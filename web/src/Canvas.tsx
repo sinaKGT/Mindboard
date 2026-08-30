@@ -1,18 +1,19 @@
 import {
   Background, BackgroundVariant, ConnectionMode, MarkerType, MiniMap, ReactFlow,
-  ReactFlowProvider, applyNodeChanges, useReactFlow, useViewport,
+  ReactFlowProvider, ViewportPortal, applyNodeChanges, useReactFlow, useViewport,
   type Edge, type Node, type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  addConnected, addFile, addTextNode, addUrl, autoLayout, connect, deleteEdges,
-  deleteNodes, unwrapMeta, wrapSelection,
+  addConnected, addFile, addTextNode, addUrl, autoLayout, connect, deleteEdges, deleteNodes,
+  unwrapMeta, wrapSelection,
 } from './actions'
-import { edgeTypes, kindColour } from './edges'
+import { edgeTypes } from './edges'
+import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
-import { nodeTypes } from './nodes'
+import { CLICK_SLOP, nodeTypes } from './nodes'
 import { ancestorAtLevel, currentParent, useStore } from './store'
 import { ThemeSheet } from './ThemeSheet'
 import type { MEdge, MNode } from './types'
@@ -82,9 +83,8 @@ function buildLevel(
       data: single ? { edge: e } : { edge: e, bundle: g.items },
       markerEnd: {
         type: MarkerType.ArrowClosed, width: 14, height: 14,
-        color: kindColour(e.kind).replace('var(', '').replace(')', '')
-          ? getComputedStyle(document.documentElement).getPropertyValue(`--mb-kind-${e.kind}`).trim()
-          : undefined,
+        color: getComputedStyle(document.documentElement)
+          .getPropertyValue(`--mb-kind-${e.kind}`).trim() || undefined,
       },
     })
   }
@@ -105,16 +105,21 @@ function CanvasInner() {
   const goTo = useStore((s) => s.goTo)
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
+  const say = useStore((s) => s.say)
   const setUI = useUI((s) => s.set)
   const minimap = useUI((s) => s.minimap)
   const themeOpen = useUI((s) => s.themeOpen)
   const focusId = useUI((s) => s.focusId)
+  const linking = useUI((s) => s.linking)
 
-  const { screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
+  const { screenToFlowPosition, fitView, zoomIn, zoomOut, getNodes, getInternalNode } =
+    useReactFlow()
   const { zoom } = useViewport()
   const parent = currentParent(path)
   const wrap = useRef<HTMLDivElement>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+  const connectStart = useRef<{ nodeId: string; x: number; y: number } | null>(null)
 
   const jump = useCallback((id: string) => {
     const all = useStore.getState().nodes
@@ -146,6 +151,26 @@ function CanvasInner() {
     return () => clearTimeout(t)
   }, [focusId, fitView, setUI])
 
+  // ------------------------------------------------------ image export --
+  const runExport = useCallback(async (kind: ImageKind, scale: number) => {
+    try {
+      say('rendering...')
+      const levelName = parent ? (useStore.getState().nodes[parent]?.title ?? '') : ''
+      const out = await exportBoardImage({
+        nodes: getNodes(), title: board?.title ?? 'board', kind, scale, levelName,
+      })
+      say(`saved ${out.filename} · ${Math.round(out.width * out.scale)}×`
+        + `${Math.round(out.height * out.scale)}px`)
+    } catch (err: any) {
+      say(err.message || 'could not export that', true)
+    }
+  }, [board?.title, getNodes, parent, say])
+
+  useEffect(() => {
+    setUI('exportImage', runExport)
+    return () => setUI('exportImage', null)
+  }, [runExport, setUI])
+
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setRfNodes((ns) => applyNodeChanges(changes, ns))
   }, [])
@@ -166,6 +191,8 @@ function CanvasInner() {
     return [Math.round(p.x - 90), Math.round(p.y - 30)]
   }, [screenToFlowPosition])
 
+  const stopLinking = useCallback(() => { setUI('linking', null); setCursor(null) }, [setUI])
+
   // ------------------------------------------------------------ keyboard --
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -185,8 +212,10 @@ function CanvasInner() {
         return
       }
       if (mod && e.key.toLowerCase() === 'l') { e.preventDefault(); autoLayout(parent); return }
+      if (mod && e.key.toLowerCase() === 'e') { e.preventDefault(); void runExport('png', 2); return }
       if (mod && e.key === '0') { e.preventDefault(); fitView({ duration: 300 }); return }
       if (e.key === 'Escape') {
+        if (useUI.getState().linking) { stopLinking(); return }
         if (useUI.getState().editingEdgeId) { setUI('editingEdgeId', null); return }
         if (path.length) goTo(path.length - 1)
         return
@@ -200,7 +229,7 @@ function CanvasInner() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [nodes, parent, path, undo, redo, goTo, setUI, fitView])
+  }, [nodes, parent, path, undo, redo, goTo, setUI, fitView, runExport, stopLinking])
 
   // --------------------------------------------------------------- paste --
   useEffect(() => {
@@ -232,8 +261,23 @@ function CanvasInner() {
 
   const crumbs = path.map((id) => nodes[id]).filter(Boolean)
 
+  // the line that follows the cursor while a click-started link is open
+  const linkPath = useMemo(() => {
+    if (!linking || !cursor) return null
+    const src = getInternalNode(linking.sourceId)
+    if (!src) return null
+    const p = src.internals.positionAbsolute
+    const w = src.measured?.width ?? 160
+    const h = src.measured?.height ?? 60
+    return { x1: p.x + w / 2, y1: p.y + h / 2, x2: cursor.x, y2: cursor.y }
+  }, [linking, cursor, getInternalNode])
+
   return (
-    <div className="stage" ref={wrap}
+    <div className={`stage ${linking ? 'linking' : ''}`} ref={wrap}
+      onMouseMove={(e) => {
+        if (!useUI.getState().linking) return
+        setCursor(screenToFlowPosition({ x: e.clientX, y: e.clientY }))
+      }}
       onDoubleClick={(e) => {
         const el = e.target as HTMLElement
         if (!el.classList.contains('react-flow__pane')) return
@@ -259,21 +303,55 @@ function CanvasInner() {
         onNodeDragStop={commitMoves}
         onSelectionChange={({ nodes: sel }) =>
           setUI('selected', sel.filter((n) => !n.id.startsWith('ghost:')).map((n) => n.id))}
-        onConnect={(c) => c.source && c.target && connect(c.source, c.target)}
+        onConnect={(c) => {
+          if (c.source && c.target) connect(c.source, c.target)
+          stopLinking()
+        }}
+        onConnectStart={(event, params) => {
+          const pt = 'touches' in event ? (event as TouchEvent).touches[0] : (event as MouseEvent)
+          connectStart.current = params.nodeId
+            ? { nodeId: params.nodeId, x: pt?.clientX ?? 0, y: pt?.clientY ?? 0 }
+            : null
+        }}
         onConnectEnd={(event, state) => {
+          const start = connectStart.current
+          connectStart.current = null
           if (state.isValid) return
-          const fromId = state.fromNode?.id
-          const src = fromId ? useStore.getState().nodes[fromId] : undefined
+          const pt = 'changedTouches' in event
+            ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent)
+          if (!start) return
+          const travelled = Math.hypot(pt.clientX - start.x, pt.clientY - start.y)
+          if (travelled < CLICK_SLOP) {
+            // a click on a port, not a drag - the port itself opened linking,
+            // so all we must do here is not drop a node
+            setCursor(screenToFlowPosition({ x: pt.clientX, y: pt.clientY }))
+            return
+          }
+          const src = useStore.getState().nodes[start.nodeId]
           if (!src) return
-          const pt = 'changedTouches' in event ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent)
           const p = screenToFlowPosition({ x: pt.clientX, y: pt.clientY })
-          // one gesture, one undo step - the node and its edge go in together
+          addConnected(src, [Math.round(p.x - 80), Math.round(p.y - 24)])
+        }}
+        onNodeClick={(_, n) => {
+          const active = useUI.getState().linking
+          if (!active || n.id.startsWith('ghost:') || n.id === active.sourceId) return
+          connect(active.sourceId, n.id)
+          stopLinking()
+        }}
+        onPaneClick={(e) => {
+          const active = useUI.getState().linking
+          if (!active) return
+          const src = useStore.getState().nodes[active.sourceId]
+          stopLinking()
+          if (!src) return
+          const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
           addConnected(src, [Math.round(p.x - 80), Math.round(p.y - 24)])
         }}
         onNodeDoubleClick={(_, n) => { if (nodes[n.id]?.type === 'meta') enter(n.id) }}
         onEdgesDelete={(es) =>
           deleteEdges(es.map((e) => String(e.id).replace(/^e:/, '')).filter((id) => edges[id]))}
         connectionMode={ConnectionMode.Loose}
+        connectOnClick={false}
         deleteKeyCode={null}
         multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
         selectionOnDrag
@@ -286,7 +364,17 @@ function CanvasInner() {
         proOptions={{ hideAttribution: true }}
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}>
-        <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="var(--mb-grid)" />
+        <Background variant={BackgroundVariant.Dots} gap={24} size={1.9} color="var(--mb-grid)" />
+        {linkPath && (
+          <ViewportPortal>
+            <svg className="link-ghost" width={1} height={1}
+              style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible',
+                pointerEvents: 'none' }}>
+              <path d={`M${linkPath.x1} ${linkPath.y1} L${linkPath.x2} ${linkPath.y2}`} />
+              <circle cx={linkPath.x2} cy={linkPath.y2} r={4.5} />
+            </svg>
+          </ViewportPortal>
+        )}
         {minimap && (
           <MiniMap pannable zoomable position="bottom-right"
             style={{ display: 'block', bottom: 62, right: 0, background: 'var(--mb-surface)',
@@ -329,6 +417,10 @@ function CanvasInner() {
         <button className="icon-btn" title="Fit to view  (Ctrl+0)" onClick={() => fitView({ duration: 300 })}>
           <Icon name="fit" size={14} />
         </button>
+        <button className="icon-btn" title="Export this level as an image  (Ctrl+E)"
+          onClick={() => void runExport('png', 2)}>
+          <Icon name="image" size={14} />
+        </button>
         <button className="icon-btn" title="Minimap" onClick={() => setUI('minimap', !minimap)}>
           <Icon name="grid" size={14} />
         </button>
@@ -339,7 +431,12 @@ function CanvasInner() {
 
       {themeOpen && <ThemeSheet />}
       {dragOver && <div className="drop-veil">drop to add</div>}
-      {Object.keys(nodes).length === 0 && (
+      {linking && (
+        <div className="hint linking-hint">
+          click a node to connect · click empty canvas for a new one · Esc to cancel
+        </div>
+      )}
+      {!linking && Object.keys(nodes).length === 0 && (
         <div className="hint">double-click anywhere to start · drop a file · Ctrl+K for everything else</div>
       )}
     </div>

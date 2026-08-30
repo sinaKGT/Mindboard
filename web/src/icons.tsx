@@ -20,6 +20,7 @@ const PATHS: Record<string, ReturnType<typeof P>[]> = {
   chevron: [P('M6 4l4 4-4 4')],
   layers: [P('M8 2.5 14 6l-6 3.5L2 6l6-3.5Z'), P('M2.5 9.5 8 12.7l5.5-3.2')],
   type: [P('M4 4.5h8M8 4.5v8')],
+  image: [P('M2.5 3.5h11v9h-11z'), P('M2.5 10.5l3-3 2.5 2.5 2-2 3.5 3.5'), P('M6 6.2h.01')],
   external: [P('M9 3.5h3.5V7'), P('M12.5 3.5 7.5 8.5'), P('M11 9.5v2.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2.5')],
 }
 

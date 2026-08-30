@@ -51,9 +51,11 @@ option has a command behind it — see **Commands** below.
 |---|---|
 | New text node | double-click empty canvas |
 | New media node | drag a file in, or paste an image or URL |
-| Connect | drag from a node's edge onto another node |
-| Connect **and** create | drag from a node and drop on empty canvas |
+| Connect | hover a node, click a **⊕** port, then click another node |
+| Connect **and** create | while connecting, click empty canvas instead |
 | Name a relationship | click the edge |
+| Change text size | hover a node, use **A / A** in its toolbar |
+| Export a picture of the board | `Ctrl+E`, or the image button in the corner |
 | Group nodes into a meta-node | select them, `Ctrl+G` |
 | Ungroup | `Ctrl+Shift+G` |
 | Enter / leave a meta-node | double-click / `Esc` |

@@ -73,14 +73,18 @@ def read_graph(conn: sqlite3.Connection, board_id: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 def _searchable_body(node: dict[str, Any]) -> str:
+    """Every node type can carry a written thought now, so every type's text is
+    searchable - not just text nodes."""
     c = node.get("content") or {}
-    if node.get("type") == "text":
-        return str(c.get("text", ""))
-    if node.get("type") == "link":
-        return " ".join(str(c.get(k, "")) for k in ("url", "excerpt"))
-    if node.get("type") == "meta":
-        return str(c.get("summary", ""))
-    return str(c.get("alt", "") or c.get("filename", ""))
+    parts = [str(c.get("text") or c.get("summary") or "")]
+    kind = node.get("type")
+    if kind == "link":
+        parts += [str(c.get("url", "")), str(c.get("excerpt", ""))]
+    elif kind in ("image", "video"):
+        parts.append(str(c.get("alt", "")))
+    elif kind == "file":
+        parts.append(str(c.get("filename", "")))
+    return " ".join(p for p in parts if p).strip()
 
 
 def _fts_set(conn: sqlite3.Connection, node: dict[str, Any]) -> None:

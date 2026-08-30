@@ -72,9 +72,10 @@ def main() -> None:
     cost = node(pos=[500, 200], title="Budget ceiling",
                 content={"text": "£18k for the pilot corridor."}, style={"color": "#e6b95c"})
     plan = node(pos=[-90, 60], type="image", size=[300, None], title="Site plan",
-                content={"sha256": img["sha256"], "alt": "corridor plan"})
+                content={"sha256": img["sha256"], "alt": "corridor plan",
+                       "text": "Junction 4 and the two approaches we can instrument."})
     sensors = node(pos=[-540, -120], type="meta", title="Sensors",
-                   content={"summary": "Everything about siting and hardware"})
+                   content={"text": "Everything about siting and hardware"})
     lidar = node(parent=sensors["id"], pos=[0, 0], title="Lidar placement",
                  content={"text": "Corner mounting cuts occlusion by roughly a third."})
     cameras = node(parent=sensors["id"], pos=[420, 30], title="Camera count",

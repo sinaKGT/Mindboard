@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------- tokens -- */
 :root {
   --mb-bg: #0d0f13;
-  --mb-grid: #191d25;
+  --mb-grid: #272e3c;
   --mb-surface: #161a21;
   --mb-surface-2: #1d222b;
   --mb-surface-3: #252b36;
@@ -41,19 +41,19 @@
 }
 
 [data-theme='slate'] {
-  --mb-bg: #10141a; --mb-grid: #1b212a; --mb-surface: #1a2029; --mb-surface-2: #222a35;
+  --mb-bg: #10141a; --mb-grid: #2b3441; --mb-surface: #1a2029; --mb-surface-2: #222a35;
   --mb-surface-3: #2b3441; --mb-border: #2c3542; --mb-border-strong: #3f4a5a;
   --mb-text: #dfe6ef; --mb-text-dim: #8b97a8; --mb-accent: #7cc4ff; --mb-accent-soft: #7cc4ff22;
   --mb-edge: #46515f;
 }
 [data-theme='ink'] {
-  --mb-bg: #08090b; --mb-grid: #131519; --mb-surface: #101216; --mb-surface-2: #171a20;
+  --mb-bg: #08090b; --mb-grid: #212635; --mb-surface: #101216; --mb-surface-2: #171a20;
   --mb-surface-3: #1f232b; --mb-border: #1e222a; --mb-border-strong: #2f3742;
   --mb-text: #e9ebef; --mb-text-dim: #7b8494; --mb-accent: #a78bfa; --mb-accent-soft: #a78bfa22;
   --mb-edge: #39414d;
 }
 [data-theme='daylight'] {
-  --mb-bg: #f7f8fa; --mb-grid: #e4e7ec; --mb-surface: #ffffff; --mb-surface-2: #f2f4f7;
+  --mb-bg: #f7f8fa; --mb-grid: #d2d8e2; --mb-surface: #ffffff; --mb-surface-2: #f2f4f7;
   --mb-surface-3: #e8ebf0; --mb-border: #dfe3ea; --mb-border-strong: #c3cad5;
   --mb-text: #131720; --mb-text-dim: #5a6473; --mb-text-faint: #8b95a3;
   --mb-accent: #2563eb; --mb-accent-soft: #2563eb18; --mb-edge: #9aa4b2;
@@ -161,7 +161,7 @@ a.btn { text-decoration: none; }
 }
 .mini { display: block; width: 100%; height: 100%; }
 .mini-edges path {
-  fill: none; stroke: var(--mb-edge); stroke-width: 1.1; opacity: 0.6;
+  fill: none; stroke-width: 1.1; opacity: 0.6;
   transition: opacity 220ms var(--mb-ease), stroke 220ms var(--mb-ease);
 }
 .mini-nodes circle {
@@ -221,15 +221,6 @@ a.btn { text-decoration: none; }
 .stage { position: relative; height: 100%; }
 .react-flow { background: var(--mb-bg); }
 .react-flow__attribution { display: none; }
-.react-flow__handle {
-  width: 9px; height: 9px; background: var(--mb-surface-3);
-  border: 1.5px solid var(--mb-border-strong); opacity: 0;
-  transition: opacity var(--mb-dur) var(--mb-ease);
-}
-.react-flow__node:hover .react-flow__handle,
-.react-flow__node.selected .react-flow__handle { opacity: 1; }
-.react-flow__handle:hover { background: var(--mb-accent); border-color: var(--mb-accent); }
-.react-flow__handle-connecting { background: var(--mb-accent); }
 .react-flow__controls, .react-flow__minimap { display: none; }
 .react-flow__selection { background: var(--mb-accent-soft); border: 1px solid var(--mb-accent); }
 .react-flow__edge.selected .mb-edge-path { stroke-width: 2.4; }
@@ -322,15 +313,23 @@ a.btn { text-decoration: none; }
 .mb-node.ghost .body { padding: 7px 10px; }
 
 .node-tools {
-  position: absolute; bottom: calc(100% + 7px); left: 0; display: flex; flex-wrap: wrap;
+  position: absolute; bottom: calc(100% + 6px); left: 0; display: flex; flex-wrap: wrap;
   gap: 1px; padding: 3px; max-width: 268px;
   background: var(--mb-surface-2); border: 1px solid var(--mb-border);
   border-radius: var(--mb-radius-sm); box-shadow: var(--mb-shadow);
   opacity: 0; pointer-events: none; transition: opacity var(--mb-dur) var(--mb-ease);
   z-index: 4;
 }
-.react-flow__node:hover .node-tools, .react-flow__node.selected .node-tools {
+.react-flow__node:hover .node-tools, .react-flow__node.selected .node-tools,
+.node-tools:hover {
   opacity: 1; pointer-events: auto;
+}
+/* The toolbar floats above the node with a gap. Without this, moving the
+   pointer toward it leaves the node, drops :hover, and the toolbar vanishes
+   before you can reach it. While hovered, the node's hit area reaches up to
+   cover the toolbar; when it is not hovered, nothing is there to block. */
+.react-flow__node:hover::before {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 48px;
 }
 .node-tools .swatch { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #0004; }
 .node-tools .sep { width: 1px; margin: 3px 3px; background: var(--mb-border); }
@@ -468,19 +467,6 @@ a.btn { text-decoration: none; }
 }
 .mb-node.spark { animation: nodeIn 320ms var(--mb-spring), sparkRing 900ms var(--mb-ease); }
 
-/* handles grow as you approach, in a small stagger around the node */
-.react-flow__handle {
-  transform-origin: center; transition: opacity 160ms var(--mb-ease),
-    transform 200ms var(--mb-spring), background 160ms var(--mb-ease);
-}
-.react-flow__node .react-flow__handle { transform: scale(0.55); }
-.react-flow__node:hover .react-flow__handle,
-.react-flow__node.selected .react-flow__handle { transform: scale(1); }
-.react-flow__node:hover .react-flow__handle-right { transition-delay: 30ms; }
-.react-flow__node:hover .react-flow__handle-bottom { transition-delay: 60ms; }
-.react-flow__node:hover .react-flow__handle-left { transition-delay: 90ms; }
-.react-flow__handle:hover { transform: scale(1.5) !important; }
-
 .mb-edge-path.spark { animation: drawIn 480ms var(--mb-ease); }
 .mb-edge-label { transition: transform 180ms var(--mb-spring), border-color 180ms var(--mb-ease); }
 .react-flow__edge:hover .mb-edge-label { transform: scale(1.06); }
@@ -506,3 +492,113 @@ a.btn { text-decoration: none; }
     animation: none !important;
   }
 }
+
+/* ----------------------------------------------------------------- ports -- */
+/* Ports read as buttons because they are: click one, then click another node.
+   Dragging from them still works for anyone who prefers that. */
+.react-flow__node .react-flow__handle {
+  width: 17px; height: 17px; border-radius: 50%;
+  background-color: var(--mb-surface-2);
+  border: 1.5px solid var(--mb-border-strong);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b93a2' stroke-width='2' stroke-linecap='round'><path d='M8 4.4v7.2M4.4 8h7.2'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px 12px;
+  opacity: 0;
+  transition: opacity 150ms var(--mb-ease), transform 200ms var(--mb-spring),
+    background-color 150ms var(--mb-ease), border-color 150ms var(--mb-ease);
+}
+.react-flow__node .react-flow__handle-top    { top: -9px;    left: 50%; transform: translateX(-50%) scale(var(--port, 0.6)); }
+.react-flow__node .react-flow__handle-bottom { bottom: -9px; left: 50%; transform: translateX(-50%) scale(var(--port, 0.6)); }
+.react-flow__node .react-flow__handle-left   { left: -9px;   top: 50%;  transform: translateY(-50%) scale(var(--port, 0.6)); }
+.react-flow__node .react-flow__handle-right  { right: -9px;  top: 50%;  transform: translateY(-50%) scale(var(--port, 0.6)); }
+.react-flow__node:hover .react-flow__handle,
+.react-flow__node.selected .react-flow__handle { opacity: 1; --port: 1; }
+.react-flow__node .react-flow__handle:hover {
+  --port: 1.3;
+  background-color: var(--mb-accent);
+  border-color: var(--mb-accent);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230b1220' stroke-width='2.4' stroke-linecap='round'><path d='M8 4.4v7.2M4.4 8h7.2'/></svg>");
+}
+.stage.linking .react-flow__node .react-flow__handle { opacity: 0; }
+.stage.linking .react-flow__pane { cursor: crosshair; }
+.stage.linking .react-flow__node { cursor: pointer; }
+.stage.linking .react-flow__node:hover .mb-node {
+  border-color: var(--mb-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mb-accent) 45%, transparent);
+}
+.link-ghost path {
+  stroke: var(--mb-accent); stroke-width: 1.8; stroke-dasharray: 5 4; fill: none;
+  animation: crawl 600ms linear infinite;
+}
+.link-ghost circle { fill: var(--mb-accent); }
+@keyframes crawl { to { stroke-dashoffset: -9; } }
+.linking-hint { color: var(--mb-accent); }
+
+/* ------------------------------------------------------------ node bodies -- */
+.mb-node .placeholder { color: var(--mb-text-faint); font-weight: 400; }
+.mb-node .text.hint-on-hover { opacity: 0; transition: opacity 150ms var(--mb-ease); }
+.react-flow__node:hover .mb-node .text.hint-on-hover { opacity: 1; }
+.mb-node img.media + .body, .mb-node video.media + .body,
+.mb-node video.media + .video-poster + .body { padding-top: 8px; }
+.mb-node .video-poster { display: none; }
+.mb-node .duration {
+  position: absolute; top: 8px; right: 9px; padding: 1px 6px; border-radius: 20px;
+  background: #000000a8; color: #fff; font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.mb-node .link-head {
+  display: flex; align-items: center; gap: 7px; padding: 8px 11px 0;
+  color: var(--mb-text-faint); font-size: 11.5px;
+}
+.mb-node .link-head .fav { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.mb-node .link-head .host {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mb-node .excerpt {
+  padding: 0 11px 10px; color: var(--mb-text-faint); font-size: 11.5px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.mb-node .badge-row { padding: 0 11px 10px; }
+
+/* text size control */
+.size-group { display: inline-flex; align-items: center; gap: 1px; }
+.size-group .size-value {
+  min-width: 18px; text-align: center; font-size: 10.5px; color: var(--mb-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.size-a { font-weight: 650; line-height: 1; }
+.size-a.small { font-size: 10px; }
+.size-a.big { font-size: 15px; }
+
+/* ------------------------------------------------------------ edge labels -- */
+.kind-glyph { display: block; flex: none; }
+.mb-edge-label.bare { padding: 3px; border-radius: 50%; opacity: 0.8; }
+.react-flow__edge:hover .mb-edge-label.bare { opacity: 1; }
+.mb-edge-label .count {
+  font-variant-numeric: tabular-nums; font-weight: 600; color: var(--mb-text);
+}
+.kind-picker { display: inline-flex; align-items: center; gap: 1px; }
+.kind-picker button {
+  display: flex; padding: 3px; border-radius: 5px; opacity: 0.4;
+  transition: opacity 140ms var(--mb-ease), background 140ms var(--mb-ease);
+}
+.kind-picker button:hover { opacity: 1; background: var(--mb-surface-3); }
+.kind-picker button.on { opacity: 1; background: var(--mb-surface-3); }
+.edge-del { display: flex; padding: 3px; border-radius: 5px; color: var(--mb-text-faint); }
+.edge-del:hover { color: var(--mb-danger); background: #f9758322; }
+
+/* ----------------------------------------------------------- image export -- */
+/* Chrome, ports and live video have no business in an exported picture. */
+.stage.exporting .node-tools,
+.stage.exporting .react-flow__handle,
+.stage.exporting .react-flow__node[data-id^="ghost:"],
+.stage.exporting .breadcrumb,
+.stage.exporting .dock,
+.stage.exporting .sheet,
+.stage.exporting .hint,
+.stage.exporting .react-flow__minimap,
+.stage.exporting .mb-node video.media { display: none !important; }
+.stage.exporting .mb-node .video-poster { display: block !important; }
+.stage.exporting .mb-node .text.hint-on-hover { display: none !important; }
+.stage.exporting .mb-edge-label.bare { opacity: 1 !important; }
+.stage.exporting .mb-node { box-shadow: none !important; transform: none !important; }

@@ -7,6 +7,7 @@ export type ThemeName = (typeof THEMES)[number]
  *  editor with forty swatches is a preferences screen, not a design. */
 export const CUSTOMISABLE: { key: string; label: string }[] = [
   { key: '--mb-bg', label: 'Canvas' },
+  { key: '--mb-grid', label: 'Grid' },
   { key: '--mb-surface', label: 'Node' },
   { key: '--mb-text', label: 'Text' },
   { key: '--mb-accent', label: 'Accent' },

@@ -1,4 +1,4 @@
-import { Position, EdgeLabelRenderer, getBezierPath, useInternalNode, type EdgeProps } from '@xyflow/react'
+import { EdgeLabelRenderer, Position, getBezierPath, useInternalNode, type EdgeProps } from '@xyflow/react'
 import { useEffect, useRef, useState } from 'react'
 
 import { deleteEdges, updateEdge } from './actions'
@@ -8,6 +8,48 @@ import { EDGE_KINDS, KIND_STYLE } from './types'
 import { useUI } from './ui'
 
 export const kindColour = (k: EdgeKind) => `var(--mb-kind-${k})`
+
+/** Every relationship gets its own mark, not only its own colour - colour alone
+ *  cannot be read by everyone, and cannot be read at all in a printed export. */
+const GLYPHS: Record<EdgeKind, JSX.Element> = {
+  'relates': (
+    <>
+      <circle cx="4" cy="8" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="8" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M5.8 8h4.4" />
+    </>
+  ),
+  'causes': <><path d="M3 8h8" /><path d="M8.2 5l3 3-3 3" /></>,
+  'supports': <path d="M3.5 8.4l3.1 3.1L12.5 4.9" />,
+  'contradicts': <><path d="M4.6 4.6l6.8 6.8" /><path d="M11.4 4.6l-6.8 6.8" /></>,
+  'part-of': (
+    <>
+      <rect x="3" y="3" width="10" height="10" rx="2" />
+      <rect x="5.9" y="5.9" width="4.2" height="4.2" rx="1" fill="currentColor" stroke="none" />
+    </>
+  ),
+  'example-of': (
+    <>
+      <path d="M8 3.4 12.6 8 8 12.6 3.4 8Z" />
+      <circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none" />
+    </>
+  ),
+}
+
+export const KIND_LABEL: Record<EdgeKind, string> = {
+  'relates': 'relates to', 'causes': 'causes', 'supports': 'supports',
+  'contradicts': 'contradicts', 'part-of': 'is part of', 'example-of': 'is an example of',
+}
+
+export function KindGlyph({ kind, size = 13 }: { kind: EdgeKind; size?: number }) {
+  return (
+    <svg className="kind-glyph" width={size} height={size} viewBox="0 0 16 16" fill="none"
+      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true">
+      {GLYPHS[kind]}
+    </svg>
+  )
+}
 
 type Internal = ReturnType<typeof useInternalNode>
 
@@ -81,10 +123,16 @@ export function LabeledEdge(props: EdgeProps) {
 
   return (
     <>
+      {/* fill and stroke live on the element, not only in CSS: an exported
+          image is a clone, and a path that loses `fill: none` fills itself black */}
       <path d={path} className={`mb-edge-path ${sparked ? 'spark' : ''}`} pathLength={1}
-        style={{ stroke: colour, strokeWidth: spec.width, strokeDasharray: spec.dash }}
+        fill="none"
+        style={{ fill: 'none', stroke: colour, strokeWidth: spec.width,
+                 strokeDasharray: spec.dash }}
         markerEnd={edge?.directed !== false && spec.arrow ? props.markerEnd : undefined} />
-      <path d={path} className="mb-edge-hit" onClick={() => edge && setUI('editingEdgeId', id)} />
+      <path d={path} className="mb-edge-hit" fill="none" stroke="transparent"
+        style={{ fill: 'none', stroke: 'transparent', strokeWidth: 18 }}
+        onClick={() => edge && setUI('editingEdgeId', id)} />
       <EdgeLabelRenderer>
         <div className="nodrag nopan"
           style={{ position: 'absolute', transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)`, pointerEvents: 'all' }}>
@@ -97,24 +145,33 @@ export function LabeledEdge(props: EdgeProps) {
                   if (e.key === 'Enter') commit()
                   if (e.key === 'Escape') { setLabel(edge.label); setUI('editingEdgeId', null) }
                 }} />
-              {EDGE_KINDS.map((k) => (
-                <button key={k} title={k} onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => updateEdge(edge.id, { kind: k })}
-                  style={{ display: 'flex', padding: 2, opacity: k === kind ? 1 : 0.4 }}>
-                  <span className="kind-dot" style={{ background: kindColour(k) }} />
-                </button>
-              ))}
-              <button title="Delete" onMouseDown={(e) => e.preventDefault()}
-                onClick={() => deleteEdges([edge.id])} style={{ display: 'flex', padding: 2 }}>
-                <Icon name="trash" size={11} />
+              <span className="kind-picker">
+                {EDGE_KINDS.map((k) => (
+                  <button key={k} title={KIND_LABEL[k]} onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => updateEdge(edge.id, { kind: k })}
+                    className={k === kind ? 'on' : ''}
+                    style={{ color: kindColour(k) }}>
+                    <KindGlyph kind={k} size={14} />
+                  </button>
+                ))}
+              </span>
+              <button title="Delete" className="edge-del" onMouseDown={(e) => e.preventDefault()}
+                onClick={() => deleteEdges([edge.id])}>
+                <Icon name="trash" size={12} />
               </button>
             </div>
           ) : (
-            <div className={`mb-edge-label ${edge?.label || bundled ? '' : 'empty'}`}
+            <div className={`mb-edge-label ${edge?.label || bundled ? '' : 'bare'}`}
               onClick={() => edge && setUI('editingEdgeId', id)}
-              title={bundled ? bundle.map((b) => b.label || b.kind).join(' · ') : undefined}>
-              <span className="kind-dot" style={{ background: colour }} />
-              {bundled ? `${bundle.length} relationships` : (edge?.label || 'name it')}
+              title={bundled
+                ? bundle.map((b) => b.label || KIND_LABEL[b.kind]).join(' · ')
+                : (edge ? `${KIND_LABEL[kind]}${edge.label ? ` — ${edge.label}` : ''}` : '')}>
+              <span style={{ color: colour, display: 'flex' }}>
+                <KindGlyph kind={kind} />
+              </span>
+              {bundled
+                ? <span className="count">{bundle.length}</span>
+                : (edge?.label ? <span>{edge.label}</span> : null)}
             </div>
           )}
         </div>

@@ -9,9 +9,18 @@ const TYPE_VAR: Record<string, string> = {
   link: 'var(--mb-type-link)', file: 'var(--mb-type-file)', meta: 'var(--mb-type-meta)',
 }
 
+/** Resolved rather than left to CSS, so the miniature survives being cloned
+ *  into an exported image. */
+function resolvedEdgeColour(): string {
+  if (typeof window === 'undefined') return '#414a58'
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--mb-edge').trim()
+  return v || '#414a58'
+}
+
 export function GraphMini({ nodes, edges, w = 100, h = 56, pad = 9, dense = false }: {
   nodes: MiniNode[]; edges: MiniEdge[]; w?: number; h?: number; pad?: number; dense?: boolean
 }) {
+  const edgeColour = resolvedEdgeColour()
   if (!nodes.length) return null
   const px = (n: MiniNode) => pad + n.x * (w - pad * 2)
   const py = (n: MiniNode) => pad + n.y * (h - pad * 2)
@@ -28,7 +37,8 @@ export function GraphMini({ nodes, edges, w = 100, h = 56, pad = 9, dense = fals
           const mx = (px(s) + px(t)) / 2
           const my = (py(s) + py(t)) / 2 - Math.abs(px(t) - px(s)) * 0.08
           return (
-            <path key={i} style={{ ['--i' as string]: i }} pathLength={1}
+            <path key={i} style={{ ['--i' as string]: i, fill: 'none' }} pathLength={1}
+              fill="none" stroke={edgeColour}
               d={`M${px(s)} ${py(s)} Q${mx} ${my} ${px(t)} ${py(t)}`} />
           )
         })}

@@ -19,21 +19,136 @@ const TYPE_VAR: Record<string, string> = {
   link: 'var(--mb-type-link)', file: 'var(--mb-type-file)', meta: 'var(--mb-type-meta)',
 }
 
-function accentOf(node: MNode) { return node.style.color || TYPE_VAR[node.type] }
+/** Under this much pointer travel, a press on a port was a click, not a drag.
+ *  The canvas uses the same number - keep them in step. */
+export const CLICK_SLOP = 6
 
-function Ports() {
+const accentOf = (n: MNode) => n.style.color || TYPE_VAR[n.type]
+const sizeOf = (n: MNode) => n.style.fontSize ?? 13
+
+/** Meta-nodes used to keep their description under `summary`; read both. */
+const bodyText = (n: MNode): string => n.content.text ?? n.content.summary ?? ''
+
+/** A port is both a drag handle and a button.
+ *
+ *  Dragging from it is xyflow's own connection gesture. A *click* - press and
+ *  release without travelling - starts click-to-click linking instead. We
+ *  detect that here rather than in onConnectEnd, because xyflow does not
+ *  reliably report a connection that never moved. The canvas applies the same
+ *  travel threshold so a click never also drops a node.
+ */
+function Ports({ nodeId }: { nodeId: string }) {
+  const setUI = useUI((s) => s.set)
+  const down = useRef<{ x: number; y: number } | null>(null)
+
   return (
     <>
       {PORTS.map(([id, position]) => (
-        <Handle key={id} id={id} type="source" position={position} />
+        <Handle key={id} id={id} type="source" position={position}
+          title="Drag to connect — or click, then click another node"
+          onPointerDown={(e: React.PointerEvent) => {
+            down.current = { x: e.clientX, y: e.clientY }
+          }}
+          onPointerUp={(e: React.PointerEvent) => {
+            const start = down.current
+            down.current = null
+            if (!start) return
+            if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < CLICK_SLOP) {
+              setUI('linking', { sourceId: nodeId })
+            }
+          }} />
       ))}
     </>
   )
 }
 
+// --------------------------------------------------------------- editing -- //
+
+function useAutoHeight(value: string, enabled: boolean) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !enabled) return
+    el.style.height = '0px'
+    el.style.height = `${el.scrollHeight}px`
+  }, [value, enabled])
+  return ref
+}
+
+/** The editable title + body every node type shares, so an image or a video
+ *  carries a thought the same way a text node does. */
+function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a note...' }: {
+  node: MNode; placeholder?: string; bodyPlaceholder?: string
+}) {
+  const editing = useUI((s) => s.editingId === node.id)
+  const setUI = useUI((s) => s.set)
+  const [title, setTitle] = useState(node.title)
+  const [text, setText] = useState<string>(bodyText(node))
+  const area = useAutoHeight(text, editing)
+  const titleRef = useRef<HTMLInputElement>(null)
+  const idle = useRef<ReturnType<typeof setTimeout>>()
+
+  useEffect(() => {
+    if (!editing) { setTitle(node.title); setText(bodyText(node)) }
+  }, [node.title, node.content.text, node.content.summary, editing])
+
+  useEffect(() => { if (editing) titleRef.current?.focus() }, [editing])
+
+  const commit = () => {
+    clearTimeout(idle.current)
+    if (title !== node.title || text !== bodyText(node)) {
+      // meta-nodes used to store this under `summary`; migrate on first edit
+      const { summary: _dropped, ...rest } = node.content as Record<string, unknown>
+      updateNode(node.id, { title, content: { ...rest, text } })
+    }
+  }
+  const touch = () => { clearTimeout(idle.current); idle.current = setTimeout(commit, 1500) }
+  const fs = sizeOf(node)
+
+  if (editing) {
+    return (
+      <div className="body">
+        <input ref={titleRef} className="title-input nodrag" value={title} placeholder={placeholder}
+          style={{ fontSize: fs + 1 }}
+          onChange={(e) => { setTitle(e.target.value); touch() }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); area.current?.focus() }
+            if (e.key === 'Escape') { commit(); setUI('editingId', null) }
+          }} />
+        <textarea ref={area} className="nodrag" value={text} rows={1} placeholder={bodyPlaceholder}
+          style={{ fontSize: fs }}
+          onChange={(e) => { setText(e.target.value); touch() }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
+              e.preventDefault(); commit(); setUI('editingId', null)
+            }
+          }}
+          onBlur={() => { commit(); setUI('editingId', null) }} />
+      </div>
+    )
+  }
+
+  const text_ = bodyText(node)
+  return (
+    <div className="body" style={{ textAlign: node.style.align }}
+      onDoubleClick={(e) => { e.stopPropagation(); setUI('editingId', node.id) }}>
+      <div className="title" style={{ color: node.style.color, fontSize: fs + 1 }}>
+        {node.title || <span className="placeholder">{placeholder}</span>}
+      </div>
+      {text_
+        ? <div className="text" style={{ fontSize: fs }}>{text_}</div>
+        : <div className="text placeholder hint-on-hover" style={{ fontSize: fs }}>
+            {bodyPlaceholder}
+          </div>}
+    </div>
+  )
+}
+
+// ----------------------------------------------------------------- shell -- //
+
 function Tools({ node }: { node: MNode }) {
   const enter = useStore((s) => s.enter)
-  const size = node.style.fontSize ?? 13
+  const size = sizeOf(node)
   return (
     <div className="node-tools nodrag nopan" onDoubleClick={(e) => e.stopPropagation()}>
       {NODE_COLOURS.slice(0, 6).map((c) => (
@@ -41,18 +156,22 @@ function Tools({ node }: { node: MNode }) {
           <span className="swatch" style={{ background: c }} />
         </button>
       ))}
-      <button className="icon-btn" title="Default colour" onClick={() => setStyle(node, { color: undefined })}>
+      <button className="icon-btn" title="Default colour"
+        onClick={() => setStyle(node, { color: undefined })}>
         <Icon name="x" size={12} />
       </button>
       <span className="sep" />
-      <button className="icon-btn" title="Smaller"
-        onClick={() => setStyle(node, { fontSize: Math.max(11, size - 1) })}>
-        <Icon name="minus" size={13} />
-      </button>
-      <button className="icon-btn" title="Larger"
-        onClick={() => setStyle(node, { fontSize: Math.min(30, size + 1) })}>
-        <Icon name="type" size={13} />
-      </button>
+      <span className="size-group" title="Text size">
+        <button className="icon-btn" aria-label="Smaller text"
+          onClick={() => setStyle(node, { fontSize: Math.max(11, size - 1) })}>
+          <span className="size-a small">A</span>
+        </button>
+        <span className="size-value">{size}</span>
+        <button className="icon-btn" aria-label="Larger text"
+          onClick={() => setStyle(node, { fontSize: Math.min(34, size + 1) })}>
+          <span className="size-a big">A</span>
+        </button>
+      </span>
       <span className="sep" />
       {node.type === 'meta' && (
         <>
@@ -92,89 +211,21 @@ function Shell({ node, selected, resizable, children }: {
         <div className="accent" style={{ background: accentOf(node) }} />
         {children}
       </div>
-      <Ports />
+      <Ports nodeId={node.id} />
     </>
   )
 }
 
-// ------------------------------------------------------------------ text -- //
+// ----------------------------------------------------------------- types -- //
 
-function useAutoHeight(value: string) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.style.height = '0px'
-    el.style.height = `${el.scrollHeight}px`
-  }, [value])
-  return ref
-}
-
-export function TextNode({ id, data, selected }: NodeProps) {
+export function TextNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
-  const editing = useUI((s) => s.editingId === id)
-  const setUI = useUI((s) => s.set)
-  const [title, setTitle] = useState(node.title)
-  const [text, setText] = useState<string>(node.content.text ?? '')
-  const area = useAutoHeight(text)
-  const titleRef = useRef<HTMLInputElement>(null)
-  const idle = useRef<ReturnType<typeof setTimeout>>()
-
-  useEffect(() => {
-    if (!editing) { setTitle(node.title); setText(node.content.text ?? '') }
-  }, [node.title, node.content.text, editing])
-
-  useEffect(() => { if (editing) titleRef.current?.focus() }, [editing])
-
-  const commit = () => {
-    clearTimeout(idle.current)
-    if (title !== node.title || text !== (node.content.text ?? '')) {
-      updateNode(id, { title, content: { ...node.content, text } })
-    }
-  }
-  const touch = () => { clearTimeout(idle.current); idle.current = setTimeout(commit, 1500) }
-
-  const style = {
-    fontSize: node.style.fontSize ?? 13,
-    fontWeight: node.style.weight,
-    textAlign: node.style.align,
-  } as React.CSSProperties
-
   return (
     <Shell node={node} selected={selected} resizable>
-      <div className="body" style={style} onDoubleClick={() => setUI('editingId', id)}>
-        {editing ? (
-          <>
-            <input ref={titleRef} className="title-input nodrag" value={title} placeholder="Title"
-              onChange={(e) => { setTitle(e.target.value); touch() }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); area.current?.focus() }
-                if (e.key === 'Escape') { commit(); setUI('editingId', null) }
-              }} />
-            <textarea ref={area} className="nodrag" value={text} rows={1} placeholder="..."
-              style={{ fontSize: style.fontSize }}
-              onChange={(e) => { setText(e.target.value); touch() }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
-                  e.preventDefault(); commit(); setUI('editingId', null)
-                }
-              }}
-              onBlur={() => { commit(); setUI('editingId', null) }} />
-          </>
-        ) : (
-          <>
-            <div className="title" style={{ color: node.style.color }}>
-              {node.title || <span style={{ color: 'var(--mb-text-faint)' }}>Untitled</span>}
-            </div>
-            {node.content.text ? <div className="text">{node.content.text}</div> : null}
-          </>
-        )}
-      </div>
+      <NodeText node={node} placeholder="Untitled" bodyPlaceholder="Add a note..." />
     </Shell>
   )
 }
-
-// ----------------------------------------------------------------- media -- //
 
 export function ImageNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
@@ -183,11 +234,11 @@ export function ImageNode({ data, selected }: NodeProps) {
   return (
     <Shell node={node} selected={selected} resizable>
       {sha && boardId
-        ? <img className="media" src={api.assetUrl(boardId, sha)} alt={node.content.alt ?? ''} draggable={false} />
+        ? <img className="media" src={api.assetUrl(boardId, sha)} alt={node.content.alt ?? ''}
+            draggable={false} />
         : null}
-      <div className="caption">
-        <div className="title">{node.title}</div>
-      </div>
+      <NodeText node={node} placeholder="Untitled image"
+        bodyPlaceholder="What does this image show?" />
     </Shell>
   )
 }
@@ -197,22 +248,25 @@ export function VideoNode({ data, selected }: NodeProps) {
   const boardId = useStore((s) => s.boardId)
   const sha = node.content.sha256
   const poster = node.content.poster
+  const posterUrl = poster && boardId ? api.assetUrl(boardId, poster) : undefined
   return (
     <Shell node={node} selected={selected} resizable>
       {sha && boardId ? (
-        <video className="media nodrag nopan" controls preload="metadata"
-          poster={poster ? api.assetUrl(boardId, poster) : undefined}
-          src={api.assetUrl(boardId, sha)} />
+        <>
+          <video className="media nodrag nopan" controls preload="metadata"
+            poster={posterUrl} src={api.assetUrl(boardId, sha)} />
+          {/* stands in for the video when the board is exported as an image */}
+          {posterUrl ? <img className="media video-poster" src={posterUrl} alt="" /> : null}
+        </>
       ) : null}
-      <div className="caption">
-        <div className="title">{node.title}</div>
-        {node.content.duration_ms ? (
-          <div className="meta-line">
-            {Math.floor(node.content.duration_ms / 60000)}:
-            {String(Math.floor((node.content.duration_ms % 60000) / 1000)).padStart(2, '0')}
-          </div>
-        ) : null}
-      </div>
+      <NodeText node={node} placeholder="Untitled video"
+        bodyPlaceholder="What is worth noticing here?" />
+      {node.content.duration_ms ? (
+        <div className="meta-line duration">
+          {Math.floor(node.content.duration_ms / 60000)}:
+          {String(Math.floor((node.content.duration_ms % 60000) / 1000)).padStart(2, '0')}
+        </div>
+      ) : null}
     </Shell>
   )
 }
@@ -221,18 +275,19 @@ export function LinkNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
   return (
     <Shell node={node} selected={selected} resizable>
-      <div className="link-row">
-        <div className="fav" style={{ background: accentOf(node), opacity: 0.75 }} />
-        <div style={{ minWidth: 0 }}>
-          <div className="title">{node.title}</div>
-          {node.content.excerpt ? <div className="text">{node.content.excerpt}</div> : null}
-          <div className="meta-line">{node.content.host}</div>
-        </div>
+      <div className="link-head">
+        <span className="fav" style={{ background: accentOf(node) }} />
+        <span className="host">{node.content.host}</span>
         <a className="icon-btn nodrag" href={node.content.url} target="_blank" rel="noreferrer"
           title="Open in browser" onClick={(e) => e.stopPropagation()}>
-          <Icon name="external" size={13} />
+          <Icon name="external" size={12} />
         </a>
       </div>
+      <NodeText node={node} placeholder="Untitled link"
+        bodyPlaceholder="Why does this matter?" />
+      {node.content.excerpt
+        ? <div className="excerpt">{node.content.excerpt}</div>
+        : null}
     </Shell>
   )
 }
@@ -241,25 +296,21 @@ export function FileNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
   const boardId = useStore((s) => s.boardId)
   return (
-    <Shell node={node} selected={selected}>
-      <div className="link-row">
-        <div className="fav" style={{ background: accentOf(node), opacity: 0.75 }} />
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="title">{node.title}</div>
-          <div className="meta-line">{node.content.filename}</div>
-        </div>
+    <Shell node={node} selected={selected} resizable>
+      <div className="link-head">
+        <span className="fav" style={{ background: accentOf(node) }} />
+        <span className="host">{node.content.filename}</span>
         {boardId && node.content.sha256 ? (
           <a className="icon-btn nodrag" href={api.assetUrl(boardId, node.content.sha256)}
             download={node.content.filename} onClick={(e) => e.stopPropagation()}>
-            <Icon name="download" size={13} />
+            <Icon name="download" size={12} />
           </a>
         ) : null}
       </div>
+      <NodeText node={node} placeholder="Untitled file" bodyPlaceholder="What is in it?" />
     </Shell>
   )
 }
-
-// ------------------------------------------------------------- meta/ghost -- //
 
 export function MetaNode({ id, data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
@@ -279,25 +330,11 @@ export function MetaNode({ id, data, selected }: NodeProps) {
     return out
   }, [allEdges, kids])
   const count = kids.length
-  const editing = useUI((s) => s.editingId === id)
-  const setUI = useUI((s) => s.set)
-  const [title, setTitle] = useState(node.title)
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => { if (!editing) setTitle(node.title) }, [node.title, editing])
-  useEffect(() => { if (editing) { ref.current?.focus(); ref.current?.select() } }, [editing])
 
   return (
     <Shell node={node} selected={selected}>
-      <div className="body">
-        {editing ? (
-          <input ref={ref} className="title-input nodrag" value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => { updateNode(id, { title }); setUI('editingId', null) }}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur() }} />
-        ) : (
-          <div className="title" style={{ color: node.style.color }}>{node.title || 'Group'}</div>
-        )}
-        {node.content.summary ? <div className="text">{node.content.summary}</div> : null}
+      <NodeText node={node} placeholder="Group" bodyPlaceholder="What is this group for?" />
+      <div className="badge-row">
         <span className="badge">
           <Icon name="layers" size={11} />
           {count === 0 ? 'empty' : `${count} ${count === 1 ? 'node' : 'nodes'}`}

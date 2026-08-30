@@ -382,6 +382,24 @@ the app's **Import** accepts a backup zip as readily as a single bundle.
 
 ---
 
+## 7c. Exporting a picture
+
+`Ctrl+E`, the dock, or the command palette renders the **whole current level**
+as an image — every node, not the visible viewport. The nodes' bounding box sets
+the canvas size, the viewport transform is overridden for the render, and
+`pixelRatio` multiplies it: 2× by default, 4× for print, or SVG for vector.
+Chrome, ports and live `<video>` elements are hidden for the render and each
+video stands in with its captured poster frame.
+
+One trap worth recording: an exported image is a *clone* of the DOM, and CSS
+class rules do not reliably survive the clone. Any SVG path whose `fill: none`
+lived only in a stylesheet came out filled black — including the invisible
+18px-wide click targets that sit under every edge, which painted as large black
+blobs. Presentation attributes and inline styles survive; class rules may not.
+Pin `fill` and `stroke` on the element for anything that must render.
+
+---
+
 ## 8. Interface and interaction
 
 ### What is permanently on screen
@@ -408,8 +426,8 @@ menu bar entirely (import, export, theme, search, jump-to-node, wrap selection).
 |---|---|
 | New text node | Double-click empty canvas → node appears in edit mode, cursor blinking |
 | New media node | Drag a file onto the canvas, or paste an image / URL |
-| Connect | Drag from a node's edge; drop on another node |
-| Connect + create | Drag from a node and drop on **empty canvas** → creates a node and connects it. This is the fast idea-flow path — the single most important interaction in the app |
+| Connect | Hover a node and four **⊕ ports** appear. *Click* one, a line follows the cursor, click any node to finish. Dragging from the same port still works for anyone who prefers it |
+| Connect + create | Drag from a port — or, while linking, click **empty canvas** → creates a node and connects it. This is the fast idea-flow path — the single most important interaction in the app |
 | Label a relationship | Click the edge → inline input on the line |
 | Group into meta-node | Select → `Ctrl+G` |
 | Enter / leave meta-node | Double-click / `Esc` |
@@ -424,13 +442,34 @@ Auto-layout is available but never automatic: `Ctrl+L` applies a force-directed
 or hierarchical tidy to the **current level only**, animated so you can see what
 moved, and undoable in one step.
 
+### Click-to-click linking
+
+A port is both a drag handle and a button. The distinction is pointer travel:
+under six pixels is a click and opens linking; more than that is xyflow's own
+drag-connect. The port itself detects the click — relying on the connection
+system to report a gesture that never moved turned out not to work — and the
+canvas applies the same threshold so a click never also drops a node.
+
+While a link is open the cursor drags a dashed line behind it, the ports
+disappear so nothing competes for the click, every node highlights as a target,
+and `Esc` cancels.
+
 ### Node anatomy
 
-A node is a rounded rectangle with, top to bottom: an optional type accent bar,
-the title (always visible, single line, truncated), the body (markdown / image /
-video / preview), and — on hover only — a slim control row (colour, delete, add
-connected node). Nodes auto-size to content until you resize one manually, after
-which it keeps your size.
+Every node type carries the same editable pair: a title and a body. An image or
+a video is the medium *plus* the thought about it — a picture with no note is a
+picture, not an idea. Double-click anywhere on a node to edit; the body is plain
+text, styled by size and colour rather than markup.
+
+Top to bottom: type accent bar, media (if any), title, body, type-specific
+trimmings (a link's host, a video's duration, a group's node count and
+miniature). On hover: a control row with colour, **text size**, add-connected
+and delete. The row floats above the node, and while the node is hovered its hit
+area extends upward to cover the gap — otherwise the row vanishes as you reach
+for it.
+
+Nodes auto-size to content until you resize one manually, after which they keep
+your size.
 
 ---
 
@@ -666,10 +705,13 @@ up and deletes on its own. `board` gains a `description` column.
 
 **2. Edges get a fixed `kind` vocabulary *and* a free label.** Six kinds —
 `relates`, `causes`, `supports`, `contradicts`, `part-of`, `example-of` — each
-with its own line treatment (solid, arrowed, dashed, dotted, bracketed), with
-your own words layered on top. The vocabulary is closed on purpose: v2's
-analysis reasons over typed relations, and a drifting user-defined set would
-give the model nothing stable to reason with.
+with its own line treatment (solid, arrowed, dashed, dotted, bracketed) **and
+its own glyph**: joined dots, an arrow, a tick, a cross, a nested square, a
+diamond. The glyph sits mid-edge whether or not the edge is labelled, so the
+relationship is legible without hovering, without colour vision, and in a
+printed export. The vocabulary is closed on purpose: v2's analysis reasons over
+typed relations, and a drifting user-defined set would give the model nothing
+stable to reason with.
 
 **3. Media is always stored locally, and always plays on the canvas.** A video
 arrives either as a dropped/selected file or as a pasted URL; either way the
