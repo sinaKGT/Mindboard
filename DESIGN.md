@@ -513,7 +513,7 @@ The stored preview still needs the server; the player does not.
 
 **A pasted link becomes the link.** Pasting a bare URL onto the canvas makes a
 link node; pasting one into an empty node, or leaving one as a node's whole
-body, converts that node in place. Sina pasted a YouTube address into a text
+body, converts that node in place. Pasting a YouTube address into a text
 box and got the text — reasonable behaviour for a text box, and useless. The
 address is never what you meant.
 
@@ -811,7 +811,7 @@ offline and every export is complete.
   links references only. The second embedded the provider's player in the node —
   which YouTube refused outright ("Error 153") because the app sends no
   referrer, and which meant a board with video links on it talked to Google.
-  The third is what Sina asked for and what should have been obvious: a cover
+  The third is what was asked for and what should have been obvious: a cover
   you own, and a click that goes where links go. No iframe, no third-party
   script, no request to anyone when a board opens. Downloading the video itself
   would need a platform downloader, which stays out of scope.
@@ -881,7 +881,7 @@ application, not a separate shell.
 
 ## 16. Second pass on the canvas (2026-08-30)
 
-Seven things Sina asked for after living with v1 for a day. Recorded because
+Seven things asked for after living with v1 for a day. Recorded because
 each one changed a decision, not just a line of code.
 
 ### Media belongs to the board, and the whole of it gets backed up
@@ -1017,7 +1017,7 @@ update depth exceeded" and left a blank screen. The handler is now a stable
 
 ## 18. The links are springs (2026-08-30)
 
-Sina, on the first version of elastic drag: *"move them other one change very
+The first version of elastic drag came back as *"move them other one change very
 fake … they should be flowty and or organise in best position based on my
 movement"*. He was right. Every neighbour moved by the same fraction of the same
 vector, arriving in lockstep the instant the pointer moved — a rigid parallel
@@ -1057,7 +1057,7 @@ everything that actually moved. One undo, one arrangement.
 
 ## 19. Placing beats physics (2026-08-30)
 
-§18 made the spring simulation the default for every drag. Sina, an hour later:
+§18 made the spring simulation the default for every drag. An hour later:
 *"they are still like sticking on canves and i can't organize them as i want,
 it's very hard"*.
 
@@ -1080,7 +1080,7 @@ little further and it lets go. Nothing is snapped to a grid: a board arranged by
 eye should stay arranged by eye, and a grid is its own kind of stickiness.
 
 This first drew a hairline through both cards to say what it had met, the way
-design tools do. Sina, on seeing them: *"when i move nodes i see those two blue
+design tools do. On seeing them: *"when i move nodes i see those two blue
 line and they are very annoying"* — fairly, because when the card it matched was
 across the board, so was the line. The lines are gone and the snap is silent;
 the reach came down from eight pixels to six at the same time, so it takes hold

@@ -188,7 +188,7 @@ function CanvasInner() {
   // and it lets go. Nothing is forced to a grid.
   //
   // This drew a hairline through both cards to say what it had met, the way
-  // design tools do, and Sina called it "very annoying" - fairly: when the card
+  // design tools do, and the verdict was "very annoying" - fairly: when the card
   // it matched was across the board, so was the line. Lining up is worth
   // having, announcing it is not.
   const SNAP = 6
@@ -281,7 +281,7 @@ function CanvasInner() {
   // drifting for a moment after you let go. A card on one link swings round to
   // keep its distance; a card held by four barely stirs.
   //
-  // This started the other way round - physics by default - and Sina's verdict
+  // This started the other way round - physics by default - and the verdict
   // was that cards "stick on the canvas" and could not be arranged. Quite
   // right: a simulation is lovely to watch and hopeless to place things with.
   const SPRING = 0.2       // how hard a stretched link pulls back

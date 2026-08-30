@@ -198,7 +198,7 @@ def test_many_requests_at_once_do_not_trip_over_one_connection(dd):
 
 
 def test_a_browser_walking_away_is_not_an_error(monkeypatch):
-    """WinError 10054 filled Sina's console whenever a page navigated away.
+    """WinError 10054 filled the console whenever a page navigated away.
 
     The proactor transport raises it from inside `_call_connection_lost`, where
     no caller can catch it. `quiet_disconnects` wraps exactly that method, so
