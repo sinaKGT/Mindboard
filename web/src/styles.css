@@ -92,6 +92,7 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 }
 .icon-btn:hover { background: var(--mb-surface-3); color: var(--mb-text); }
 .icon-btn.danger:hover { background: #f9758322; color: var(--mb-danger); }
+.icon-btn.on { background: var(--mb-accent-soft); color: var(--mb-text); }
 
 .btn {
   display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px;
@@ -347,7 +348,7 @@ a.btn { text-decoration: none; }
 
 .node-tools {
   position: absolute; bottom: calc(100% + 6px); left: 0; display: flex; flex-wrap: wrap;
-  gap: 1px; padding: 3px; max-width: 268px;
+  gap: 1px; padding: 3px; max-width: 300px;
   background: var(--mb-surface-2); border: 1px solid var(--mb-border);
   border-radius: var(--mb-radius-sm); box-shadow: var(--mb-shadow);
   opacity: 0; pointer-events: none; transition: opacity var(--mb-dur) var(--mb-ease);
@@ -657,3 +658,56 @@ a.btn { text-decoration: none; }
 .stage.exporting .mb-node .text.hint-on-hover { display: none !important; }
 .stage.exporting .mb-edge-label.bare { opacity: 1 !important; }
 .stage.exporting .mb-node { box-shadow: none !important; transform: none !important; }
+
+/* ------------------------------------------------------------- node tones -- */
+/* One colour, three strengths: a bar, a wash, or the whole card. */
+.mb-node.has-colour .title { color: var(--node-color); }
+
+.mb-node.tone-tinted {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--node-color) 15%, var(--mb-surface)),
+    color-mix(in srgb, var(--node-color) 5%, var(--mb-surface))
+  );
+  border-color: color-mix(in srgb, var(--node-color) 32%, var(--mb-border));
+}
+.mb-node.tone-solid {
+  background: color-mix(in srgb, var(--node-color) 28%, var(--mb-surface));
+  border-color: color-mix(in srgb, var(--node-color) 58%, var(--mb-border));
+}
+.mb-node.tone-solid .accent { height: 3px; }
+.mb-node.tone-solid .title { color: color-mix(in srgb, var(--node-color) 45%, var(--mb-text)); }
+.mb-node.tone-solid .text { color: color-mix(in srgb, var(--mb-text) 78%, transparent); }
+.mb-node.tone-solid .meta-line,
+.mb-node.tone-solid .link-head { color: color-mix(in srgb, var(--mb-text) 55%, transparent); }
+.react-flow__node:hover .mb-node.tone-tinted,
+.react-flow__node:hover .mb-node.tone-solid {
+  border-color: color-mix(in srgb, var(--node-color) 70%, var(--mb-border-strong));
+}
+
+.tone-group { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px; }
+.tone-chip {
+  width: 17px; height: 17px; border-radius: 5px; border: 1px solid var(--mb-border-strong);
+  transition: transform 180ms var(--mb-spring), border-color 160ms var(--mb-ease);
+}
+.tone-chip:hover { transform: scale(1.12); }
+.tone-chip.on { border-color: var(--mb-accent); }
+.tone-chip.accent {
+  background: linear-gradient(180deg, var(--node-color) 0 3px, var(--mb-surface) 3px);
+}
+.tone-chip.tinted {
+  background: color-mix(in srgb, var(--node-color) 22%, var(--mb-surface));
+}
+.tone-chip.solid { background: var(--node-color); }
+
+/* ----------------------------------------------------------------- lists -- */
+.mb-node .text p { margin: 0; white-space: pre-wrap; }
+.mb-node .text p + p { margin-top: 0.45em; }
+.mb-node .text ul,
+.mb-node .text ol { margin: 0.2em 0; padding-left: 1.35em; }
+.mb-node .text ul + p,
+.mb-node .text ol + p { margin-top: 0.45em; }
+.mb-node .text li { margin: 0.12em 0; }
+.mb-node .text ul { list-style: disc; }
+.mb-node .text ol { list-style: decimal; }
+.mb-node .text li::marker { color: var(--node-color, var(--mb-text-faint)); }

@@ -57,6 +57,8 @@ option has a command behind it — see **Commands** below.
 | Name a relationship | click the edge |
 | Write on any node | double-click it — including on a picture |
 | Change text size | **A / A** in the toolbar, or click the number for a menu |
+| Bullet or numbered list | the list buttons in the toolbar — Enter continues the list as you type |
+| Recolour a node | pick a colour, then one of the three tones: bar, tinted, or solid |
 | Export a picture of the board | `Ctrl+E`, or the image button in the corner |
 | Group nodes into a meta-node | select them, `Ctrl+G` |
 | Ungroup | `Ctrl+Shift+G` |

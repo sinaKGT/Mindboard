@@ -1,6 +1,7 @@
 /** Everything the interface can do to a board, expressed as ops. */
 import { api } from './api'
 import { useStore } from './store'
+import { type ListKind, toList } from './text'
 import type { EdgeKind, MEdge, MNode, NodeType, Op } from './types'
 import { newEdge, newNode } from './types'
 import { useUI } from './ui'
@@ -81,6 +82,58 @@ export function connect(source: string, target: string, kind: EdgeKind = 'relate
   const edge = newEdge(source, target, { kind })
   S().run([{ kind: 'edge.create', edge }])
   spark(edge.id)
+}
+
+/** Turn a node that is really just a URL into the link (or media) it names. */
+export async function linkifyNode(nodeId: string, url: string): Promise<void> {
+  const s = S()
+  const boardId = s.boardId
+  const node = s.nodes[nodeId]
+  if (!boardId || !node) return
+  try {
+    const got = await api.fromUrl(boardId, url)
+    if (got.kind === 'link') {
+      const video = got.video ?? null
+      S().run([{
+        kind: 'node.update', id: nodeId,
+        patch: {
+          type: 'link' as NodeType,
+          title: got.title || got.host,
+          size: [video || got.thumb ? 360 : 300, null],
+          content: {
+            url, host: got.host, excerpt: got.excerpt,
+            ...(got.thumb ? { thumb: got.thumb } : {}),
+            ...(video
+              ? { provider: video.provider, video_id: video.video_id, embed: video.embed }
+              : {}),
+          },
+        },
+      }])
+    } else {
+      const type: NodeType = got.mime.startsWith('video/') ? 'video'
+        : got.mime.startsWith('image/') ? 'image' : 'file'
+      S().run([{
+        kind: 'node.update', id: nodeId,
+        patch: {
+          type,
+          title: got.orig_name || url.split('/').pop() || 'media',
+          size: [320, null],
+          content: { sha256: got.sha256, alt: got.orig_name, source_url: url },
+        },
+      }])
+    }
+    spark(nodeId)
+  } catch (err: any) {
+    s.say(`could not fetch that link: ${err.message}`, true)
+  }
+}
+
+export function setBodyList(node: MNode, kind: ListKind) {
+  const text = String(node.content.text ?? node.content.summary ?? '')
+  const next = toList(text, kind)
+  if (next === text) return
+  const { summary: _dropped, ...rest } = node.content as Record<string, unknown>
+  updateNode(node.id, { content: { ...rest, text: next } })
 }
 
 export function setStyle(node: MNode, patch: Partial<MNode['style']>) {

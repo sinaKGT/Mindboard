@@ -17,8 +17,12 @@ export const KIND_STYLE: Record<EdgeKind, { dash?: string; width: number; arrow:
   'example-of': { width: 1.6, arrow: true, dash: '9 5' },
 }
 
+export type NodeTone = 'accent' | 'tinted' | 'solid'
+
 export interface NodeStyle {
   color?: string
+  /** How far the colour carries: a bar, a wash, or the whole card. */
+  tone?: NodeTone
   fontSize?: number
   weight?: number
   align?: 'left' | 'center'

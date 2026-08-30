@@ -1,13 +1,16 @@
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { addConnected, deleteNodes, setStyle, unwrapMeta, updateNode } from './actions'
+import {
+  addConnected, deleteNodes, linkifyNode, setBodyList, setStyle, unwrapMeta, updateNode,
+} from './actions'
 import { api } from './api'
 import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
+import { blocks, continueList, detectList, URL_ONLY } from './text'
 import { NODE_COLOURS } from './theme'
-import type { MNode } from './types'
+import type { MNode, NodeTone } from './types'
 import { useUI } from './ui'
 
 const PORTS: [string, Position][] = [
@@ -98,11 +101,28 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
 
   const commit = () => {
     clearTimeout(idle.current)
+    // A text node whose whole body is a link is a link - fetch it rather than
+    // leaving the address sitting there as prose.
+    if (node.type === 'text' && URL_ONLY.test(text.trim())) {
+      void linkifyNode(node.id, text.trim())
+      return
+    }
     if (title !== node.title || text !== bodyText(node)) {
       // meta-nodes used to store this under `summary`; migrate on first edit
       const { summary: _dropped, ...rest } = node.content as Record<string, unknown>
       updateNode(node.id, { title, content: { ...rest, text } })
     }
+  }
+
+  /** Pasting a bare link into an empty node makes the link, not its address. */
+  const onPasteUrl = (e: React.ClipboardEvent) => {
+    if (node.type !== 'text' || node.title || bodyText(node)) return
+    const dropped = e.clipboardData.getData('text/plain').trim()
+    if (!URL_ONLY.test(dropped)) return
+    e.preventDefault()
+    clearTimeout(idle.current)
+    setUI('editingId', null)
+    void linkifyNode(node.id, dropped)
   }
   const touch = () => { clearTimeout(idle.current); idle.current = setTimeout(commit, 1500) }
   const fs = sizeOf(node)
@@ -112,6 +132,7 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
       <div className="body">
         <input ref={titleRef} className="title-input nodrag" value={title} placeholder={placeholder}
           style={{ fontSize: fs + 1 }}
+          onPaste={onPasteUrl}
           onChange={(e) => { setTitle(e.target.value); touch() }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); area.current?.focus() }
@@ -119,10 +140,27 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
           }} />
         <textarea ref={area} className="nodrag" value={text} rows={1} placeholder={bodyPlaceholder}
           style={{ fontSize: fs }}
+          onPaste={onPasteUrl}
           onChange={(e) => { setText(e.target.value); touch() }}
           onKeyDown={(e) => {
             if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
               e.preventDefault(); commit(); setUI('editingId', null)
+              return
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+              // carry the list on to the next line, the way any editor does
+              const el = e.currentTarget
+              const next = continueList(el.value, el.selectionStart ?? el.value.length)
+              if (next) {
+                e.preventDefault()
+                // Put the text and the caret in place synchronously. Deferring
+                // the caret to a frame later loses characters when someone
+                // types quickly through the line break.
+                el.value = next.value
+                el.setSelectionRange(next.caret, next.caret)
+                setText(next.value)
+                touch()
+              }
             }
           }}
           onBlur={() => { commit(); setUI('editingId', null) }} />
@@ -135,11 +173,19 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
   const text_ = bodyText(node)
   return (
     <div className="body" style={{ textAlign: node.style.align }}>
-      <div className="title" style={{ color: node.style.color, fontSize: fs + 1 }}>
+      <div className="title" style={{ fontSize: fs + 1 }}>
         {node.title || <span className="placeholder">{placeholder}</span>}
       </div>
       {text_
-        ? <div className="text" style={{ fontSize: fs }}>{text_}</div>
+        ? <div className="text" style={{ fontSize: fs }}>
+            {blocks(text_).map((block, i) => (
+              block.kind === 'p'
+                ? <p key={i}>{block.items.join('\n')}</p>
+                : block.kind === 'ul'
+                  ? <ul key={i}>{block.items.map((it, j) => <li key={j}>{it}</li>)}</ul>
+                  : <ol key={i}>{block.items.map((it, j) => <li key={j}>{it}</li>)}</ol>
+            ))}
+          </div>
         : <div className="text placeholder hint-on-hover" style={{ fontSize: fs }}>
             {bodyPlaceholder}
           </div>}
@@ -149,12 +195,20 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
 
 // ----------------------------------------------------------------- shell -- //
 
+const TONES: { key: NodeTone; label: string }[] = [
+  { key: 'accent', label: 'Accent bar' },
+  { key: 'tinted', label: 'Tinted card' },
+  { key: 'solid', label: 'Solid card' },
+]
+
 const SIZES = [11, 12, 13, 14, 16, 18, 20, 24, 28, 34]
 
 function Tools({ node }: { node: MNode }) {
   const enter = useStore((s) => s.enter)
   const size = sizeOf(node)
   const [sizeOpen, setSizeOpen] = useState(false)
+  const listKind = detectList(bodyText(node))
+  const tone: NodeTone = node.style.tone ?? 'accent'
   return (
     <div className="node-tools nodrag nopan" onDoubleClick={(e) => e.stopPropagation()}
       onMouseLeave={() => setSizeOpen(false)}>
@@ -192,6 +246,24 @@ function Tools({ node }: { node: MNode }) {
         )}
       </span>
       <span className="sep" />
+      <span className="tone-group" title="How far the colour carries">
+        {TONES.map((t) => (
+          <button key={t.key} className={`tone-chip ${t.key} ${tone === t.key ? 'on' : ''}`}
+            title={t.label} aria-label={t.label}
+            style={{ ['--node-color' as string]: accentOf(node) }}
+            onClick={() => setStyle(node, { tone: t.key })} />
+        ))}
+      </span>
+      <span className="sep" />
+      <button className={`icon-btn ${listKind === 'bullet' ? 'on' : ''}`} title="Bullet list"
+        onClick={() => setBodyList(node, listKind === 'bullet' ? 'none' : 'bullet')}>
+        <Icon name="bullets" size={13} />
+      </button>
+      <button className={`icon-btn ${listKind === 'number' ? 'on' : ''}`} title="Numbered list"
+        onClick={() => setBodyList(node, listKind === 'number' ? 'none' : 'number')}>
+        <Icon name="numbers" size={13} />
+      </button>
+      <span className="sep" />
       {node.type === 'meta' && (
         <>
           <button className="icon-btn" title="Open" onClick={() => enter(node.id)}>
@@ -226,8 +298,10 @@ function Shell({ node, selected, resizable, children }: {
       )}
       <Tools node={node} />
       <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''}`
+        + ` tone-${node.style.tone ?? 'accent'}${node.style.color ? ' has-colour' : ''}`
         + `${sparked ? ' spark' : ''}${node.size[1] ? ' sized-h' : ''}`}
         style={{
+          ['--node-color' as string]: accentOf(node),
           width: node.size[0] ? '100%' : undefined,
           height: node.size[1] ? '100%' : undefined,
           // the default max-width keeps unsized nodes readable; once you have

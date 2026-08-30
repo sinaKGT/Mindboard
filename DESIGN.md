@@ -472,6 +472,12 @@ Nodes auto-size to content until you resize one manually, after which they keep
 your size — the default 380px readability cap is lifted the moment you set a
 width yourself, or the card refuses to fill the frame you dragged.
 
+**A pasted link becomes the link.** Pasting a bare URL onto the canvas makes a
+link node; pasting one into an empty node, or leaving one as a node's whole
+body, converts that node in place. Sina pasted a YouTube address into a text
+box and got the text — reasonable behaviour for a text box, and useless. The
+address is never what you meant.
+
 **Double-click anywhere on a node writes on it**, handled once by the canvas so
 it works over a picture as readily as over its caption. Only a `<video>` keeps
 its own double-click, for the player. Dropping a single file also opens its
@@ -777,6 +783,18 @@ weight, alignment and colour, per node, from the hover controls. `content_json`
 holds `{ "text": "…" }`; presentation lives in `style_json`. This keeps nodes
 short — which is what a mind map wants — and removes an editor dependency and a
 week of schedule.
+
+*Lists are the exception, added 2026-08-30.* They are structure, not markup, and
+a mind map needs them. They live as ordinary leading markers in the same plain
+string — `- item`, `1. item` — so nothing about the storage format changes and
+v2 still hands an LLM readable prose. The editor continues a list when you press
+Enter and ends it on an empty item; the canvas renders the markers as a real
+`<ul>`/`<ol>`; the toolbar toggles a body between plain, bulleted and numbered.
+
+**Node tones.** A colour carries as far as you want it to: `accent` (a bar on a
+neutral card, the default), `tinted` (a wash), or `solid` (the whole card).
+Stored as `style.tone`, applied through a `--node-color` custom property so one
+colour drives the bar, the border, the title and the list markers together.
 
 **5. Inter ships inside the package.** ~200 KB of woff2 as package data. Zero
 network requests at runtime, and the board looks identical on every machine,
