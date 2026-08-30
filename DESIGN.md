@@ -478,6 +478,23 @@ stylesheet.
 
 ### The user's experience
 
+Double-click `Mindboard.bat` (Windows) or `Mindboard.command` (macOS / Linux).
+The launcher installs on first run, then opens a numbered menu: open the app,
+back up, restore, list boards, check the install, open the data folder,
+reinstall. Every option is a thin wrapper over a CLI command, so nothing exists
+only in the menu.
+
+Two details that matter more than they look:
+
+- **The menu serves on a background thread and stops on Enter**, not Ctrl+C.
+  Pressing Ctrl+C inside a `.bat` makes cmd ask "Terminate batch job (Y/N)?",
+  which is a baffling way to close an app.
+- **Restore names the choice in plain language.** When a backup overlaps boards
+  you already have, the menu offers "leave mine alone / replace mine / add
+  alongside" rather than `--replace` and `--copy`.
+
+Behind it, for anyone who prefers a terminal:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1    # Windows
 ```
@@ -503,6 +520,7 @@ step in `mindboard install` exists only for source checkouts.
 
 | Command | Does |
 |---|---|
+| `mindboard menu` | The screen the desktop launcher opens |
 | `mindboard run [--port] [--data-dir] [--no-open] [--dev]` | Serve on 127.0.0.1 and open the browser |
 | `mindboard install [--with-demo] [--skip-build]` | Prepare storage, key and interface. Idempotent |
 | `mindboard backup [-o FILE]` | Every board, media included, into one zip |
@@ -580,11 +598,14 @@ Reserved but unused in v1: a `node_embedding(node_id, vec BLOB)` table (for
 mindboard/
 ├── DESIGN.md                    ← this file
 ├── README.md
+├── Mindboard.bat / .command     double-click launcher -> the menu
 ├── install.ps1 / install.sh     one-command isolated setup
 ├── build.sh                     builds the interface into the package
 ├── pyproject.toml               packaging, CLI entry point, deps
 ├── src/mindboard/
 │   ├── cli.py                   Typer commands
+│   ├── menu.py                  the launcher's pick-an-option screen
+│   ├── runtime.py               data dir, token, ports, serving, diagnostics
 │   ├── app.py                   FastAPI app, static mount, auth middleware
 │   ├── db.py                    connection, WAL setup, migrations runner
 │   ├── models.py                Pydantic schemas

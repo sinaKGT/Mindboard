@@ -113,3 +113,21 @@ def test_backup_of_an_empty_install(dd, tmp_path):
     assert is_backup(out["path"])
     fresh = DataDir(tmp_path / "elsewhere").ensure()
     assert restore_backup(fresh, out["path"])["restored"] == []
+
+
+def test_diagnostics_cover_the_basics(dd):
+    from mindboard.runtime import diagnostics
+
+    seed(dd, "Alpha", 2)
+    labels = [c["label"] for c in diagnostics(dd)]
+    assert any("python" in l for l in labels)
+    assert any("storage writable" in l for l in labels)
+    assert any("Alpha" in l for l in labels)
+    assert all(set(c) >= {"label", "ok", "detail", "fix"} for c in diagnostics(dd))
+
+
+def test_menu_backup_folder_is_created(dd):
+    from mindboard.runtime import backups_dir
+
+    folder = backups_dir(dd)
+    assert folder.is_dir()

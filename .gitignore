@@ -11,3 +11,5 @@ src/mindboard/web/*
 .pytest_cache/
 .ruff_cache/
 *.mindboard
+backups/
+mindboard-backup-*.zip

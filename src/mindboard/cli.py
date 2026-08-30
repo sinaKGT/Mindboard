@@ -8,14 +8,9 @@ subcommand here, so the app never needs a settings screen for it.
 """
 
 import os
-import secrets
 import shutil
-import socket
 import subprocess
 import sys
-import threading
-import time
-import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +18,10 @@ import typer
 
 from . import __version__
 from .paths import DataDir
+from .runtime import (
+    DEFAULT_PORT, access_token, board_url, diagnostics, open_in_browser, port_free,
+    resolve_data_dir, serve, source_root,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -34,39 +33,19 @@ DataDirOpt = typer.Option(None, "--data-dir", help="Where boards are stored.")
 
 
 def _dd(data_dir: Optional[str]) -> DataDir:
-    return DataDir(Path(data_dir) if data_dir else None).ensure()
+    return resolve_data_dir(data_dir)
 
 
 def _token(dd: DataDir) -> str:
-    f = dd.token_file
-    if f.exists():
-        existing = f.read_text(encoding="utf-8").strip()
-        if existing:
-            return existing
-    token = secrets.token_urlsafe(32)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(token, encoding="utf-8")
-    try:
-        os.chmod(f, 0o600)
-    except Exception:
-        pass
-    return token
+    return access_token(dd)
 
 
 def _port_free(port: int, host: str = "127.0.0.1") -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            s.bind((host, port))
-            return True
-        except OSError:
-            return False
+    return port_free(port, host)
 
 
 def _source_root() -> Optional[Path]:
-    """The repository, when running from a checkout rather than a wheel."""
-    root = Path(__file__).resolve().parents[2]
-    return root if (root / "web" / "package.json").exists() else None
+    return source_root()
 
 
 def _ok(label: str, detail: str = "") -> None:
@@ -85,15 +64,13 @@ def _warn(label: str, detail: str = "") -> None:
 
 @app.command()
 def run(
-    port: int = typer.Option(7788, "--port", "-p"),
+    port: int = typer.Option(DEFAULT_PORT, "--port", "-p"),
     data_dir: Optional[str] = DataDirOpt,
     no_open: bool = typer.Option(False, "--no-open", help="Do not open a browser."),
     dev: bool = typer.Option(False, "--dev", help="Reload on code changes."),
 ):
     """Run Mindboard and open it in your browser."""
-    import uvicorn
-
-    from .app import WEB_DIR, create_app
+    from .app import WEB_DIR
 
     dd = _dd(data_dir)
     token = _token(dd)
@@ -108,23 +85,20 @@ def run(
         typer.echo(f"Either Mindboard is running, or try:  mindboard run --port {port + 1}")
         raise typer.Exit(1)
 
-    url = f"http://127.0.0.1:{port}/?t={token}"
+    url = board_url(port, token)
     typer.secho(f"  Mindboard {__version__}", fg=typer.colors.CYAN, bold=True)
     typer.echo(f"  data   {dd.root}")
     typer.echo(f"  open   {url}")
     typer.secho("  ctrl-c to stop\n", fg=typer.colors.BRIGHT_BLACK)
 
     if not no_open:
-        threading.Thread(
-            target=lambda: (time.sleep(1.0), webbrowser.open(url)), daemon=True
-        ).start()
-
-    uvicorn.run(create_app(dd, token, dev=dev), host="127.0.0.1", port=port, log_level="warning")
+        open_in_browser(url)
+    serve(dd, token, port, dev=dev)
 
 
 @app.command(hidden=True)
 def start(
-    port: int = typer.Option(7788, "--port", "-p"),
+    port: int = typer.Option(DEFAULT_PORT, "--port", "-p"),
     data_dir: Optional[str] = DataDirOpt,
     no_open: bool = typer.Option(False, "--no-open"),
     dev: bool = typer.Option(False, "--dev"),
@@ -357,33 +331,16 @@ def delete(board_id: str, data_dir: Optional[str] = DataDirOpt,
 # --------------------------------------------------------------------------- #
 
 @app.command()
-def doctor(data_dir: Optional[str] = DataDirOpt, port: int = 7788):
+def doctor(data_dir: Optional[str] = DataDirOpt, port: int = DEFAULT_PORT):
     """Check that everything Mindboard needs is in order."""
-    from .app import WEB_DIR
-    from .boards import conn_for, list_boards
-    from .db import integrity_ok
-
-    ok = True
-
-    def check(label: str, good: bool, detail: str = "", fix: str = ""):
-        """`detail` is context either way; `fix` only shows when something failed."""
-        nonlocal ok
-        ok = ok and good
-        mark = typer.style("ok  ", fg=typer.colors.GREEN) if good else typer.style(
-            "FAIL", fg=typer.colors.RED)
-        note = detail if good else (fix or detail)
-        typer.echo(f"  {mark} {label}{('  - ' + note) if note else ''}")
-
     typer.secho(f"Mindboard {__version__}", bold=True)
-    check("python >= 3.10", sys.version_info >= (3, 10), sys.version.split()[0])
-    dd = _dd(data_dir)
-    check("data directory writable", os.access(dd.root, os.W_OK), str(dd.root))
-    check("interface built", (WEB_DIR / "index.html").exists(), fix="run: mindboard install")
-    check(f"port {port} free", _port_free(port), fix="Mindboard may already be running")
-    for b in list_boards(dd):
-        check(f"board {b['title'][:24]!r}", integrity_ok(conn_for(dd, b["id"])),
-              f"{b['node_count']} nodes")
-    raise typer.Exit(0 if ok else 1)
+    checks = diagnostics(_dd(data_dir), port)
+    for c in checks:
+        mark = typer.style("ok  ", fg=typer.colors.GREEN) if c["ok"] else typer.style(
+            "FAIL", fg=typer.colors.RED)
+        note = c["detail"] if c["ok"] else (c["fix"] or c["detail"])
+        typer.echo(f"  {mark} {c['label']}{('  - ' + note) if note else ''}")
+    raise typer.Exit(0 if all(c["ok"] for c in checks) else 1)
 
 
 @app.command()
@@ -414,6 +371,14 @@ def gc(data_dir: Optional[str] = DataDirOpt, dry_run: bool = typer.Option(False,
 def where(data_dir: Optional[str] = DataDirOpt):
     """Print the data directory."""
     typer.echo(str(_dd(data_dir).root))
+
+
+@app.command()
+def menu(data_dir: Optional[str] = DataDirOpt):
+    """Open the pick-an-option menu (what the desktop launcher runs)."""
+    from .menu import run_menu
+
+    run_menu(data_dir)
 
 
 @app.command()
