@@ -91,7 +91,7 @@ The app takes backups too: **Back up all** on the launcher, or `Ctrl+K` →
 
 ```
 mindboard menu                       # the screen the launcher opens
-mindboard run [--port 7788] [--data-dir PATH] [--no-open]
+mindboard run [--port 7788] [--host 127.0.0.1] [--data-dir PATH] [--no-open]
 mindboard install [--with-demo]
 mindboard backup [-o FILE]
 mindboard restore FILE [--replace | --copy]

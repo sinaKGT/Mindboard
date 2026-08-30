@@ -68,8 +68,8 @@ def ui_built() -> bool:
     return (WEB_DIR / "index.html").exists()
 
 
-def board_url(port: int, token: str) -> str:
-    return f"http://127.0.0.1:{port}/?t={token}"
+def board_url(port: int, token: str, host: str = "127.0.0.1") -> str:
+    return f"http://{host}:{port}/?t={token}"
 
 
 def open_in_browser(url: str, delay: float = 1.0) -> None:
@@ -91,14 +91,14 @@ def open_folder(path: Path) -> bool:
         return False
 
 
-def serve(dd: DataDir, token: str, port: int, dev: bool = False) -> None:
+def serve(dd: DataDir, token: str, port: int, dev: bool = False,
+          host: str = "127.0.0.1") -> None:
     """Blocks until the server stops. Ctrl+C returns cleanly."""
     import uvicorn
 
     from .app import create_app
 
-    uvicorn.run(create_app(dd, token, dev=dev), host="127.0.0.1", port=port,
-                log_level="warning")
+    uvicorn.run(create_app(dd, token, dev=dev), host=host, port=port, log_level="warning")
 
 
 def diagnostics(dd: DataDir, port: int = DEFAULT_PORT) -> list[dict]:

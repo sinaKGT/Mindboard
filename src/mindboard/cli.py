@@ -68,6 +68,10 @@ def run(
     data_dir: Optional[str] = DataDirOpt,
     no_open: bool = typer.Option(False, "--no-open", help="Do not open a browser."),
     dev: bool = typer.Option(False, "--dev", help="Reload on code changes."),
+    host: str = typer.Option(
+        "127.0.0.1", "--host",
+        help="Address to serve on. Try 'localhost' if an embedded video player "
+             "refuses to load."),
 ):
     """Run Mindboard and open it in your browser."""
     from .app import WEB_DIR
@@ -80,12 +84,12 @@ def run(
         typer.echo("Run:  mindboard install")
         raise typer.Exit(1)
 
-    if not _port_free(port):
+    if not port_free(port, host):
         typer.secho(f"Port {port} is already in use.", fg=typer.colors.RED)
         typer.echo(f"Either Mindboard is running, or try:  mindboard run --port {port + 1}")
         raise typer.Exit(1)
 
-    url = board_url(port, token)
+    url = board_url(port, token, host)
     typer.secho(f"  Mindboard {__version__}", fg=typer.colors.CYAN, bold=True)
     typer.echo(f"  data   {dd.root}")
     typer.echo(f"  open   {url}")
@@ -93,7 +97,7 @@ def run(
 
     if not no_open:
         open_in_browser(url)
-    serve(dd, token, port, dev=dev)
+    serve(dd, token, port, dev=dev, host=host)
 
 
 @app.command(hidden=True)

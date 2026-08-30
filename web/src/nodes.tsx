@@ -389,6 +389,20 @@ export function LinkNode({ data, selected }: NodeProps) {
     ? api.assetUrl(boardId, node.content.thumb) : undefined
   const embed = node.content.embed as string | undefined
 
+  /** The app sends no referrer by default, and YouTube refuses an embed that
+   *  arrives without one — that is the "Error 153" screen. Relax the policy for
+   *  this one element and tell the player which origin it is playing in. */
+  const playerSrc = useMemo(() => {
+    if (!embed) return undefined
+    try {
+      const u = new URL(embed)
+      if (u.hostname.includes('youtube')) u.searchParams.set('origin', location.origin)
+      return u.toString()
+    } catch {
+      return embed
+    }
+  }, [embed])
+
   return (
     <Shell node={node} selected={selected} resizable>
       {(thumb || embed) && (
@@ -407,8 +421,9 @@ export function LinkNode({ data, selected }: NodeProps) {
             </button>
           )}
           {embed && playing && (
-            <iframe className="embed nodrag nopan" src={embed} title={node.title || 'video'}
+            <iframe className="embed nodrag nopan" src={playerSrc} title={node.title || 'video'}
               onDoubleClick={(e) => e.stopPropagation()}
+              referrerPolicy="strict-origin-when-cross-origin"
               allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
               allowFullScreen />
           )}

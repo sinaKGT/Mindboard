@@ -478,6 +478,16 @@ makes the debounced auto-save a no-op for the rest of that edit. Without it the
 `link`, skipped the "is this a URL?" branch, and wrote the raw address back over
 the node as its title and body — a link node displaying its own URL twice.
 
+**The player needs a referrer.** The app sends `Referrer-Policy: no-referrer` on
+every response, which is right for a local tool — and it made YouTube refuse
+every embed with "Error 153", its message for a request that arrives with no
+referrer. The fix is scoped to the one element that needs it: the player iframe
+carries `referrerPolicy="strict-origin-when-cross-origin"` and an `origin`
+parameter, so YouTube sees `http://127.0.0.1:7788` and nothing else in the app
+starts leaking referrers. If a provider still refuses a bare-IP origin,
+`mindboard run --host localhost` serves the same app from an origin they are
+happier with.
+
 **The frontend detects video links too.** The same YouTube/Vimeo matching runs
 client-side as a fallback, so a video still gets its player even when the server
 tells us nothing about it — an older backend, a blocked page, a failed fetch.
