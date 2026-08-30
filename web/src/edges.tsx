@@ -58,6 +58,7 @@ export function LabeledEdge(props: EdgeProps) {
 
   const sourceNode = useInternalNode(source)
   const targetNode = useInternalNode(target)
+  const sparked = useUI((s) => (edge ? s.sparkIds.includes(edge.id) : false))
 
   useEffect(() => { if (!editing) setLabel(edge?.label ?? '') }, [edge?.label, editing])
   useEffect(() => { if (editing) { inputRef.current?.focus(); inputRef.current?.select() } }, [editing])
@@ -80,7 +81,7 @@ export function LabeledEdge(props: EdgeProps) {
 
   return (
     <>
-      <path d={path} className="mb-edge-path"
+      <path d={path} className={`mb-edge-path ${sparked ? 'spark' : ''}`} pathLength={1}
         style={{ stroke: colour, strokeWidth: spec.width, strokeDasharray: spec.dash }}
         markerEnd={edge?.directed !== false && spec.arrow ? props.markerEnd : undefined} />
       <path d={path} className="mb-edge-hit" onClick={() => edge && setUI('editingEdgeId', id)} />

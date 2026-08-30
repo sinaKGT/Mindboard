@@ -7,9 +7,20 @@ import { useUI } from './ui'
 
 const S = () => useStore.getState()
 
+/** Mark ids as just-created so the canvas can animate them in, then forget. */
+export function spark(...ids: string[]) {
+  const ui = useUI.getState()
+  ui.set('sparkIds', [...ui.sparkIds, ...ids])
+  setTimeout(() => {
+    const now = useUI.getState()
+    now.set('sparkIds', now.sparkIds.filter((id) => !ids.includes(id)))
+  }, 900)
+}
+
 export function addTextNode(pos: [number, number], parent: string | null): MNode {
   const node = newNode({ pos, parent, type: 'text', title: '', content: { text: '' } })
   S().run([{ kind: 'node.create', node }])
+  spark(node.id)
   useUI.getState().set('editingId', node.id)
   return node
 }
@@ -20,6 +31,7 @@ export function addConnected(from: MNode, at?: [number, number]): MNode {
   const node = newNode({ pos, parent: from.parent, type: 'text', content: { text: '' } })
   const edge = newEdge(from.id, node.id)
   S().run([{ kind: 'node.create', node }, { kind: 'edge.create', edge }])
+  spark(node.id, edge.id)
   useUI.getState().set('editingId', node.id)
   return node
 }
@@ -40,7 +52,9 @@ export function connect(source: string, target: string, kind: EdgeKind = 'relate
   if (source === target) return
   const exists = Object.values(S().edges).some((e) => e.source === source && e.target === target)
   if (exists) return
-  S().run([{ kind: 'edge.create', edge: newEdge(source, target, { kind }) }])
+  const edge = newEdge(source, target, { kind })
+  S().run([{ kind: 'edge.create', edge }])
+  spark(edge.id)
 }
 
 export function setStyle(node: MNode, patch: Partial<MNode['style']>) {
@@ -67,6 +81,7 @@ export function wrapSelection(ids: string[]) {
     meta,
     children: picked.map((n) => ({ id: n.id, x: n.pos[0] - minX, y: n.pos[1] - minY })),
   }])
+  spark(meta.id)
   useUI.getState().set('editingId', meta.id)
 }
 
@@ -161,6 +176,7 @@ export async function addFile(file: File, pos: [number, number], parent: string 
         : { sha256: info.sha256, alt: file.name, ...probed },
     })
     S().run([{ kind: 'node.create', node }])
+    spark(node.id)
     if (type === 'video') void capturePoster(boardId, node.id, file)
   } catch (err: any) {
     s.say(`could not add ${file.name}: ${err.message}`, true)
@@ -181,6 +197,7 @@ export async function addUrl(url: string, pos: [number, number], parent: string 
         content: { url, host: got.host, excerpt: got.excerpt },
       })
       S().run([{ kind: 'node.create', node }])
+      spark(node.id)
       return
     }
     const type: NodeType = got.mime.startsWith('video/') ? 'video'
@@ -191,6 +208,7 @@ export async function addUrl(url: string, pos: [number, number], parent: string 
       content: { sha256: got.sha256, alt: got.orig_name, source_url: url },
     })
     S().run([{ kind: 'node.create', node }])
+    spark(node.id)
   } catch (err: any) {
     s.say(`could not fetch that URL: ${err.message}`, true)
   }

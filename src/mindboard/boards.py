@@ -49,6 +49,75 @@ def create_board(dd: DataDir, title: str = "Untitled board", description: str = 
     return board_meta(dd, bid)
 
 
+MAX_PREVIEW_NODES = 60
+MAX_PREVIEW_EDGES = 90
+
+
+def board_preview(c: sqlite3.Connection, board_id: str) -> dict[str, Any]:
+    """A miniature of the board's top level, normalised to the unit square, so a
+    launcher card can draw the shape of the actual graph rather than a stock
+    placeholder. Nodes inside meta-nodes resolve to the meta-node that holds
+    them, which is exactly what you see when you open the board."""
+    rows = c.execute(
+        "SELECT id, type, x, y, style_json FROM node "
+        "WHERE board_id=? AND parent_id IS NULL ORDER BY created_at LIMIT ?",
+        (board_id, MAX_PREVIEW_NODES),
+    ).fetchall()
+    if not rows:
+        return {"nodes": [], "edges": []}
+
+    index = {r["id"]: i for i, r in enumerate(rows)}
+    parents = {
+        r["id"]: r["parent_id"]
+        for r in c.execute("SELECT id, parent_id FROM node WHERE board_id=?", (board_id,))
+    }
+
+    def root_of(node_id: str) -> Optional[str]:
+        seen = set()
+        cur = node_id
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            parent = parents.get(cur)
+            if parent is None:
+                return cur
+            cur = parent
+        return None
+
+    xs = [r["x"] for r in rows]
+    ys = [r["y"] for r in rows]
+    span_x = max(max(xs) - min(xs), 1.0)
+    span_y = max(max(ys) - min(ys), 1.0)
+    nodes = []
+    for r in rows:
+        try:
+            colour = json.loads(r["style_json"]).get("color")
+        except Exception:
+            colour = None
+        nodes.append({
+            "x": round((r["x"] - min(xs)) / span_x, 4),
+            "y": round((r["y"] - min(ys)) / span_y, 4),
+            "t": r["type"],
+            **({"c": colour} if colour else {}),
+        })
+
+    edges: list[list[int]] = []
+    seen_pairs: set[tuple[int, int]] = set()
+    for e in c.execute("SELECT source_id, target_id FROM edge WHERE board_id=?", (board_id,)):
+        a, b = root_of(e["source_id"]), root_of(e["target_id"])
+        if a is None or b is None or a == b:
+            continue
+        if a not in index or b not in index:
+            continue
+        pair = (index[a], index[b])
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        edges.append([pair[0], pair[1]])
+        if len(edges) >= MAX_PREVIEW_EDGES:
+            break
+    return {"nodes": nodes, "edges": edges}
+
+
 def board_meta(dd: DataDir, board_id: str) -> Optional[dict[str, Any]]:
     if not dd.db_path(board_id).exists():
         return None
@@ -60,6 +129,11 @@ def board_meta(dd: DataDir, board_id: str) -> Optional[dict[str, Any]]:
         "SELECT (SELECT COUNT(*) FROM node WHERE board_id=?) AS n,"
         " (SELECT COUNT(*) FROM edge WHERE board_id=?) AS e", (board_id, board_id)
     ).fetchone()
+    by_type = {
+        r["type"]: r["n"]
+        for r in c.execute(
+            "SELECT type, COUNT(*) AS n FROM node WHERE board_id=? GROUP BY type", (board_id,))
+    }
     return {
         "id": row["id"],
         "title": row["title"],
@@ -70,6 +144,8 @@ def board_meta(dd: DataDir, board_id: str) -> Optional[dict[str, Any]]:
         "updated_at": row["updated_at"],
         "node_count": counts["n"],
         "edge_count": counts["e"],
+        "counts_by_type": by_type,
+        "preview": board_preview(c, board_id),
     }
 
 

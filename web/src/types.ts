@@ -67,6 +67,8 @@ export interface BoardMeta {
   updated_at: string
   node_count: number
   edge_count: number
+  counts_by_type?: Record<string, number>
+  preview?: { nodes: { x: number; y: number; t: string; c?: string }[]; edges: [number, number][] }
 }
 
 export type Op =

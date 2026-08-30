@@ -656,8 +656,20 @@ The only non-canvas screen.
 └───────────────────────────────────────────────────────────┘
 ```
 
-Each card shows name, description, created date and node count; hovering reveals
-rename, duplicate, export and delete. Clicking enters the canvas and the
+Each card **draws the board's actual top-level graph** - the backend serves a
+normalised miniature with every board listing - so a shelf of boards reads as a
+shelf of distinct things rather than a column of identical rectangles. Below it:
+name, description, a composition strip (how many text / image / video / group
+nodes, colour-coded to match the canvas) and a relative time that keeps itself
+honest without a reload.
+
+The cards respond rather than sit still: a highlight tracks the cursor across
+the card, the miniature's edges draw themselves in and its nodes breathe gently
+on hover, cards stagger in on load, and pressing one springs. The same
+miniature appears inside a collapsed meta-node, so a group also shows what is
+in it. All of it is suppressed under `prefers-reduced-motion`.
+
+Hovering a card reveals rename, export and delete. Clicking enters the canvas and the
 launcher is gone until you ask for it (`Ctrl+K` → *Switch board*, or the
 breadcrumb root). Same dark palette, same type scale — it reads as the same
 application, not a separate shell.

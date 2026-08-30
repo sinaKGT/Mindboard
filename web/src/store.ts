@@ -335,7 +335,3 @@ export function ancestorAtLevel(
   }
   return null
 }
-
-export function childCount(nodes: Record<string, MNode>, id: string): number {
-  return Object.values(nodes).filter((n) => n.parent === id).length
-}

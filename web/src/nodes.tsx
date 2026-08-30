@@ -1,10 +1,11 @@
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { addConnected, deleteNodes, setStyle, unwrapMeta, updateNode } from './actions'
 import { api } from './api'
 import { Icon } from './icons'
-import { childCount, useStore } from './store'
+import { GraphMini, toMini, type MiniEdge } from './Mini'
+import { useStore } from './store'
 import { NODE_COLOURS } from './theme'
 import type { MNode } from './types'
 import { useUI } from './ui'
@@ -76,6 +77,7 @@ function Tools({ node }: { node: MNode }) {
 function Shell({ node, selected, resizable, children }: {
   node: MNode; selected?: boolean; resizable?: boolean; children: React.ReactNode
 }) {
+  const sparked = useUI((s) => s.sparkIds.includes(node.id))
   return (
     <>
       {resizable && (
@@ -85,7 +87,7 @@ function Shell({ node, selected, resizable, children }: {
           onResizeEnd={(_, p) => updateNode(node.id, { size: [p.width, p.height] })} />
       )}
       <Tools node={node} />
-      <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''}`}
+      <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''} ${sparked ? 'spark' : ''}`}
         style={{ width: node.size[0] ? '100%' : undefined, height: node.size[1] ? '100%' : undefined }}>
         <div className="accent" style={{ background: accentOf(node) }} />
         {children}
@@ -261,7 +263,22 @@ export function FileNode({ data, selected }: NodeProps) {
 
 export function MetaNode({ id, data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
-  const count = useStore((s) => childCount(s.nodes, id))
+  const allNodes = useStore((s) => s.nodes)
+  const allEdges = useStore((s) => s.edges)
+  const kids = useMemo(
+    () => Object.values(allNodes).filter((n) => n.parent === id), [allNodes, id])
+  const miniNodes = useMemo(() => toMini(kids), [kids])
+  const miniEdges = useMemo<MiniEdge[]>(() => {
+    const index = new Map(kids.map((k, i) => [k.id, i]))
+    const out: MiniEdge[] = []
+    for (const e of Object.values(allEdges)) {
+      const a = index.get(e.source)
+      const b = index.get(e.target)
+      if (a !== undefined && b !== undefined && a !== b) out.push([a, b])
+    }
+    return out
+  }, [allEdges, kids])
+  const count = kids.length
   const editing = useUI((s) => s.editingId === id)
   const setUI = useUI((s) => s.set)
   const [title, setTitle] = useState(node.title)
@@ -283,9 +300,14 @@ export function MetaNode({ id, data, selected }: NodeProps) {
         {node.content.summary ? <div className="text">{node.content.summary}</div> : null}
         <span className="badge">
           <Icon name="layers" size={11} />
-          {count} {count === 1 ? 'node' : 'nodes'}
+          {count === 0 ? 'empty' : `${count} ${count === 1 ? 'node' : 'nodes'}`}
         </span>
       </div>
+      {miniNodes.length > 1 && (
+        <div className="meta-mini">
+          <GraphMini nodes={miniNodes} edges={miniEdges} w={150} h={54} pad={11} dense />
+        </div>
+      )}
     </Shell>
   )
 }

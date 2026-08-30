@@ -9,6 +9,7 @@ interface UI {
   minimap: boolean
   focusId: string | null
   selected: string[]
+  sparkIds: string[]
   set<K extends keyof UI>(key: K, value: UI[K]): void
 }
 
@@ -20,5 +21,6 @@ export const useUI = create<UI>()((set) => ({
   minimap: false,
   focusId: null,
   selected: [],
+  sparkIds: [],
   set: (key, value) => set({ [key]: value } as any),
 }))

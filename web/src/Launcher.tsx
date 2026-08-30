@@ -1,16 +1,31 @@
-/** The only screen outside the canvas. It exists because import lives here and
- *  because a board's identity - its name and description - is set here. */
+/** The only screen outside the canvas. Each card draws the board's actual
+ *  top-level graph, so a shelf of boards reads as a shelf of distinct things. */
 import { useCallback, useEffect, useState } from 'react'
 
 import { api } from './api'
 import { Icon } from './icons'
+import { GraphMini, ago } from './Mini'
 import { useStore } from './store'
 import type { BoardMeta } from './types'
 
-const fmt = (iso: string) => {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-  } catch { return iso.slice(0, 10) }
+const TYPE_ORDER = ['text', 'image', 'video', 'link', 'file', 'meta'] as const
+const TYPE_LABEL: Record<string, string> = {
+  text: 'text', image: 'image', video: 'video', link: 'link', file: 'file', meta: 'group',
+}
+
+function Composition({ counts }: { counts: Record<string, number> }) {
+  const shown = TYPE_ORDER.filter((t) => counts[t])
+  if (!shown.length) return <span className="type-dots empty">empty</span>
+  return (
+    <span className="type-dots">
+      {shown.map((t) => (
+        <span key={t} className="type-dot" title={`${counts[t]} ${TYPE_LABEL[t]}`}>
+          <i style={{ background: `var(--mb-type-${t})` }} />
+          {counts[t]}
+        </span>
+      ))}
+    </span>
+  )
 }
 
 export function Launcher({ onImport }: { onImport: () => void }) {
@@ -18,6 +33,7 @@ export function Launcher({ onImport }: { onImport: () => void }) {
   const [modal, setModal] = useState<{ mode: 'new' | 'rename'; board?: BoardMeta } | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [, retick] = useState(0)
   const open = useStore((s) => s.open)
   const say = useStore((s) => s.say)
 
@@ -26,6 +42,11 @@ export function Launcher({ onImport }: { onImport: () => void }) {
   }, [say])
 
   useEffect(() => { void refresh() }, [refresh])
+  // keeps "3m ago" honest without a reload
+  useEffect(() => {
+    const t = setInterval(() => retick((n) => n + 1), 30000)
+    return () => clearInterval(t)
+  }, [])
 
   const submit = async () => {
     if (!modal) return
@@ -46,6 +67,12 @@ export function Launcher({ onImport }: { onImport: () => void }) {
   const remove = async (b: BoardMeta) => {
     if (!confirm(`Delete "${b.title}" and its ${b.node_count} nodes? This cannot be undone.`)) return
     try { await api.deleteBoard(b.id); void refresh() } catch (e: any) { say(e.message, true) }
+  }
+
+  const spotlight = (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`)
+    e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`)
   }
 
   return (
@@ -76,14 +103,23 @@ export function Launcher({ onImport }: { onImport: () => void }) {
           </div>
         ) : (
           <div className="board-grid">
-            {boards.map((b) => (
-              <button key={b.id} className="board-card" onClick={() => void open(b.id)}>
-                <h3>{b.title}</h3>
-                <p>{b.description || <span style={{ color: 'var(--mb-text-faint)' }}>No description</span>}</p>
-                <footer>
-                  <span>{fmt(b.created_at)}</span>
-                  <span>{b.node_count} {b.node_count === 1 ? 'node' : 'nodes'}</span>
-                </footer>
+            {boards.map((b, i) => (
+              <button key={b.id} className="board-card" style={{ ['--i' as string]: i }}
+                onMouseMove={spotlight} onClick={() => void open(b.id)}>
+                <span className="card-glow" aria-hidden="true" />
+                <span className="card-canvas">
+                  {b.preview?.nodes?.length
+                    ? <GraphMini nodes={b.preview.nodes} edges={b.preview.edges} />
+                    : <span className="card-canvas-empty">empty board</span>}
+                </span>
+                <span className="card-body">
+                  <h3>{b.title}</h3>
+                  <p>{b.description || <span className="faint">No description</span>}</p>
+                </span>
+                <span className="card-foot">
+                  <Composition counts={b.counts_by_type ?? {}} />
+                  <span className="when">{ago(b.updated_at)}</span>
+                </span>
                 <span className="card-tools" onClick={(e) => e.stopPropagation()}>
                   <a className="icon-btn" href={api.exportUrl(b.id)} title="Export"
                     onClick={(e) => e.stopPropagation()}>
