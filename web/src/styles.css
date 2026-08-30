@@ -798,3 +798,47 @@ a.btn { text-decoration: none; }
 }
 .align-guide.v { width: 1px; }
 .align-guide.h { height: 1px; }
+
+
+/* ------------------------------------------------------------- shortcuts -- */
+/* Not a menu - it only says what the canvas can already do. Folds to a chip
+   and remembers that you folded it. */
+/* The panel does not take the pointer: it sits over a corner of the canvas,
+   and a card you drag under it must still be draggable. Only its own button
+   is clickable. */
+.keys {
+  position: absolute; left: 16px; bottom: 16px; z-index: 6; width: 236px;
+  padding: 8px 10px 10px; pointer-events: none; user-select: none;
+  background: color-mix(in srgb, var(--mb-surface) 88%, transparent);
+  border: 1px solid var(--mb-border); border-radius: var(--mb-radius);
+  backdrop-filter: blur(10px); box-shadow: var(--mb-shadow);
+  font-size: 11px; line-height: 1.5; color: var(--mb-text-faint);
+  animation: pop 140ms var(--mb-ease);
+}
+.keys-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 7px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em;
+  color: var(--mb-text-dim); text-transform: uppercase;
+}
+.keys-head button { display: flex; padding: 3px; border-radius: 5px;
+  color: var(--mb-text-faint); pointer-events: auto; }
+.keys-head button:hover { background: var(--mb-surface-3); color: var(--mb-text); }
+.keys dl { margin: 0; display: grid; gap: 4px; }
+.keys .keys-row { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; }
+.keys dt { display: flex; gap: 3px; align-items: center; }
+.keys dd { margin: 0; }
+.keys kbd {
+  font: inherit; font-size: 10.5px; padding: 1px 5px; border-radius: 5px;
+  background: var(--mb-surface-3); border: 1px solid var(--mb-border);
+  color: var(--mb-text-dim); white-space: nowrap;
+}
+.keys-chip {
+  position: absolute; left: 16px; bottom: 16px; z-index: 6;
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px;
+  border-radius: 999px; font-size: 11.5px; color: var(--mb-text-faint);
+  background: color-mix(in srgb, var(--mb-surface) 88%, transparent);
+  border: 1px solid var(--mb-border); backdrop-filter: blur(10px);
+  transition: color 140ms var(--mb-ease), border-color 140ms var(--mb-ease);
+}
+.keys-chip:hover { color: var(--mb-text); border-color: var(--mb-border-strong); }
+.stage.exporting .keys, .stage.exporting .keys-chip { display: none; }

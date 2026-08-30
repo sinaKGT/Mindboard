@@ -8,6 +8,8 @@ the bin while a node still shows it. These are the tests that keep that true.
 import hashlib
 import zipfile
 
+import pytest
+
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -193,3 +195,36 @@ def test_many_requests_at_once_do_not_trip_over_one_connection(dd):
     with ThreadPoolExecutor(max_workers=12) as pool:
         codes = list(pool.map(hit, range(120)))
     assert set(codes) <= {200, 206}, f"unexpected statuses: {sorted(set(codes))}"
+
+
+def test_a_browser_walking_away_is_not_an_error(monkeypatch):
+    """WinError 10054 filled Sina's console whenever a page navigated away.
+
+    The proactor transport raises it from inside `_call_connection_lost`, where
+    no caller can catch it. `quiet_disconnects` wraps exactly that method, so
+    the check is that a reset is swallowed and anything else still gets out.
+    """
+    import sys as _sys
+
+    from mindboard import runtime
+
+    class FakeTransport:
+        def _call_connection_lost(self, exc):
+            raise exc
+
+    fake = type(_sys)("asyncio.proactor_events")
+    fake._ProactorBasePipeTransport = FakeTransport
+    monkeypatch.setitem(_sys.modules, "asyncio.proactor_events", fake)
+    monkeypatch.setattr(runtime.sys, "platform", "win32")
+
+    runtime.quiet_disconnects()
+    t = FakeTransport()
+    t._call_connection_lost(ConnectionResetError(10054, "forcibly closed"))  # silent
+    t._call_connection_lost(ConnectionAbortedError())                       # silent
+    with pytest.raises(ValueError):
+        t._call_connection_lost(ValueError("a real problem"))
+
+    # applying it twice must not stack wrappers
+    before = FakeTransport._call_connection_lost
+    runtime.quiet_disconnects()
+    assert FakeTransport._call_connection_lost is before

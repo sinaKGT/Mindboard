@@ -1091,3 +1091,45 @@ A measurement worth keeping for future tests: xyflow spends the first ~10px of
 pointer travel starting the drag, so a Playwright drag lands ten pixels short of
 where the arithmetic says. That is the drag threshold doing its job, not a bug —
 but it invalidated three test runs before it was spotted.
+
+---
+
+## 20. Two small things (2026-08-30)
+
+### The console stopped shouting
+
+Working on a board filled the launcher window with tracebacks:
+
+```
+Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+ConnectionResetError: [WinError 10054] An existing connection was forcibly
+closed by the remote host
+```
+
+Nothing was wrong. A page that navigates, a video that seeks, a tab that
+closes — each ends a request the server was still writing to, and Windows
+reports that as 10054. asyncio's proactor transport raises it from inside
+`_call_connection_lost`, which no caller can wrap, so it surfaces as an
+unhandled-callback traceback. `runtime.quiet_disconnects()` wraps exactly that
+method, on Windows only, swallowing `ConnectionResetError`,
+`ConnectionAbortedError` and `BrokenPipeError` and letting everything else
+through. It is idempotent and both `serve` and `serve_background` call it.
+
+Honest limit: this cannot be reproduced on Linux, so the test exercises the
+wrapper against a fake transport — a reset is swallowed, a `ValueError` still
+escapes, and applying it twice does not stack wrappers.
+
+### The keys are on screen
+
+A `Shortcuts` panel sits in the bottom-left of every board: ten rows, key pills
+and plain descriptions, folded away with a ✕ into a small **Keys** chip that
+remembers its state in `localStorage`. It is hidden from image exports along
+with the rest of the chrome.
+
+It is not a menu — it acts on nothing, it only says what the canvas already
+does — which keeps the original "no extra menus" rule intact.
+
+One trap worth recording: the first version took the pointer. A 236×278 panel
+with a background sitting over a corner of the canvas meant a card underneath it
+could not be dragged, which a drag-into-group test caught immediately.
+`pointer-events: none` on the panel, `auto` on its close button.

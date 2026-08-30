@@ -16,6 +16,7 @@ import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
 import { CLICK_SLOP, nodeTypes } from './nodes'
 import { ancestorAtLevel, currentParent, useStore } from './store'
+import { Shortcuts } from './Shortcuts'
 import { ThemeSheet } from './ThemeSheet'
 import type { MEdge, MNode } from './types'
 import { useUI } from './ui'
@@ -854,6 +855,8 @@ function CanvasInner() {
             }} />
         )}
       </ReactFlow>
+
+      <Shortcuts />
 
       <div className="breadcrumb">
         <button onClick={() => useStore.getState().close()} title="All boards">

@@ -91,6 +91,37 @@ def open_folder(path: Path) -> bool:
         return False
 
 
+def quiet_disconnects() -> None:
+    """Stop Windows shouting every time a browser walks away mid-request.
+
+    A page that navigates, a video that seeks, a tab that closes - each ends a
+    request the server was still writing to, and Windows reports that as
+    WinError 10054. asyncio's proactor transport raises it from inside
+    `_call_connection_lost`, where nobody can catch it, so it lands in the
+    console as an unhandled-callback traceback. Nothing is wrong and nothing is
+    lost: the socket was already closing. This swallows exactly that, on
+    Windows, and leaves every other error alone.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+    except Exception:
+        return
+    original = _ProactorBasePipeTransport._call_connection_lost
+    if getattr(original, "_mindboard_quiet", False):
+        return
+
+    def quiet(self, exc):
+        try:
+            original(self, exc)
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
+
+    quiet._mindboard_quiet = True  # type: ignore[attr-defined]
+    _ProactorBasePipeTransport._call_connection_lost = quiet  # type: ignore[method-assign]
+
+
 def serve(dd: DataDir, token: str, port: int, dev: bool = False,
           host: str = "127.0.0.1") -> None:
     """Blocks until the server stops. Ctrl+C returns cleanly."""
@@ -98,6 +129,7 @@ def serve(dd: DataDir, token: str, port: int, dev: bool = False,
 
     from .app import create_app
 
+    quiet_disconnects()
     uvicorn.run(create_app(dd, token, dev=dev), host=host, port=port, log_level="warning")
 
 
@@ -157,6 +189,7 @@ def serve_background(dd: DataDir, token: str, port: int, dev: bool = False):
 
     from .app import create_app
 
+    quiet_disconnects()
     config = uvicorn.Config(create_app(dd, token, dev=dev), host="127.0.0.1",
                             port=port, log_level="warning")
     server = uvicorn.Server(config)

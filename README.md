@@ -75,6 +75,9 @@ option has a command behind it — see **Commands** below.
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` |
 | Everything else | `Ctrl+K` |
 
+The keys are listed in the bottom-left corner of every board. Fold them away
+with the **✕** and they stay folded until you ask for them again.
+
 ## Where your things are kept
 
 Everything you put on a board — a video you upload, a picture you drag in, the
