@@ -13,6 +13,35 @@ const NUMBER = /^(\s*)(\d+)[.)]\s+(.*)$/
 
 export const URL_ONLY = /^https?:\/\/\S+$/i
 
+const YOUTUBE = /(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/
+const VIMEO = /vimeo\.com\/(?:video\/)?(\d+)/
+
+/** The same detection the backend does, mirrored here so a video link still
+ *  gets its player even if the server could not tell us about it. */
+export function videoEmbed(url: string):
+  { provider: string; video_id: string; embed: string } | null {
+  const y = url.match(YOUTUBE)
+  if (y) {
+    return { provider: 'youtube', video_id: y[1],
+      embed: `https://www.youtube-nocookie.com/embed/${y[1]}?autoplay=1&rel=0` }
+  }
+  const v = url.match(VIMEO)
+  if (v) {
+    return { provider: 'vimeo', video_id: v[1],
+      embed: `https://player.vimeo.com/video/${v[1]}?autoplay=1` }
+  }
+  return null
+}
+
+/** Never show a raw address as a node's name. */
+export function niceTitle(given: string | undefined, url: string, host: string): string {
+  const clean = (given || '').trim()
+  if (clean && !URL_ONLY.test(clean)) return clean
+  const video = videoEmbed(url)
+  if (video) return video.provider === 'youtube' ? 'YouTube video' : 'Vimeo video'
+  return host || url
+}
+
 export function lineKind(line: string): ListKind {
   if (BULLET.test(line)) return 'bullet'
   if (NUMBER.test(line)) return 'number'

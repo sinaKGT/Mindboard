@@ -472,6 +472,17 @@ Nodes auto-size to content until you resize one manually, after which they keep
 your size — the default 380px readability cap is lifted the moment you set a
 width yourself, or the card refuses to fill the frame you dragged.
 
+**Conversion beats auto-save.** A node being turned into a link sets a flag that
+makes the debounced auto-save a no-op for the rest of that edit. Without it the
+1.5s idle save fired *after* the conversion landed, saw a node that was now a
+`link`, skipped the "is this a URL?" branch, and wrote the raw address back over
+the node as its title and body — a link node displaying its own URL twice.
+
+**The frontend detects video links too.** The same YouTube/Vimeo matching runs
+client-side as a fallback, so a video still gets its player even when the server
+tells us nothing about it — an older backend, a blocked page, a failed fetch.
+The stored preview still needs the server; the player does not.
+
 **A pasted link becomes the link.** Pasting a bare URL onto the canvas makes a
 link node; pasting one into an empty node, or leaving one as a node's whole
 body, converts that node in place. Sina pasted a YouTube address into a text

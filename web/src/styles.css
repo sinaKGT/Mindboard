@@ -347,10 +347,10 @@ a.btn { text-decoration: none; }
 .mb-node.ghost .body { padding: 7px 10px; }
 
 .node-tools {
-  position: absolute; bottom: calc(100% + 6px); left: 0; display: flex; flex-wrap: wrap;
-  gap: 1px; padding: 3px; max-width: 300px;
+  position: absolute; bottom: calc(100% + 8px); left: 0; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 3px; padding: 6px; max-width: 352px;
   background: var(--mb-surface-2); border: 1px solid var(--mb-border);
-  border-radius: var(--mb-radius-sm); box-shadow: var(--mb-shadow);
+  border-radius: 11px; box-shadow: var(--mb-shadow-lg);
   opacity: 0; pointer-events: none; transition: opacity var(--mb-dur) var(--mb-ease);
   z-index: 4;
 }
@@ -363,10 +363,13 @@ a.btn { text-decoration: none; }
    before you can reach it. While hovered, the node's hit area reaches up to
    cover the toolbar; when it is not hovered, nothing is there to block. */
 .react-flow__node:hover::before {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 48px;
+  content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 56px;
 }
-.node-tools .swatch { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #0004; }
-.node-tools .sep { width: 1px; margin: 3px 3px; background: var(--mb-border); }
+/* The node toolbar is the app's only dense control cluster - it needs real
+   targets, not 16px dots. */
+.node-tools .icon-btn { width: 30px; height: 30px; border-radius: 8px; }
+.node-tools .swatch { width: 20px; height: 20px; border-radius: 50%; border: 1px solid #0005; }
+.node-tools .sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--mb-border); }
 
 /* ----------------------------------------------------------------- edges -- */
 .mb-edge-path { fill: none; stroke: var(--mb-edge); stroke-width: 1.6;
@@ -597,23 +600,23 @@ a.btn { text-decoration: none; }
 /* text size control */
 .size-group { position: relative; display: inline-flex; align-items: center; gap: 1px; }
 .size-group .size-value {
-  min-width: 22px; height: 22px; padding: 0 4px; border-radius: 5px;
-  text-align: center; font-size: 11px; color: var(--mb-text-dim);
+  min-width: 28px; height: 26px; padding: 0 6px; border-radius: 7px;
+  text-align: center; font-size: 12.5px; color: var(--mb-text-dim);
   font-variant-numeric: tabular-nums;
   transition: background 140ms var(--mb-ease), color 140ms var(--mb-ease);
 }
 .size-group .size-value:hover { background: var(--mb-surface-3); color: var(--mb-text); }
 .size-menu {
-  position: absolute; top: calc(100% + 5px); left: 50%; transform: translateX(-50%);
-  z-index: 6; display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
-  padding: 4px; width: 132px; max-height: 216px; overflow: auto;
+  position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  z-index: 6; display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px;
+  padding: 6px; width: 156px; max-height: 244px; overflow: auto;
   background: var(--mb-surface-2); border: 1px solid var(--mb-border-strong);
   border-radius: var(--mb-radius-sm); box-shadow: var(--mb-shadow-lg);
   animation: pop 130ms var(--mb-ease);
 }
 .size-menu button {
   display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
-  padding: 4px 7px; border-radius: 5px; color: var(--mb-text-dim); line-height: 1.1;
+  padding: 6px 9px; border-radius: 7px; color: var(--mb-text-dim); line-height: 1.15;
 }
 .size-menu button:hover { background: var(--mb-surface-3); color: var(--mb-text); }
 .size-menu button.on { background: var(--mb-accent-soft); color: var(--mb-text); }
@@ -621,8 +624,8 @@ a.btn { text-decoration: none; }
 .size-menu .n { font-size: 10.5px; font-variant-numeric: tabular-nums;
   color: var(--mb-text-faint); }
 .size-a { font-weight: 650; line-height: 1; }
-.size-a.small { font-size: 10px; }
-.size-a.big { font-size: 15px; }
+.size-a.small { font-size: 11.5px; }
+.size-a.big { font-size: 17px; }
 
 /* ------------------------------------------------------------ edge labels -- */
 .kind-glyph { display: block; flex: none; }
@@ -687,13 +690,13 @@ a.btn { text-decoration: none; }
 
 .tone-group { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px; }
 .tone-chip {
-  width: 17px; height: 17px; border-radius: 5px; border: 1px solid var(--mb-border-strong);
+  width: 22px; height: 22px; border-radius: 7px; border: 1px solid var(--mb-border-strong);
   transition: transform 180ms var(--mb-spring), border-color 160ms var(--mb-ease);
 }
 .tone-chip:hover { transform: scale(1.12); }
-.tone-chip.on { border-color: var(--mb-accent); }
+.tone-chip.on { border-color: var(--mb-accent); box-shadow: 0 0 0 1px var(--mb-accent); }
 .tone-chip.accent {
-  background: linear-gradient(180deg, var(--node-color) 0 3px, var(--mb-surface) 3px);
+  background: linear-gradient(180deg, var(--node-color) 0 4px, var(--mb-surface) 4px);
 }
 .tone-chip.tinted {
   background: color-mix(in srgb, var(--node-color) 22%, var(--mb-surface));

@@ -92,18 +92,26 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
   const area = useAutoHeight(text, editing)
   const titleRef = useRef<HTMLInputElement>(null)
   const idle = useRef<ReturnType<typeof setTimeout>>()
+  /** Once a node is on its way to becoming a link, this edit is over. Without
+   *  this the debounced auto-save fires after the conversion lands and writes
+   *  the raw address back over the link it just became. */
+  const converting = useRef(false)
 
   useEffect(() => {
     if (!editing) { setTitle(node.title); setText(bodyText(node)) }
   }, [node.title, node.content.text, node.content.summary, editing])
 
-  useEffect(() => { if (editing) titleRef.current?.focus() }, [editing])
+  useEffect(() => {
+    if (editing) { converting.current = false; titleRef.current?.focus() }
+  }, [editing])
 
   const commit = () => {
     clearTimeout(idle.current)
+    if (converting.current) return
     // A text node whose whole body is a link is a link - fetch it rather than
     // leaving the address sitting there as prose.
     if (node.type === 'text' && URL_ONLY.test(text.trim())) {
+      converting.current = true
       void linkifyNode(node.id, text.trim())
       return
     }
@@ -121,6 +129,7 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
     if (!URL_ONLY.test(dropped)) return
     e.preventDefault()
     clearTimeout(idle.current)
+    converting.current = true
     setUI('editingId', null)
     void linkifyNode(node.id, dropped)
   }
@@ -219,7 +228,7 @@ function Tools({ node }: { node: MNode }) {
       ))}
       <button className="icon-btn" title="Default colour"
         onClick={() => setStyle(node, { color: undefined })}>
-        <Icon name="x" size={12} />
+        <Icon name="x" size={14} />
       </button>
       <span className="sep" />
       <span className="size-group">
@@ -257,28 +266,28 @@ function Tools({ node }: { node: MNode }) {
       <span className="sep" />
       <button className={`icon-btn ${listKind === 'bullet' ? 'on' : ''}`} title="Bullet list"
         onClick={() => setBodyList(node, listKind === 'bullet' ? 'none' : 'bullet')}>
-        <Icon name="bullets" size={13} />
+        <Icon name="bullets" size={15} />
       </button>
       <button className={`icon-btn ${listKind === 'number' ? 'on' : ''}`} title="Numbered list"
         onClick={() => setBodyList(node, listKind === 'number' ? 'none' : 'number')}>
-        <Icon name="numbers" size={13} />
+        <Icon name="numbers" size={15} />
       </button>
       <span className="sep" />
       {node.type === 'meta' && (
         <>
           <button className="icon-btn" title="Open" onClick={() => enter(node.id)}>
-            <Icon name="enter" size={13} />
+            <Icon name="enter" size={15} />
           </button>
           <button className="icon-btn" title="Ungroup" onClick={() => unwrapMeta(node.id)}>
-            <Icon name="layers" size={13} />
+            <Icon name="layers" size={15} />
           </button>
         </>
       )}
       <button className="icon-btn" title="Add connected node" onClick={() => addConnected(node)}>
-        <Icon name="branch" size={13} />
+        <Icon name="branch" size={15} />
       </button>
       <button className="icon-btn danger" title="Delete" onClick={() => deleteNodes([node.id])}>
-        <Icon name="trash" size={13} />
+        <Icon name="trash" size={15} />
       </button>
     </div>
   )

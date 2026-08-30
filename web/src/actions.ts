@@ -1,7 +1,7 @@
 /** Everything the interface can do to a board, expressed as ops. */
 import { api } from './api'
 import { useStore } from './store'
-import { type ListKind, toList } from './text'
+import { type ListKind, niceTitle, toList, videoEmbed } from './text'
 import type { EdgeKind, MEdge, MNode, NodeType, Op } from './types'
 import { newEdge, newNode } from './types'
 import { useUI } from './ui'
@@ -93,12 +93,12 @@ export async function linkifyNode(nodeId: string, url: string): Promise<void> {
   try {
     const got = await api.fromUrl(boardId, url)
     if (got.kind === 'link') {
-      const video = got.video ?? null
+      const video = got.video ?? videoEmbed(url)
       S().run([{
         kind: 'node.update', id: nodeId,
         patch: {
           type: 'link' as NodeType,
-          title: got.title || got.host,
+          title: niceTitle(got.title, url, got.host),
           size: [video || got.thumb ? 360 : 300, null],
           content: {
             url, host: got.host, excerpt: got.excerpt,
@@ -276,9 +276,10 @@ export async function addUrl(url: string, pos: [number, number],
   try {
     const got = await api.fromUrl(boardId, url)
     if (got.kind === 'link') {
-      const video = got.video ?? null
+      const video = got.video ?? videoEmbed(url)
       const node = newNode({
-        pos: freeSpot(pos, parent), parent, type: 'link', title: got.title || got.host,
+        pos: freeSpot(pos, parent), parent, type: 'link',
+        title: niceTitle(got.title, url, got.host),
         size: [video || got.thumb ? 360 : 300, null],
         content: {
           url, host: got.host, excerpt: got.excerpt,
