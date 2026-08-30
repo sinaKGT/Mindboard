@@ -946,12 +946,12 @@ and the bin pushed to the far right, away from everything else).
 
 ### Dragging pulls the graph with it
 
-A mind map is held together by its relationships. Dragging a card now pulls what
-it is connected to along with it: 55% of the movement at one hop, 26% at two,
-10% at three, nothing beyond. The shape of an idea survives being moved instead
-of stretching out of recognition. Hold `Alt` to move one card alone. Followers
-land in the same `node.move` op as the card that pulled them, so one undo puts
-the whole arrangement back.
+A mind map is held together by its relationships. Dragging a card pulls what it
+is connected to along with it. The first version of this moved every neighbour
+by a fixed fraction of the same vector — 55% at one hop, 26% at two — and was
+replaced within the day; §18 has the reason and what took its place. Hold `Alt`
+to move one card alone. Whatever moves lands in the same `node.move` op as the
+card that pulled it, so one undo puts the whole arrangement back.
 
 
 ---
@@ -1010,3 +1010,44 @@ time. `onSelectionChange` wrote a fresh array on every call, which re-rendered
 the canvas, which called it again: React tore the board down with "maximum
 update depth exceeded" and left a blank screen. The handler is now a stable
 `useCallback` that writes only when the selection actually differs.
+
+
+---
+
+## 18. The links are springs (2026-08-30)
+
+Sina, on the first version of elastic drag: *"move them other one change very
+fake … they should be flowty and or organise in best position based on my
+movement"*. He was right. Every neighbour moved by the same fraction of the same
+vector, arriving in lockstep the instant the pointer moved — a rigid parallel
+shift wearing the costume of a graph. Nothing in it knew what it was attached
+to; a card holding four relationships travelled exactly as far as a card holding
+one.
+
+What replaced it is a small spring simulation, ~90 lines in `Canvas.tsx`,
+running on `requestAnimationFrame` for the length of a drag and for a moment
+after it.
+
+- **Every link is a spring whose rest length is its length when the drag
+  began.** Nothing pulls until something stretches, so picking a card up never
+  quietly rearranges a board you had already arranged.
+- **Cards have velocity and lose it to damping** (`SPRING = 0.2`,
+  `DAMP = 0.82`). That is where the flow comes from: neighbours trail behind the
+  pointer, overshoot very slightly, and settle — typically within a third of a
+  second, capped at `SETTLE_MS`.
+- **Short-range repulsion** shoves apart anything that would land on top of
+  something else.
+- **The dragged cards are pinned** to wherever xyflow has just put them, read
+  fresh at the top of every frame.
+
+The behaviour falls out of the model rather than being written into it: a card
+on one link swings around to keep its distance, a card held by four barely
+stirs, force travels along chains so a grandchild moves too, and a card with no
+relationships does not move at all. Measured on a two-node board: hub dragged
+364px, link length 500 before and 491 after — the spring returned to its rest
+length, and the child swung 130px around it rather than sliding along behind.
+
+The commit waits for the board to stop. `onNodeDragStop` no longer writes
+positions; it hands the simulation a callback that runs when the motion dies,
+which diffs every card against the store and writes one `node.move` op with
+everything that actually moved. One undo, one arrangement.

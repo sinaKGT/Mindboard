@@ -22,6 +22,9 @@ import { useUI } from './ui'
 
 interface Level { rfNodes: Node[]; rfEdges: Edge[] }
 
+/** A card while the board is in motion: where it is, and where it is going. */
+interface Body { x: number; y: number; vx: number; vy: number }
+
 function buildLevel(
   nodes: Record<string, MNode>, edges: Record<string, MEdge>,
   parent: string | null, jump: (id: string) => void,
@@ -198,60 +201,39 @@ function CanvasInner() {
     if (picked.length && ui.selectedEdges.length) ui.set('selectedEdges', [])
   }, [])
 
-  // --------------------------------------------------------- elastic drag --
-  // A mind map is held together by its relationships, not by a grid: pull one
-  // card and what it is connected to comes along, less and less with distance,
-  // so the shape of an idea survives being moved. Hold Alt to move one alone.
-  const HOP_PULL = [0.55, 0.26, 0.1]
-  const drag = useRef<{
-    from: Map<string, { x: number; y: number }>
-    pull: Map<string, number>
-    lead: string
+  // ----------------------------------------------------- a map that moves --
+  // Pulling one card used to shift its neighbours by a fixed fraction of the
+  // same vector: all of them travelling in lockstep, arriving the instant you
+  // moved. Sina called it fake and he was right - nothing in it knew what it
+  // was attached to.
+  //
+  // The links are springs now. Each remembers how long it was when the drag
+  // began and pulls only once stretched, cards carry momentum and lose it to
+  // damping, and anything that would end up on top of something else is shoved
+  // clear. A card on one link follows you; a card held by four barely stirs;
+  // everything keeps drifting for a moment after you let go, then settles.
+  // Hold Alt to move one card and nothing else.
+  const SPRING = 0.2       // how hard a stretched link pulls back
+  const DAMP = 0.82        // how quickly movement dies away
+  const SETTLE_MS = 1600   // how long the board may keep drifting after a drop
+  const STILL = 0.02       // below this a card has stopped
+
+  const sim = useRef<{
+    bodies: Map<string, Body>
+    size: Map<string, [number, number]>
+    springs: { a: string; b: string; rest: number }[]
+    pinned: Set<string>
+    raf: number
+    until: number
+    live: boolean
+    done: (() => void) | null
   } | null>(null)
 
-  const onNodeDragStart = useCallback((event: MouseEvent | TouchEvent, node: Node,
-                                       dragged: Node[]) => {
-    drag.current = null
-    if ((event as MouseEvent).altKey || node.id.startsWith('ghost:')) return
-    const moving = new Set(dragged.map((n) => n.id))
-    moving.add(node.id)
-
-    const near = new Map<string, string[]>()
-    const join = (a: string, b: string) => {
-      const list = near.get(a)
-      if (list) list.push(b)
-      else near.set(a, [b])
-    }
-    for (const e of level.rfEdges) {
-      if (e.source.startsWith('ghost:') || e.target.startsWith('ghost:')) continue
-      join(e.source, e.target)
-      join(e.target, e.source)
-    }
-
-    const pull = new Map<string, number>()
-    let ring = [...moving]
-    const seen = new Set(ring)
-    for (const strength of HOP_PULL) {
-      const next: string[] = []
-      for (const id of ring) {
-        for (const other of near.get(id) ?? []) {
-          if (seen.has(other)) continue
-          seen.add(other)
-          pull.set(other, strength)
-          next.push(other)
-        }
-      }
-      if (!next.length) break
-      ring = next
-    }
-    if (!pull.size) return
-
-    const from = new Map<string, { x: number; y: number }>()
-    for (const n of rfNodesRef.current) {
-      if (pull.has(n.id) || n.id === node.id) from.set(n.id, { ...n.position })
-    }
-    drag.current = { from, pull, lead: node.id }
-  }, [level.rfEdges])
+  const stopSim = useCallback(() => {
+    if (sim.current?.raf) cancelAnimationFrame(sim.current.raf)
+    sim.current = null
+  }, [])
+  useEffect(() => stopSim, [stopSim])
 
   /** The group a dragged card is currently over - drop it there and it goes in. */
   const groupUnder = useCallback((fx: number, fy: number, carried: Set<string>) => {
@@ -268,51 +250,138 @@ function CanvasInner() {
     return null
   }, [getInternalNode])
 
-  const onNodeDrag = useCallback((event: MouseEvent | TouchEvent, node: Node, dragged: Node[]) => {
+  const stepSim = useCallback(() => {
+    const s = sim.current
+    if (!s) return
+    const centre = (id: string, b: Body) => {
+      const [w, h] = s.size.get(id) ?? [300, 120]
+      return [b.x + w / 2, b.y + h / 2] as const
+    }
+
+    // whatever is under the cursor is wherever xyflow has just put it
+    for (const id of s.pinned) {
+      const n = rfNodesRef.current.find((x) => x.id === id)
+      const b = s.bodies.get(id)
+      if (n && b) { b.x = n.position.x; b.y = n.position.y; b.vx = 0; b.vy = 0 }
+    }
+
+    for (const sp of s.springs) {
+      const A = s.bodies.get(sp.a)
+      const B = s.bodies.get(sp.b)
+      if (!A || !B) continue
+      const [ax, ay] = centre(sp.a, A)
+      const [bx, by] = centre(sp.b, B)
+      const dx = bx - ax
+      const dy = by - ay
+      const len = Math.hypot(dx, dy) || 1
+      const f = SPRING * (len - sp.rest) / len
+      if (!s.pinned.has(sp.a)) { A.vx += f * dx; A.vy += f * dy }
+      if (!s.pinned.has(sp.b)) { B.vx -= f * dx; B.vy -= f * dy }
+    }
+
+    // nothing should finish its journey sitting on top of something else
+    const ids = [...s.bodies.keys()]
+    if (ids.length <= 140) {
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const A = s.bodies.get(ids[i]) as Body
+          const B = s.bodies.get(ids[j]) as Body
+          const [aw, ah] = s.size.get(ids[i]) ?? [300, 120]
+          const [bw, bh] = s.size.get(ids[j]) ?? [300, 120]
+          const [ax, ay] = centre(ids[i], A)
+          const [bx, by] = centre(ids[j], B)
+          const dx = bx - ax
+          const dy = by - ay
+          const len = Math.hypot(dx, dy) || 1
+          const clear = (Math.hypot(aw, ah) + Math.hypot(bw, bh)) * 0.39 + 18
+          if (len >= clear) continue
+          const f = ((clear - len) / len) * 0.14
+          if (!s.pinned.has(ids[i])) { A.vx -= f * dx; A.vy -= f * dy }
+          if (!s.pinned.has(ids[j])) { B.vx += f * dx; B.vy += f * dy }
+        }
+      }
+    }
+
+    let moving = 0
+    for (const [id, b] of s.bodies) {
+      if (s.pinned.has(id)) continue
+      b.vx *= DAMP
+      b.vy *= DAMP
+      if (Math.abs(b.vx) < STILL) b.vx = 0
+      if (Math.abs(b.vy) < STILL) b.vy = 0
+      b.x += b.vx
+      b.y += b.vy
+      moving += Math.abs(b.vx) + Math.abs(b.vy)
+    }
+
+    setRfNodes((ns) => ns.map((n) => {
+      const b = s.bodies.get(n.id)
+      if (!b || s.pinned.has(n.id)) return n
+      if (n.position.x === b.x && n.position.y === b.y) return n
+      return { ...n, position: { x: b.x, y: b.y } }
+    }))
+
+    if (s.live || (moving > 0.4 && Date.now() < s.until)) {
+      s.raf = requestAnimationFrame(stepSim)
+    } else {
+      const finish = s.done
+      s.done = null
+      finish?.()
+    }
+  }, [])
+
+  const onNodeDragStart = useCallback((event: MouseEvent | TouchEvent, node: Node,
+                                       dragged: Node[]) => {
+    stopSim()
+    if ((event as MouseEvent).altKey || node.id.startsWith('ghost:')) return
+    const pinned = new Set(dragged.map((n) => n.id))
+    pinned.add(node.id)
+
+    const bodies = new Map<string, Body>()
+    const size = new Map<string, [number, number]>()
+    for (const n of rfNodesRef.current) {
+      if (n.id.startsWith('ghost:')) continue
+      bodies.set(n.id, { x: n.position.x, y: n.position.y, vx: 0, vy: 0 })
+      const internal = getInternalNode(n.id)
+      size.set(n.id, [internal?.measured?.width ?? 300, internal?.measured?.height ?? 120])
+    }
+
+    const springs: { a: string; b: string; rest: number }[] = []
+    for (const e of level.rfEdges) {
+      const A = bodies.get(e.source)
+      const B = bodies.get(e.target)
+      if (!A || !B) continue
+      const [aw, ah] = size.get(e.source) as [number, number]
+      const [bw, bh] = size.get(e.target) as [number, number]
+      const dx = (B.x + bw / 2) - (A.x + aw / 2)
+      const dy = (B.y + bh / 2) - (A.y + ah / 2)
+      // the length it has now is the length it wants: moving one card should
+      // deform the map around it, never tidy the whole board behind your back
+      springs.push({ a: e.source, b: e.target, rest: Math.hypot(dx, dy) })
+    }
+    if (!springs.length) return
+
+    sim.current = { bodies, size, springs, pinned, raf: 0, until: 0, live: true, done: null }
+    stepSim()
+  }, [level.rfEdges, getInternalNode, stopSim, stepSim])
+
+  const onNodeDrag = useCallback((event: MouseEvent | TouchEvent, node: Node,
+                                  dragged: Node[]) => {
     const carried = new Set(dragged.map((n) => n.id))
     carried.add(node.id)
     const pt = 'touches' in event ? (event as TouchEvent).touches[0] : (event as MouseEvent)
-    if (pt) {
-      const at = screenToFlowPosition({ x: pt.clientX, y: pt.clientY })
-      const over = groupUnder(at.x, at.y, carried)
-      if (over !== useUI.getState().dropTarget) setUI('dropTarget', over)
-    }
-
-    const d = drag.current
-    if (!d || node.id !== d.lead) return
-    const start = d.from.get(node.id)
-    if (!start) return
-    const dx = node.position.x - start.x
-    const dy = node.position.y - start.y
-    setRfNodes((ns) => ns.map((n) => {
-      const k = d.pull.get(n.id)
-      const origin = d.from.get(n.id)
-      if (!k || !origin) return n
-      return { ...n, position: { x: origin.x + dx * k, y: origin.y + dy * k } }
-    }))
+    if (!pt) return
+    const at = screenToFlowPosition({ x: pt.clientX, y: pt.clientY })
+    const over = groupUnder(at.x, at.y, carried)
+    if (over !== useUI.getState().dropTarget) setUI('dropTarget', over)
   }, [groupUnder, screenToFlowPosition, setUI])
 
   const commitMoves = useCallback((event: MouseEvent | TouchEvent, node: Node,
                                    dragged: Node[]) => {
-    const seen = new Set<string>()
     const carried = dragged.filter((n) => !n.id.startsWith('ghost:')).map((n) => n.id)
     if (!carried.includes(node.id) && !node.id.startsWith('ghost:')) carried.push(node.id)
-    const moves = carried.map((id) => {
-      const n = rfNodesRef.current.find((x) => x.id === id)
-      return { id, x: Math.round(n?.position.x ?? 0), y: Math.round(n?.position.y ?? 0) }
-    })
-    moves.forEach((m) => seen.add(m.id))
-    const d = drag.current
-    if (d) {
-      // the followers land in the same op, so one undo puts everything back
-      for (const n of rfNodesRef.current) {
-        if (!d.pull.has(n.id) || seen.has(n.id)) continue
-        moves.push({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) })
-      }
-    }
-    drag.current = null
 
-    // Decided here rather than from the last drag event: a quick flick can end
+    // Read here rather than from the last drag event: a quick flick can end
     // before one more onNodeDrag fires, and dropping into a group has to depend
     // on where the card actually landed.
     const pt = 'changedTouches' in event
@@ -325,8 +394,30 @@ function CanvasInner() {
     const where = pt ? screenToFlowPosition({ x: pt.clientX, y: pt.clientY }) : fallback
     const into = where ? groupUnder(where.x, where.y, new Set(carried)) : null
     setUI('dropTarget', null)
-    if (moves.length) useStore.getState().run([{ kind: 'node.move', moves }])
-    if (into) moveInto(carried, into)
+
+    /** Written once the board has stopped moving - the card you dragged and
+     *  everything that drifted with it, in one op, so one undo puts the whole
+     *  arrangement back. */
+    const settled = () => {
+      const before = useStore.getState().nodes
+      const moves: { id: string; x: number; y: number }[] = []
+      for (const n of rfNodesRef.current) {
+        if (n.id.startsWith('ghost:')) continue
+        const was = before[n.id]
+        const x = Math.round(n.position.x)
+        const y = Math.round(n.position.y)
+        if (!was || (was.pos[0] === x && was.pos[1] === y)) continue
+        moves.push({ id: n.id, x, y })
+      }
+      if (moves.length) useStore.getState().run([{ kind: 'node.move', moves }])
+      if (into) moveInto(carried, into)
+    }
+
+    const s = sim.current
+    if (!s) { settled(); return }
+    s.live = false
+    s.until = Date.now() + SETTLE_MS
+    s.done = () => { sim.current = null; settled() }
   }, [setUI, groupUnder, screenToFlowPosition, getInternalNode])
 
   const centre = useCallback((): [number, number] => {

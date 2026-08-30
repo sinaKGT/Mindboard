@@ -56,7 +56,7 @@ option has a command behind it — see **Commands** below.
 | Connect **and** create | while connecting, click empty canvas instead |
 | Name a relationship | double-click the edge |
 | Remove a relationship | click it, then the **✕** on its label — or `Delete` |
-| Move a node with what it is connected to | just drag it — connected nodes follow, less the further away they are |
+| Move a node with what it is connected to | just drag it — the links behave like springs, so what it is joined to swings along and settles |
 | Move one node on its own | hold `Alt` while dragging |
 | Copy / cut / paste nodes | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` — relationships and group contents come too, across boards as well |
 | Duplicate a node | `Ctrl+D`, or the ⧉ button in its toolbar |
