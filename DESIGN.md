@@ -469,7 +469,17 @@ area extends upward to cover the gap — otherwise the row vanishes as you reach
 for it.
 
 Nodes auto-size to content until you resize one manually, after which they keep
-your size.
+your size — the default 380px readability cap is lifted the moment you set a
+width yourself, or the card refuses to fill the frame you dragged.
+
+**Double-click anywhere on a node writes on it**, handled once by the canvas so
+it works over a picture as readily as over its caption. Only a `<video>` keeps
+its own double-click, for the player. Dropping a single file also opens its
+caption straight away — a picture usually arrives with something to say about
+it.
+
+Text size has three ways in: `A` / `A` step it, and clicking the number opens a
+menu of sizes, each previewed at its own size.
 
 ---
 

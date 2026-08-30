@@ -128,10 +128,11 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
     )
   }
 
+  // double-click is handled once, by the canvas, so it works over the picture
+  // in an image node as readily as over the caption
   const text_ = bodyText(node)
   return (
-    <div className="body" style={{ textAlign: node.style.align }}
-      onDoubleClick={(e) => { e.stopPropagation(); setUI('editingId', node.id) }}>
+    <div className="body" style={{ textAlign: node.style.align }}>
       <div className="title" style={{ color: node.style.color, fontSize: fs + 1 }}>
         {node.title || <span className="placeholder">{placeholder}</span>}
       </div>
@@ -146,11 +147,15 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
 
 // ----------------------------------------------------------------- shell -- //
 
+const SIZES = [11, 12, 13, 14, 16, 18, 20, 24, 28, 34]
+
 function Tools({ node }: { node: MNode }) {
   const enter = useStore((s) => s.enter)
   const size = sizeOf(node)
+  const [sizeOpen, setSizeOpen] = useState(false)
   return (
-    <div className="node-tools nodrag nopan" onDoubleClick={(e) => e.stopPropagation()}>
+    <div className="node-tools nodrag nopan" onDoubleClick={(e) => e.stopPropagation()}
+      onMouseLeave={() => setSizeOpen(false)}>
       {NODE_COLOURS.slice(0, 6).map((c) => (
         <button key={c} className="icon-btn" title="Colour" onClick={() => setStyle(node, { color: c })}>
           <span className="swatch" style={{ background: c }} />
@@ -161,16 +166,28 @@ function Tools({ node }: { node: MNode }) {
         <Icon name="x" size={12} />
       </button>
       <span className="sep" />
-      <span className="size-group" title="Text size">
-        <button className="icon-btn" aria-label="Smaller text"
+      <span className="size-group">
+        <button className="icon-btn" title="Smaller text" aria-label="Smaller text"
           onClick={() => setStyle(node, { fontSize: Math.max(11, size - 1) })}>
           <span className="size-a small">A</span>
         </button>
-        <span className="size-value">{size}</span>
-        <button className="icon-btn" aria-label="Larger text"
+        <button className="size-value" title="Pick a text size"
+          onClick={() => setSizeOpen((v) => !v)}>{size}</button>
+        <button className="icon-btn" title="Larger text" aria-label="Larger text"
           onClick={() => setStyle(node, { fontSize: Math.min(34, size + 1) })}>
           <span className="size-a big">A</span>
         </button>
+        {sizeOpen && (
+          <div className="size-menu">
+            {SIZES.map((s) => (
+              <button key={s} className={s === size ? 'on' : ''}
+                onClick={() => { setStyle(node, { fontSize: s }); setSizeOpen(false) }}>
+                <span className="sample" style={{ fontSize: Math.min(s, 19) }}>A</span>
+                <span className="n">{s}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </span>
       <span className="sep" />
       {node.type === 'meta' && (
@@ -207,7 +224,13 @@ function Shell({ node, selected, resizable, children }: {
       )}
       <Tools node={node} />
       <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''} ${sparked ? 'spark' : ''}`}
-        style={{ width: node.size[0] ? '100%' : undefined, height: node.size[1] ? '100%' : undefined }}>
+        style={{
+          width: node.size[0] ? '100%' : undefined,
+          height: node.size[1] ? '100%' : undefined,
+          // the default max-width keeps unsized nodes readable; once you have
+          // resized one by hand, your size wins
+          maxWidth: node.size[0] ? 'none' : undefined,
+        }}>
         <div className="accent" style={{ background: accentOf(node) }} />
         {children}
       </div>
@@ -254,7 +277,8 @@ export function VideoNode({ data, selected }: NodeProps) {
       {sha && boardId ? (
         <>
           <video className="media nodrag nopan" controls preload="metadata"
-            poster={posterUrl} src={api.assetUrl(boardId, sha)} />
+            poster={posterUrl} src={api.assetUrl(boardId, sha)}
+            onDoubleClick={(e) => e.stopPropagation()} />
           {/* stands in for the video when the board is exported as an image */}
           {posterUrl ? <img className="media video-poster" src={posterUrl} alt="" /> : null}
         </>

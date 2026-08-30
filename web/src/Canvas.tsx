@@ -239,7 +239,8 @@ function CanvasInner() {
       if (files.length) {
         e.preventDefault()
         const [x, y] = centre()
-        files.forEach((f, i) => void addFile(f, [x + i * 30, y + i * 30], parent))
+        files.forEach((f, i) => void addFile(f, [x + i * 30, y + i * 30], parent,
+          files.length === 1))
         return
       }
       const text = e.clipboardData?.getData('text/plain')?.trim()
@@ -290,7 +291,8 @@ function CanvasInner() {
         e.preventDefault(); setDragOver(false)
         const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
         const files = Array.from(e.dataTransfer.files)
-        files.forEach((f, i) => void addFile(f, [p.x + i * 28, p.y + i * 28], parent))
+        files.forEach((f, i) => void addFile(f, [p.x + i * 28, p.y + i * 28], parent,
+          files.length === 1))
         const uri = e.dataTransfer.getData('text/uri-list')
         if (!files.length && uri) void addUrl(uri, [p.x, p.y], parent)
       }}>
@@ -347,7 +349,12 @@ function CanvasInner() {
           const p = screenToFlowPosition({ x: e.clientX, y: e.clientY })
           addConnected(src, [Math.round(p.x - 80), Math.round(p.y - 24)])
         }}
-        onNodeDoubleClick={(_, n) => { if (nodes[n.id]?.type === 'meta') enter(n.id) }}
+        onNodeDoubleClick={(_, n) => {
+          const node = nodes[n.id]
+          if (!node) return                       // ghost endpoints are not editable
+          if (node.type === 'meta') { enter(n.id); return }
+          setUI('editingId', n.id)
+        }}
         onEdgesDelete={(es) =>
           deleteEdges(es.map((e) => String(e.id).replace(/^e:/, '')).filter((id) => edges[id]))}
         connectionMode={ConnectionMode.Loose}

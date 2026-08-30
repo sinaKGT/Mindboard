@@ -54,7 +54,8 @@ option has a command behind it — see **Commands** below.
 | Connect | hover a node, click a **⊕** port, then click another node |
 | Connect **and** create | while connecting, click empty canvas instead |
 | Name a relationship | click the edge |
-| Change text size | hover a node, use **A / A** in its toolbar |
+| Write on any node | double-click it — including on a picture |
+| Change text size | **A / A** in the toolbar, or click the number for a menu |
 | Export a picture of the board | `Ctrl+E`, or the image button in the corner |
 | Group nodes into a meta-node | select them, `Ctrl+G` |
 | Ungroup | `Ctrl+Shift+G` |

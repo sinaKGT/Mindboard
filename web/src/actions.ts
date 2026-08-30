@@ -157,7 +157,8 @@ async function capturePoster(boardId: string, nodeId: string, file: File) {
   }
 }
 
-export async function addFile(file: File, pos: [number, number], parent: string | null) {
+export async function addFile(file: File, pos: [number, number], parent: string | null,
+                              focus = false) {
   const s = S()
   const boardId = s.boardId
   if (!boardId) return
@@ -177,6 +178,8 @@ export async function addFile(file: File, pos: [number, number], parent: string 
     })
     S().run([{ kind: 'node.create', node }])
     spark(node.id)
+    // dropping one file usually means you want to say something about it
+    if (focus) useUI.getState().set('editingId', node.id)
     if (type === 'video') void capturePoster(boardId, node.id, file)
   } catch (err: any) {
     s.say(`could not add ${file.name}: ${err.message}`, true)
