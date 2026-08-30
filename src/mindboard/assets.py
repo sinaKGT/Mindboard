@@ -14,6 +14,8 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
+from urllib.parse import urljoin
+
 from .db import now
 from .paths import DataDir
 
@@ -150,6 +152,60 @@ def thumbnail(dd: DataDir, conn: sqlite3.Connection, board_id: str, sha: str,
 # pasted URLs
 # --------------------------------------------------------------------------- #
 
+# Platforms whose player we can embed. The URL is enough to build both the
+# player address and, for YouTube, the thumbnail - no API key, no scraping.
+_YOUTUBE_RE = re.compile(
+    r"(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|embed/|shorts/|live/|v/)|youtu\.be/)"
+    r"([A-Za-z0-9_-]{6,})")
+_VIMEO_RE = re.compile(r"vimeo\.com/(?:video/)?(\d+)")
+
+MAX_THUMB_BYTES = 8 * 1024 * 1024
+
+
+def video_embed(url: str) -> Optional[dict[str, Any]]:
+    """Recognise a video the page can play in place."""
+    m = _YOUTUBE_RE.search(url)
+    if m:
+        vid = m.group(1)
+        return {
+            "provider": "youtube",
+            "video_id": vid,
+            # -nocookie so watching inside a board does not seed tracking cookies
+            "embed": f"https://www.youtube-nocookie.com/embed/{vid}?autoplay=1&rel=0",
+            "thumb_urls": [
+                f"https://i.ytimg.com/vi/{vid}/maxresdefault.jpg",
+                f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+            ],
+        }
+    m = _VIMEO_RE.search(url)
+    if m:
+        vid = m.group(1)
+        return {"provider": "vimeo", "video_id": vid,
+                "embed": f"https://player.vimeo.com/video/{vid}?autoplay=1",
+                "thumb_urls": []}
+    return None
+
+
+def fetch_bytes(url: str, limit: int = MAX_THUMB_BYTES) -> Optional[tuple[bytes, str]]:
+    """Grab a small resource - a preview image - or give up quietly."""
+    try:
+        headers = {"User-Agent": "Mindboard/0.1 (+local)"}
+        with httpx.Client(follow_redirects=True, timeout=15.0, headers=headers) as client:
+            with client.stream("GET", url) as resp:
+                if resp.status_code >= 400:
+                    return None
+                ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+                chunks, total = [], 0
+                for chunk in resp.iter_bytes():
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total > limit:
+                        return None
+                return b"".join(chunks), ctype
+    except Exception:
+        return None
+
+
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 _DESC_RE = re.compile(
     r'<meta[^>]+(?:name|property)=["\'](?:description|og:description)["\'][^>]+'
@@ -158,27 +214,53 @@ _OGIMG_RE = re.compile(
     r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](.*?)["\']', re.I | re.S)
 
 
+def _host_of(url: str) -> str:
+    return re.sub(r"^https?://", "", url).split("/")[0]
+
+
+PROVIDER_NAMES = {"youtube": "YouTube", "vimeo": "Vimeo"}
+
+
+def _link_from_url_alone(url: str, embed: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """A link we could not open is still a link worth keeping. A recognised
+    video needs nothing from the page anyway - the address carries both the
+    player and the thumbnail."""
+    host = _host_of(url)
+    title = f"{PROVIDER_NAMES.get(embed['provider'], embed['provider'])} video" if embed else host
+    return {"kind": "link", "url": url, "title": title, "excerpt": "", "image": None,
+            "host": host, "video": embed, "unreachable": True}
+
+
 def fetch_url(url: str) -> dict[str, Any]:
     """Fetch a pasted URL.
 
     Media -> bytes we can store locally. A page -> metadata for a link node.
     """
+    embed = video_embed(url)
     headers = {"User-Agent": "Mindboard/0.1 (+local)"}
-    with httpx.Client(follow_redirects=True, timeout=30.0, headers=headers) as client:
-        with client.stream("GET", url) as resp:
-            resp.raise_for_status()
-            ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
-            is_media = ctype.startswith(INLINE_MIME_PREFIXES) or ctype == "application/pdf"
-            chunks, total = [], 0
-            limit = MAX_FETCH_BYTES if is_media else 512 * 1024
-            for chunk in resp.iter_bytes():
-                chunks.append(chunk)
-                total += len(chunk)
-                if total > limit:
-                    if is_media:
-                        raise ValueError("file exceeds the 512 MB limit")
-                    break
-            data = b"".join(chunks)
+    is_media = False
+    try:
+        with httpx.Client(follow_redirects=True, timeout=30.0, headers=headers) as client:
+            with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+                is_media = ctype.startswith(INLINE_MIME_PREFIXES) or ctype == "application/pdf"
+                chunks, total = [], 0
+                limit = MAX_FETCH_BYTES if is_media else 512 * 1024
+                for chunk in resp.iter_bytes():
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total > limit:
+                        if is_media:
+                            raise ValueError("file exceeds the 512 MB limit")
+                        break
+                data = b"".join(chunks)
+    except ValueError:
+        raise
+    except Exception:
+        # The page would not open. Refusing the paste helps nobody - keep the
+        # link, and keep the player if we recognised one.
+        return _link_from_url_alone(url, embed)
 
     if is_media:
         name = url.rsplit("/", 1)[-1].split("?")[0]
@@ -188,16 +270,17 @@ def fetch_url(url: str) -> dict[str, Any]:
     title = _TITLE_RE.search(html)
     desc = _DESC_RE.search(html)
     img = _OGIMG_RE.search(html)
-    host = re.sub(r"^https?://", "", url).split("/")[0]
+    host = _host_of(url)
+    image = urljoin(url, img.group(1).strip()) if img else None
     return {
         "kind": "link",
         "url": url,
         "title": (title.group(1).strip()[:200] if title else host),
         "excerpt": (desc.group(1).strip()[:400] if desc else ""),
-        "image": img.group(1) if img else None,
+        "image": image,
         "host": host,
+        "video": embed,
     }
-
 
 # --------------------------------------------------------------------------- #
 # range streaming - without this, <video> seeking silently fails in Chrome

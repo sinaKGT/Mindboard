@@ -112,8 +112,10 @@ function CanvasInner() {
   const focusId = useUI((s) => s.focusId)
   const linking = useUI((s) => s.linking)
 
-  const { screenToFlowPosition, fitView, zoomIn, zoomOut, getNodes, getInternalNode } =
-    useReactFlow()
+  const {
+    screenToFlowPosition, flowToScreenPosition, fitView, zoomIn, zoomOut, getNodes,
+    getInternalNode, setCenter, getZoom,
+  } = useReactFlow()
   const { zoom } = useViewport()
   const parent = currentParent(path)
   const wrap = useRef<HTMLDivElement>(null)
@@ -193,6 +195,25 @@ function CanvasInner() {
 
   const stopLinking = useCallback(() => { setUI('linking', null); setCursor(null) }, [setUI])
 
+  /** Bring a just-created node into view, but only if it landed off-screen —
+   *  panning when you can already see it is just motion for its own sake. */
+  const reveal = useCallback((id: string | null) => {
+    if (!id) return
+    setTimeout(() => {
+      const box = wrap.current?.getBoundingClientRect()
+      const internal = getInternalNode(id)
+      if (!box || !internal) return
+      const w = internal.measured?.width ?? 320
+      const h = internal.measured?.height ?? 200
+      const { x, y } = internal.internals.positionAbsolute
+      const tl = flowToScreenPosition({ x, y })
+      const br = flowToScreenPosition({ x: x + w, y: y + h })
+      const visible = tl.x >= box.left && tl.y >= box.top
+        && br.x <= box.right && br.y <= box.bottom
+      if (!visible) setCenter(x + w / 2, y + h / 2, { duration: 320, zoom: getZoom() })
+    }, 120)
+  }, [flowToScreenPosition, getInternalNode, getZoom, setCenter])
+
   // ------------------------------------------------------------ keyboard --
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -240,14 +261,14 @@ function CanvasInner() {
         e.preventDefault()
         const [x, y] = centre()
         files.forEach((f, i) => void addFile(f, [x + i * 30, y + i * 30], parent,
-          files.length === 1))
+          files.length === 1).then((id) => i === 0 && reveal(id)))
         return
       }
       const text = e.clipboardData?.getData('text/plain')?.trim()
       if (!text) return
       e.preventDefault()
       const [x, y] = centre()
-      if (/^https?:\/\/\S+$/.test(text)) { void addUrl(text, [x, y], parent); return }
+      if (/^https?:\/\/\S+$/.test(text)) { void addUrl(text, [x, y], parent).then(reveal); return }
       const node = addTextNode([x, y], parent)
       const lines = text.split('\n')
       useStore.getState().run([{
@@ -258,7 +279,7 @@ function CanvasInner() {
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [centre, parent, setUI])
+  }, [centre, parent, setUI, reveal])
 
   const crumbs = path.map((id) => nodes[id]).filter(Boolean)
 

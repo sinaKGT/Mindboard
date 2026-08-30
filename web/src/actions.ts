@@ -17,8 +17,34 @@ export function spark(...ids: string[]) {
   }, 900)
 }
 
+/** Estimates for nodes that size themselves to their content. */
+const GUESS_W = 300
+const GUESS_H = 190
+
+/** Cascade a new node clear of anything already sitting there, so pasting twice
+ *  in a row does not bury one card under another. Only moves on a real overlap,
+ *  so a node you placed deliberately stays where you put it. */
+export function freeSpot(pos: [number, number], parent: string | null,
+                         size: [number, number] = [320, 200]): [number, number] {
+  const siblings = Object.values(S().nodes).filter((n) => (n.parent ?? null) === parent)
+  let [x, y] = pos
+  for (let i = 0; i < 30; i++) {
+    const overlaps = siblings.some((n) => {
+      const w = n.size[0] ?? GUESS_W
+      const h = n.size[1] ?? GUESS_H
+      return x < n.pos[0] + w && x + size[0] > n.pos[0]
+        && y < n.pos[1] + h && y + size[1] > n.pos[1]
+    })
+    if (!overlaps) break
+    x += 48
+    y += 36
+  }
+  return [Math.round(x), Math.round(y)]
+}
+
 export function addTextNode(pos: [number, number], parent: string | null): MNode {
-  const node = newNode({ pos, parent, type: 'text', title: '', content: { text: '' } })
+  const node = newNode({ pos: freeSpot(pos, parent), parent, type: 'text', title: '',
+                         content: { text: '' } })
   S().run([{ kind: 'node.create', node }])
   spark(node.id)
   useUI.getState().set('editingId', node.id)
@@ -158,10 +184,10 @@ async function capturePoster(boardId: string, nodeId: string, file: File) {
 }
 
 export async function addFile(file: File, pos: [number, number], parent: string | null,
-                              focus = false) {
+                              focus = false): Promise<string | null> {
   const s = S()
   const boardId = s.boardId
-  if (!boardId) return
+  if (!boardId) return null
   try {
     const isVideo = file.type.startsWith('video/')
     const probed = isVideo ? await probeVideo(file) : await probeImage(file)
@@ -169,7 +195,7 @@ export async function addFile(file: File, pos: [number, number], parent: string 
     const type: NodeType = info.mime.startsWith('video/') ? 'video'
       : info.mime.startsWith('image/') ? 'image' : 'file'
     const node = newNode({
-      pos, parent, type,
+      pos: freeSpot(pos, parent), parent, type,
       title: file.name.replace(/\.[^.]+$/, ''),
       size: [type === 'file' ? null : 320, null],
       content: type === 'file'
@@ -181,39 +207,58 @@ export async function addFile(file: File, pos: [number, number], parent: string 
     // dropping one file usually means you want to say something about it
     if (focus) useUI.getState().set('editingId', node.id)
     if (type === 'video') void capturePoster(boardId, node.id, file)
+    return node.id
   } catch (err: any) {
     s.say(`could not add ${file.name}: ${err.message}`, true)
+    return null
   }
 }
 
 /** A pasted URL: media is fetched and stored locally, a page becomes a link node. */
-export async function addUrl(url: string, pos: [number, number], parent: string | null) {
+export async function addUrl(url: string, pos: [number, number],
+                             parent: string | null): Promise<string | null> {
   const s = S()
   const boardId = s.boardId
-  if (!boardId) return
+  if (!boardId) return null
   try {
     const got = await api.fromUrl(boardId, url)
     if (got.kind === 'link') {
+      const video = got.video ?? null
       const node = newNode({
-        pos, parent, type: 'link', title: got.title || got.host,
-        size: [300, null],
-        content: { url, host: got.host, excerpt: got.excerpt },
+        pos: freeSpot(pos, parent), parent, type: 'link', title: got.title || got.host,
+        size: [video || got.thumb ? 360 : 300, null],
+        content: {
+          url, host: got.host, excerpt: got.excerpt,
+          // the preview picture is stored locally like any other media
+          ...(got.thumb ? { thumb: got.thumb } : {}),
+          ...(video
+            ? { provider: video.provider, video_id: video.video_id, embed: video.embed }
+            : {}),
+        },
       })
       S().run([{ kind: 'node.create', node }])
       spark(node.id)
-      return
+      if (got.unreachable) {
+        s.say(video
+          ? 'added the video — could not reach the page for its title'
+          : 'added the link — could not reach the page for a preview')
+      }
+      return node.id
     }
     const type: NodeType = got.mime.startsWith('video/') ? 'video'
       : got.mime.startsWith('image/') ? 'image' : 'file'
     const node = newNode({
-      pos, parent, type, title: (got.orig_name || url.split('/').pop() || 'media'),
+      pos: freeSpot(pos, parent), parent, type,
+      title: (got.orig_name || url.split('/').pop() || 'media'),
       size: [320, null],
       content: { sha256: got.sha256, alt: got.orig_name, source_url: url },
     })
     S().run([{ kind: 'node.create', node }])
     spark(node.id)
+    return node.id
   } catch (err: any) {
     s.say(`could not fetch that URL: ${err.message}`, true)
+    return null
   }
 }
 

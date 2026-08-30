@@ -297,11 +297,31 @@ a.btn { text-decoration: none; }
 .mb-node img.media { object-fit: contain; max-height: 420px; }
 .mb-node video.media { object-fit: contain; max-height: 420px; }
 
+/* a preview picture with a player laid over it */
+.media-frame { position: relative; display: block; overflow: hidden; }
+.media-frame .no-preview { height: 168px; background: #0a0e14; }
+.media-frame .embed {
+  position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000;
+}
+.media-frame .play {
+  position: absolute; inset: 0; margin: auto; width: 52px; height: 52px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; padding-left: 3px;
+  background: #0b0f16d0; border: 1px solid #ffffff2e; color: #fff;
+  backdrop-filter: blur(6px);
+  transition: transform 200ms var(--mb-spring), background 180ms var(--mb-ease),
+    color 180ms var(--mb-ease), border-color 180ms var(--mb-ease);
+}
+.media-frame .play:hover {
+  transform: scale(1.1); background: var(--mb-accent); color: #06121f; border-color: transparent;
+}
+
 /* Once you have given a node a height, the picture takes the space you made
    for it and the caption keeps its own. */
 .mb-node.sized-h { display: flex; flex-direction: column; }
 .mb-node.sized-h > * { flex: 0 0 auto; }
 .mb-node.sized-h .media { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; }
+.mb-node.sized-h .media-frame { flex: 1 1 auto; min-height: 0; display: flex; }
+.mb-node.sized-h .media-frame > .media { flex: 1 1 auto; min-height: 0; max-height: none; }
 .mb-node.sized-h .body { overflow: hidden; }
 .mb-node .caption { padding: 7px 11px 9px; }
 .mb-node .meta-line { color: var(--mb-text-faint); font-size: 11.5px; margin-top: 3px; }
@@ -630,7 +650,9 @@ a.btn { text-decoration: none; }
 .stage.exporting .sheet,
 .stage.exporting .hint,
 .stage.exporting .react-flow__minimap,
-.stage.exporting .mb-node video.media { display: none !important; }
+.stage.exporting .mb-node video.media,
+.stage.exporting .media-frame .embed,
+.stage.exporting .media-frame .play { display: none !important; }
 .stage.exporting .mb-node .video-poster { display: block !important; }
 .stage.exporting .mb-node .text.hint-on-hover { display: none !important; }
 .stage.exporting .mb-edge-label.bare { opacity: 1 !important; }

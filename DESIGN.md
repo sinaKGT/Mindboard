@@ -745,18 +745,29 @@ printed export. The vocabulary is closed on purpose: v2's analysis reasons over
 typed relations, and a drifting user-defined set would give the model nothing
 stable to reason with.
 
-**3. Media is always stored locally, and always plays on the canvas.** A video
-arrives either as a dropped/selected file or as a pasted URL; either way the
-backend stores the bytes in the board's asset directory and the node plays it
-inline. No streaming from the internet at view time, which keeps a board
-watchable offline and keeps every export complete.
+**3. Media is stored locally and plays on the canvas.** A video arrives as a
+dropped file or a pasted URL; a direct media URL is fetched and stored in the
+board's asset directory, and the node plays it inline. A platform link keeps its
+*preview* locally and plays through the provider's embed on demand (see the
+amendment below). Everything you can store is stored, so a board stays legible
+offline and every export is complete.
 
 - Pasted URL pointing at a media file (`.mp4`, `.webm`, `.gif`, images) →
   fetched server-side, hashed, stored, becomes a video/image node.
-- Pasted URL pointing at a page (YouTube, an article) → becomes a `link` node
-  with title, favicon and excerpt. It cannot be stored as bytes without a
-  platform downloader, which is out of scope; the node states plainly that it
-  is a reference, not a local copy.
+- Pasted URL pointing at a page → becomes a `link` node with title, excerpt and
+  **a preview picture stored locally** like any other media (the page's
+  `og:image`, or the platform's thumbnail). A board still shows what its links
+  are with the network off.
+- Pasted URL pointing at a **video platform** (YouTube, Vimeo) → the same, plus
+  a player. The thumbnail is stored locally and shown with a play button;
+  pressing it swaps in the provider's embed. **Amended 2026-08-30** at Sina's
+  request — the original decision was link-only, on the grounds that a video we
+  cannot store is not really on your board.
+  The trade-off, stated plainly: the picture and the title are yours offline,
+  but *playback* reaches the provider. Nothing is requested until you press
+  play, and YouTube is embedded through `youtube-nocookie.com`, so simply
+  opening a board with video links on it stays silent. Downloading the video
+  itself would need a platform downloader, which stays out of scope.
 - A poster frame is captured client-side at 0.5s and stored as its own asset, so
   video cards look right without shipping ffmpeg.
 

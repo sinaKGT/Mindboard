@@ -23,7 +23,9 @@ const TYPE_VAR: Record<string, string> = {
  *  The canvas uses the same number - keep them in step. */
 export const CLICK_SLOP = 6
 
-const accentOf = (n: MNode) => n.style.color || TYPE_VAR[n.type]
+const accentOf = (n: MNode) =>
+  // a link to a video is a video, and reads better in the video colour
+  n.style.color || (n.type === 'link' && n.content.embed ? TYPE_VAR.video : TYPE_VAR[n.type])
 const sizeOf = (n: MNode) => n.style.fontSize ?? 13
 
 /** Meta-nodes used to keep their description under `summary`; read both. */
@@ -298,8 +300,37 @@ export function VideoNode({ data, selected }: NodeProps) {
 
 export function LinkNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
+  const boardId = useStore((s) => s.boardId)
+  const [playing, setPlaying] = useState(false)
+  const thumb = node.content.thumb && boardId
+    ? api.assetUrl(boardId, node.content.thumb) : undefined
+  const embed = node.content.embed as string | undefined
+
   return (
     <Shell node={node} selected={selected} resizable>
+      {(thumb || embed) && (
+        <div className="media-frame">
+          {thumb
+            ? <img className="media" src={thumb} alt="" draggable={false} />
+            : <div className="media no-preview" />}
+          {/* nothing is requested from the internet until you press play */}
+          {embed && !playing && (
+            <button className="play nodrag nopan" title="Play here"
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setPlaying(true) }}>
+              <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                <path d="M8 5.2v13.6L19 12z" fill="currentColor" />
+              </svg>
+            </button>
+          )}
+          {embed && playing && (
+            <iframe className="embed nodrag nopan" src={embed} title={node.title || 'video'}
+              onDoubleClick={(e) => e.stopPropagation()}
+              allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+              allowFullScreen />
+          )}
+        </div>
+      )}
       <div className="link-head">
         <span className="fav" style={{ background: accentOf(node) }} />
         <span className="host">{node.content.host}</span>

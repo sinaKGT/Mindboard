@@ -57,6 +57,8 @@ export const api = {
     return req<{ sha256: string; mime: string; width: number | null; height: number | null }>(
       `/boards/${boardId}/assets`, { method: 'POST', body: fd })
   },
+  /** Media is stored locally; a page comes back with a stored preview and,
+   *  when it is a video we can play, its embed address. */
   fromUrl: (boardId: string, url: string) =>
     req<any>(`/boards/${boardId}/assets/from-url`, { method: 'POST', body: JSON.stringify({ url }) }),
   /** Accepts a single .mindboard bundle or a whole backup zip. */

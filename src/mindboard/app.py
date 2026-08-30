@@ -15,7 +15,8 @@ from starlette.background import BackgroundTask
 
 from . import __version__
 from .assets import (
-    fetch_url, link_asset, parse_range, resolve, store_bytes, stream_file, thumbnail,
+    fetch_bytes, fetch_url, link_asset, parse_range, resolve, store_bytes, stream_file,
+    thumbnail,
 )
 from .boards import board_meta, conn_for, create_board, delete_board, list_boards
 from .bundle import (
@@ -167,7 +168,27 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         except Exception as exc:
             raise HTTPException(400, f"could not fetch that URL: {exc}")
         if got["kind"] == "link":
-            return got
+            # Store the preview picture locally, like any other media. A board
+            # should still show what a link is when the network is not there.
+            conn = conn_for(dd, bid)
+            candidates = list((got.get("video") or {}).get("thumb_urls") or [])
+            if got.get("image"):
+                candidates.append(got["image"])
+            thumb = None
+            for candidate in candidates:
+                fetched = fetch_bytes(candidate)
+                if fetched is None:
+                    continue
+                payload, ctype = fetched
+                try:
+                    info = store_bytes(dd, conn, bid, payload, declared_mime=ctype,
+                                       orig_name="preview", source_url=candidate)
+                except Exception:
+                    continue
+                if info["mime"].startswith("image/") and info["bytes"] > 1024:
+                    thumb = info["sha256"]
+                    break
+            return {**got, "thumb": thumb}
         info = store_bytes(
             dd, conn_for(dd, bid), bid, got["data"],
             declared_mime=got["mime"], orig_name=got["orig_name"], source_url=url,
