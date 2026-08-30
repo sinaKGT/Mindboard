@@ -49,10 +49,10 @@ option has a command behind it — see **Commands** below.
 
 | | |
 |---|---|
-| New text node | double-click empty canvas |
+| New text node | press **a** — it lands where your pointer is — or double-click empty canvas |
 | New media node | drag a file in, or paste an image or URL |
 | Link or video from the web | paste any link — its cover is saved locally; click the cover to open it in your browser |
-| Connect | hover a node, click a **⊕** port, then click another node |
+| Connect | three ways: select a node and press **c**; the **link** button in its toolbar; or click a **⊕** port. Then click the other node |
 | Connect **and** create | while connecting, click empty canvas instead |
 | Name a relationship | double-click the edge |
 | Remove a relationship | click it, then the **✕** on its label — or `Delete` |
@@ -64,8 +64,11 @@ option has a command behind it — see **Commands** below.
 | Change text size | **A / A** in the toolbar, or click the number for a menu |
 | Bullet or numbered list | the list buttons in the toolbar — Enter continues the list as you type |
 | Recolour a node | pick a colour, then one of the three tones: bar, tinted, or solid |
+| The node toolbar | click a node to open it. Hovering shows only the ⊕ ports, so a toolbar never sits over the card you were aiming at |
 | Export a picture of the board | `Ctrl+E`, or the image button in the corner |
-| Group nodes into a meta-node | select them, `Ctrl+G` |
+| Group nodes | select two or more — a bar appears above them with **Group** — or `Ctrl+G` |
+| Put a node into an existing group | drag it onto the group; the group lights up as you cross it |
+| Take a node back out | open the group, then the **↑** button in the node's toolbar |
 | Ungroup | `Ctrl+Shift+G` |
 | Enter / leave a meta-node | double-click / `Esc` |
 | Tidy the current level | `Ctrl+L` |

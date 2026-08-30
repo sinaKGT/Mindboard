@@ -431,7 +431,7 @@ menu bar entirely (import, export, theme, search, jump-to-node, wrap selection).
 
 | Action | Gesture |
 |---|---|
-| New text node | Double-click empty canvas → node appears in edit mode, cursor blinking |
+| New text node | **`a`** — lands under the pointer, in edit mode. Double-clicking empty canvas does the same |
 | New media node | Drag a file onto the canvas, or paste an image / URL |
 | Connect | Hover a node and four **⊕ ports** appear. *Click* one, a line follows the cursor, click any node to finish. Dragging from the same port still works for anyone who prefers it |
 | Connect + create | Drag from a port — or, while linking, click **empty canvas** → creates a node and connects it. This is the fast idea-flow path — the single most important interaction in the app |
@@ -440,7 +440,10 @@ menu bar entirely (import, export, theme, search, jump-to-node, wrap selection).
 | Copy / cut / paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` — takes the cards, the relationships between them, and the contents of any group |
 | Duplicate | `Ctrl+D`, or the ⧉ button on a card |
 | Move one card alone | Hold `Alt` while dragging |
-| Group into meta-node | Select → `Ctrl+G` |
+| Group into meta-node | Select two or more → a bar appears over them with **Group** (`Ctrl+G` still works) |
+| Into an existing group | Drag the node onto the group — it lights up as you cross it |
+| Back out of a group | **↑** in the node's toolbar |
+| Connect | **`c`** from the selected node, the **link** button in its toolbar, or a ⊕ port. Then click the other node |
 | Enter / leave meta-node | Double-click / `Esc` |
 | Search & jump | `Ctrl+K`, type, `Enter` — canvas pans and highlights |
 | Multi-select | Drag a marquee, or `Shift`-click |
@@ -949,3 +952,61 @@ it is connected to along with it: 55% of the movement at one hop, 26% at two,
 of stretching out of recognition. Hold `Alt` to move one card alone. Followers
 land in the same `node.move` op as the card that pulled them, so one undo puts
 the whole arrangement back.
+
+
+---
+
+## 17. Third pass: the crash, and getting around the canvas (2026-08-30)
+
+### One SQLite connection per board, per thread
+
+`sqlite3.InterfaceError: bad parameter or other API misuse`, raised from
+`board_meta`'s `SELECT * FROM board WHERE id=?` while opening a board with media
+on it. Every DB endpoint in `app.py` is a plain `def`, which FastAPI runs on a
+pool of worker threads, and `conn_for` handed all of them the **same**
+`sqlite3.Connection` (`check_same_thread=False`). Two threads inside one
+connection is exactly what sqlite reports as misuse; a board with several
+videos fires enough parallel range requests to make it likely.
+
+`_conns` is now keyed by `(thread id, data dir + board)`, with a lock around
+creation so two threads never both run `migrate()`. WAL is what makes this
+cheap: readers never block, one writer at a time, `busy_timeout` covers the
+wait. `delete_board` closes every thread's connection to that board before
+removing the folder — Windows will not delete an open file.
+
+Honest note: this could not be reproduced on Linux, with either the test client
+or a live server under sixteen threads. The reasoning is from the code, and it
+is the only way that call can raise that error.
+
+### Getting around
+
+- **`a`** drops a card under the pointer. The canvas now always tracks the
+  pointer in flow coordinates, not only while a link is open.
+- **`c`** starts a connection from the selected card; so does a **link** button
+  in its toolbar. Ports remain, but they are no longer the only way in — which
+  is what made connecting feel fiddly.
+- **Ports are 20px and sit outside the card.** An invisible 38px hit ring around
+  each was tried first and reverted within the hour: it covered the top of every
+  card, so pressing on a title to drag it started a connection instead. Verified
+  by a Playwright drag that silently stopped moving the node.
+- **The toolbar belongs to the selected card, not a hovered one.** Three rows of
+  opaque panel opening on hover sat over whatever was above that card and ate
+  clicks meant for it. Hovering still shows the ports. With more than one card
+  selected every toolbar is hidden (`.stage.multi`) so the selection bar is the
+  only thing acting on them.
+- **A selection bar** appears over two or more selected cards: *n selected ·
+  Group · Duplicate · bin*. Grouping was already there under `Ctrl+G` and in the
+  palette, and was found by nobody.
+- **Drag a card onto a group and it goes in**, the group lighting up as you
+  cross it. The decision is made at drop time from the pointer's position, not
+  from the last drag event — a quick flick can end before one more `onNodeDrag`
+  fires. It is a `node.update` of `parent` and `pos`, so one undo takes it back
+  out; **↑** in the toolbar does the same deliberately.
+
+### A React trap worth remembering
+
+Adding a multi-selection bar meant `Canvas` *read* `ui.selected` for the first
+time. `onSelectionChange` wrote a fresh array on every call, which re-rendered
+the canvas, which called it again: React tore the board down with "maximum
+update depth exceeded" and left a blank screen. The handler is now a stable
+`useCallback` that writes only when the selection actually differs.

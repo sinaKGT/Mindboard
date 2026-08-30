@@ -4,6 +4,7 @@ so a board backs up, exports and deletes on its own."""
 import json
 import shutil
 import sqlite3
+import threading
 from typing import Any, Optional
 
 from . import SCHEMA_VERSION
@@ -12,25 +13,43 @@ from .ids import ulid
 from .models import DEFAULT_SETTINGS
 from .paths import DataDir
 
-_conns: dict[str, sqlite3.Connection] = {}
+# One connection per board *per thread*.
+#
+# A sqlite3.Connection is not safe to use from two threads at once: the second
+# caller walks into the middle of the first one's statement and sqlite reports
+# "bad parameter or other API misuse", which is what a board full of media does
+# the moment several range requests land together. WAL mode is what makes a
+# connection each cheap - readers never block, one writer at a time, and
+# busy_timeout covers the wait.
+_conns: dict[tuple[int, str], sqlite3.Connection] = {}
+_conns_lock = threading.Lock()
 
 
 def conn_for(dd: DataDir, board_id: str) -> sqlite3.Connection:
-    key = f"{dd.root}::{board_id}"
-    c = _conns.get(key)
+    key = (threading.get_ident(), f"{dd.root}::{board_id}")
+    with _conns_lock:
+        c = _conns.get(key)
     if c is None:
         c = connect(dd.db_path(board_id))
-        _conns[key] = c
+        with _conns_lock:
+            existing = _conns.get(key)
+            if existing is None:
+                _conns[key] = c
+            else:  # another call on this thread got there first
+                c.close()
+                c = existing
     return c
 
 
 def close_all() -> None:
-    for c in _conns.values():
+    with _conns_lock:
+        conns = list(_conns.values())
+        _conns.clear()
+    for c in conns:
         try:
             c.close()
         except Exception:
             pass
-    _conns.clear()
 
 
 def create_board(dd: DataDir, title: str = "Untitled board", description: str = "",
@@ -163,10 +182,17 @@ def list_boards(dd: DataDir) -> list[dict[str, Any]]:
 
 
 def delete_board(dd: DataDir, board_id: str) -> bool:
-    key = f"{dd.root}::{board_id}"
-    c = _conns.pop(key, None)
-    if c is not None:
-        c.close()
+    # every thread's connection to this board has to go before the folder can:
+    # Windows will not remove a file that is still open
+    suffix = f"{dd.root}::{board_id}"
+    with _conns_lock:
+        keys = [k for k in _conns if k[1] == suffix]
+        doomed = [_conns.pop(k) for k in keys]
+    for c in doomed:
+        try:
+            c.close()
+        except Exception:
+            pass
     d = dd.board_dir(board_id)
     if d.exists():
         shutil.rmtree(d)

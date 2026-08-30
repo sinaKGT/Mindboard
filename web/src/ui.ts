@@ -16,6 +16,8 @@ interface UI {
   focusId: string | null
   selected: string[]
   selectedEdges: string[]
+  /** The group a dragged node is hovering over, about to go inside. */
+  dropTarget: string | null
   sparkIds: string[]
   set<K extends keyof UI>(key: K, value: UI[K]): void
 }
@@ -31,6 +33,7 @@ export const useUI = create<UI>()((set) => ({
   focusId: null,
   selected: [],
   selectedEdges: [],
+  dropTarget: null,
   sparkIds: [],
   set: (key, value) => set({ [key]: value } as any),
 }))

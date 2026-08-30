@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   addConnected, addFile, addTextNode, addUrl, autoLayout, buildClip, clipText, connect,
-  deleteEdges, deleteNodes, duplicateNodes, getClip, pasteClip, setClip, unwrapMeta,
+  deleteEdges, deleteNodes, duplicateNodes, getClip, moveInto, pasteClip, setClip, unwrapMeta,
   wrapSelection,
 } from './actions'
 import { edgeTypes } from './edges'
@@ -112,6 +112,7 @@ function CanvasInner() {
   const themeOpen = useUI((s) => s.themeOpen)
   const focusId = useUI((s) => s.focusId)
   const linking = useUI((s) => s.linking)
+  const selectedIds = useUI((s) => s.selected)
 
   const {
     screenToFlowPosition, flowToScreenPosition, fitView, zoomIn, zoomOut, getNodes,
@@ -122,6 +123,7 @@ function CanvasInner() {
   const wrap = useRef<HTMLDivElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+  const pointer = useRef<{ x: number; y: number } | null>(null)
   const connectStart = useRef<{ nodeId: string; x: number; y: number } | null>(null)
 
   const jump = useCallback((id: string) => {
@@ -180,6 +182,22 @@ function CanvasInner() {
     setRfNodes((ns) => applyNodeChanges(changes, ns))
   }, [])
 
+  /** Stable, and writes only on a real change.
+   *
+   *  xyflow calls this from an effect. Something on this screen now *reads*
+   *  `selected` (the multi-selection toolbar), so writing a fresh array every
+   *  time re-rendered the canvas, which called this again - React tore the whole
+   *  board down with "maximum update depth exceeded". */
+  const onSelectionChange = useCallback(({ nodes: sel }: { nodes: Node[] }) => {
+    const picked = sel.filter((n) => !n.id.startsWith('ghost:')).map((n) => n.id)
+    const ui = useUI.getState()
+    const same = picked.length === ui.selected.length
+      && picked.every((id, i) => ui.selected[i] === id)
+    if (!same) ui.set('selected', picked)
+    // picking a card puts down whatever relationship was in hand
+    if (picked.length && ui.selectedEdges.length) ui.set('selectedEdges', [])
+  }, [])
+
   // --------------------------------------------------------- elastic drag --
   // A mind map is held together by its relationships, not by a grid: pull one
   // card and what it is connected to comes along, less and less with distance,
@@ -235,7 +253,31 @@ function CanvasInner() {
     drag.current = { from, pull, lead: node.id }
   }, [level.rfEdges])
 
-  const onNodeDrag = useCallback((_: unknown, node: Node) => {
+  /** The group a dragged card is currently over - drop it there and it goes in. */
+  const groupUnder = useCallback((fx: number, fy: number, carried: Set<string>) => {
+    for (const n of rfNodesRef.current) {
+      if (carried.has(n.id) || n.id.startsWith('ghost:')) continue
+      const mn = (n.data as { node?: MNode }).node
+      if (!mn || mn.type !== 'meta') continue
+      const internal = getInternalNode(n.id)
+      const w = internal?.measured?.width ?? 320
+      const h = internal?.measured?.height ?? 150
+      if (fx >= n.position.x && fx <= n.position.x + w
+        && fy >= n.position.y && fy <= n.position.y + h) return n.id
+    }
+    return null
+  }, [getInternalNode])
+
+  const onNodeDrag = useCallback((event: MouseEvent | TouchEvent, node: Node, dragged: Node[]) => {
+    const carried = new Set(dragged.map((n) => n.id))
+    carried.add(node.id)
+    const pt = 'touches' in event ? (event as TouchEvent).touches[0] : (event as MouseEvent)
+    if (pt) {
+      const at = screenToFlowPosition({ x: pt.clientX, y: pt.clientY })
+      const over = groupUnder(at.x, at.y, carried)
+      if (over !== useUI.getState().dropTarget) setUI('dropTarget', over)
+    }
+
     const d = drag.current
     if (!d || node.id !== d.lead) return
     const start = d.from.get(node.id)
@@ -248,13 +290,17 @@ function CanvasInner() {
       if (!k || !origin) return n
       return { ...n, position: { x: origin.x + dx * k, y: origin.y + dy * k } }
     }))
-  }, [])
+  }, [groupUnder, screenToFlowPosition, setUI])
 
-  const commitMoves = useCallback((_: unknown, __: Node, dragged: Node[]) => {
+  const commitMoves = useCallback((event: MouseEvent | TouchEvent, node: Node,
+                                   dragged: Node[]) => {
     const seen = new Set<string>()
-    const moves = dragged
-      .filter((n) => !n.id.startsWith('ghost:'))
-      .map((n) => ({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) }))
+    const carried = dragged.filter((n) => !n.id.startsWith('ghost:')).map((n) => n.id)
+    if (!carried.includes(node.id) && !node.id.startsWith('ghost:')) carried.push(node.id)
+    const moves = carried.map((id) => {
+      const n = rfNodesRef.current.find((x) => x.id === id)
+      return { id, x: Math.round(n?.position.x ?? 0), y: Math.round(n?.position.y ?? 0) }
+    })
     moves.forEach((m) => seen.add(m.id))
     const d = drag.current
     if (d) {
@@ -265,8 +311,23 @@ function CanvasInner() {
       }
     }
     drag.current = null
+
+    // Decided here rather than from the last drag event: a quick flick can end
+    // before one more onNodeDrag fires, and dropping into a group has to depend
+    // on where the card actually landed.
+    const pt = 'changedTouches' in event
+      ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent)
+    const held = rfNodesRef.current.find((x) => x.id === node.id)
+    const fallback = held
+      ? { x: held.position.x + (getInternalNode(node.id)?.measured?.width ?? 300) / 2,
+          y: held.position.y + 24 }
+      : null
+    const where = pt ? screenToFlowPosition({ x: pt.clientX, y: pt.clientY }) : fallback
+    const into = where ? groupUnder(where.x, where.y, new Set(carried)) : null
+    setUI('dropTarget', null)
     if (moves.length) useStore.getState().run([{ kind: 'node.move', moves }])
-  }, [])
+    if (into) moveInto(carried, into)
+  }, [setUI, groupUnder, screenToFlowPosition, getInternalNode])
 
   const centre = useCallback((): [number, number] => {
     const box = wrap.current?.getBoundingClientRect()
@@ -338,12 +399,24 @@ function CanvasInner() {
         return
       }
       if (e.key === 'Enter' && selected.length === 1) {
-        e.preventDefault(); setUI('editingId', selected[0])
+        e.preventDefault(); setUI('editingId', selected[0]); return
+      }
+      // a — a new card lands where you are looking, not in the middle of nowhere
+      if (!mod && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        const at = pointer.current
+        addTextNode(at ? [Math.round(at.x - 80), Math.round(at.y - 24)] : centre(), parent)
+        return
+      }
+      // c — start a connection from the selected card, then click the other one
+      if (!mod && e.key.toLowerCase() === 'c' && selected.length === 1) {
+        e.preventDefault(); setUI('linking', { sourceId: selected[0] })
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [nodes, parent, path, undo, redo, goTo, setUI, fitView, runExport, stopLinking, reveal])
+  }, [nodes, parent, path, undo, redo, goTo, setUI, fitView, runExport, stopLinking, reveal,
+      centre])
 
   // ---------------------------------------------------------- copy / cut --
   // The clipboard gets the words, so pasting into any other app reads sensibly;
@@ -412,6 +485,24 @@ function CanvasInner() {
 
   const crumbs = path.map((id) => nodes[id]).filter(Boolean)
 
+  /** With more than one card in hand, the things you can do to them together
+   *  should be in front of you - grouping especially, which nobody discovers
+   *  as a keyboard shortcut. */
+  const selectionBox = useMemo(() => {
+    if (selectedIds.length < 2) return null
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const id of selectedIds) {
+      const n = rfNodes.find((x) => x.id === id)
+      if (!n) continue
+      const internal = getInternalNode(id)
+      const w = internal?.measured?.width ?? 320
+      const h = internal?.measured?.height ?? 140
+      minX = Math.min(minX, n.position.x); minY = Math.min(minY, n.position.y)
+      maxX = Math.max(maxX, n.position.x + w); maxY = Math.max(maxY, n.position.y + h)
+    }
+    return Number.isFinite(minX) ? { x: (minX + maxX) / 2, y: minY } : null
+  }, [selectedIds, rfNodes, getInternalNode])
+
   // the line that follows the cursor while a click-started link is open
   const linkPath = useMemo(() => {
     if (!linking || !cursor) return null
@@ -424,10 +515,12 @@ function CanvasInner() {
   }, [linking, cursor, getInternalNode])
 
   return (
-    <div className={`stage ${linking ? 'linking' : ''}`} ref={wrap}
+    <div className={`stage ${linking ? 'linking' : ''}${selectedIds.length > 1 ? ' multi' : ''}`}
+      ref={wrap}
       onMouseMove={(e) => {
-        if (!useUI.getState().linking) return
-        setCursor(screenToFlowPosition({ x: e.clientX, y: e.clientY }))
+        const at = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+        pointer.current = at
+        if (useUI.getState().linking) setCursor(at)
       }}
       onDoubleClick={(e) => {
         const el = e.target as HTMLElement
@@ -455,12 +548,7 @@ function CanvasInner() {
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={commitMoves}
-        onSelectionChange={({ nodes: sel }) => {
-          const picked = sel.filter((n) => !n.id.startsWith('ghost:')).map((n) => n.id)
-          setUI('selected', picked)
-          // picking a card puts down whatever relationship was in hand
-          if (picked.length) setUI('selectedEdges', [])
-        }}
+        onSelectionChange={onSelectionChange}
         onConnect={(c) => {
           if (c.source && c.target) connect(c.source, c.target)
           stopLinking()
@@ -537,6 +625,25 @@ function CanvasInner() {
               <path d={`M${linkPath.x1} ${linkPath.y1} L${linkPath.x2} ${linkPath.y2}`} />
               <circle cx={linkPath.x2} cy={linkPath.y2} r={4.5} />
             </svg>
+          </ViewportPortal>
+        )}
+        {selectionBox && (
+          <ViewportPortal>
+            <div className="selection-bar nodrag nopan"
+              style={{ position: 'absolute', transform:
+                `translate(-50%,-100%) translate(${selectionBox.x}px, ${selectionBox.y - 14}px)` }}>
+              <span className="count">{selectedIds.length} selected</span>
+              <span className="sep" />
+              <button onClick={() => wrapSelection(selectedIds)}>
+                <Icon name="layers" size={14} /> Group
+              </button>
+              <button onClick={() => void duplicateNodes(selectedIds)}>
+                <Icon name="copy" size={14} /> Duplicate
+              </button>
+              <button className="danger" onClick={() => deleteNodes(selectedIds)}>
+                <Icon name="trash" size={14} />
+              </button>
+            </div>
           </ViewportPortal>
         )}
         {minimap && (

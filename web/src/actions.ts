@@ -190,6 +190,42 @@ export function wrapSelection(ids: string[]) {
   useUI.getState().set('editingId', meta.id)
 }
 
+/** Put nodes inside a group - the drag-and-drop half of organising a board. */
+export function moveInto(ids: string[], metaId: string) {
+  const s = S()
+  const meta = s.nodes[metaId]
+  if (!meta || meta.type !== 'meta') return
+  const ops: Op[] = []
+  const moved: string[] = []
+  for (const id of ids) {
+    const n = s.nodes[id]
+    if (!n || id === metaId || n.parent === metaId) continue
+    moved.push(id)
+    ops.push({
+      kind: 'node.update', id,
+      patch: { parent: metaId,
+               pos: [Math.round(n.pos[0] - meta.pos[0]), Math.round(n.pos[1] - meta.pos[1])] },
+    })
+  }
+  if (!ops.length) return
+  s.run(ops)
+  s.say(`moved ${moved.length} into ${meta.title || 'the group'}`)
+}
+
+/** And back out again, onto the level the group itself sits on. */
+export function moveOut(id: string) {
+  const s = S()
+  const n = s.nodes[id]
+  const meta = n?.parent ? s.nodes[n.parent] : null
+  if (!n || !meta) return
+  s.run([{
+    kind: 'node.update', id,
+    patch: { parent: meta.parent ?? null,
+             pos: [Math.round(meta.pos[0] + n.pos[0] + 40), Math.round(meta.pos[1] + n.pos[1] + 40)] },
+  }])
+  s.say('moved out of the group')
+}
+
 export function unwrapMeta(metaId: string) {
   const s = S()
   const meta = s.nodes[metaId]

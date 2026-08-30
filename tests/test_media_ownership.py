@@ -160,3 +160,36 @@ def test_a_node_pasted_into_another_board_brings_its_file(dd):
     assert dd.asset_path(dst["id"], info["sha256"], info["ext"]).exists()
     assert c.get(f"/api/boards/{dst['id']}/assets/{info['sha256']}",
                  headers=auth()).content == PNG
+
+
+def test_many_requests_at_once_do_not_trip_over_one_connection(dd):
+    """A board full of media fires a lot of requests at once.
+
+    Every one of those endpoints is a plain `def`, so FastAPI runs them on a
+    pool of worker threads. Sharing one sqlite connection between them used to
+    surface as `InterfaceError: bad parameter or other API misuse` partway
+    through an ordinary session.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    c = TestClient(create_app(dd, TOKEN))
+    bid = c.post("/api/boards", json={"title": "Busy"}, headers=auth()).json()["id"]
+    shas = []
+    for i in range(6):
+        r = c.post(f"/api/boards/{bid}/assets", headers=auth(),
+                   files={"file": (f"p{i}.png", PNG + bytes([i]), "image/png")})
+        shas.append(r.json()["sha256"])
+
+    def hit(i):
+        sha = shas[i % len(shas)]
+        which = i % 3
+        if which == 0:
+            return c.get(f"/api/boards/{bid}/assets/{sha}", headers=auth()).status_code
+        if which == 1:
+            return c.get(f"/api/boards/{bid}/graph", headers=auth()).status_code
+        return c.get(f"/api/boards/{bid}/assets/{sha}",
+                     headers={**auth(), "Range": "bytes=0-10"}).status_code
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        codes = list(pool.map(hit, range(120)))
+    assert set(codes) <= {200, 206}, f"unexpected statuses: {sorted(set(codes))}"

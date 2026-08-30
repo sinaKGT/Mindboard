@@ -2,7 +2,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  addConnected, deleteNodes, duplicateNodes, linkifyNode, refreshLinkPreview, setBodyList, setStyle, unwrapMeta, updateNode,
+  addConnected, deleteNodes, duplicateNodes, linkifyNode, moveOut, refreshLinkPreview, setBodyList, setStyle, unwrapMeta, updateNode,
 } from './actions'
 import { api } from './api'
 import { Icon } from './icons'
@@ -292,9 +292,19 @@ function Tools({ node }: { node: MNode }) {
             <span className="sep" />
           </>
         )}
+        <button className="icon-btn" title="Connect to another node — then click it  (c)"
+          onClick={() => useUI.getState().set('linking', { sourceId: node.id })}>
+          <Icon name="link" size={15} />
+        </button>
         <button className="icon-btn" title="Add connected node" onClick={() => addConnected(node)}>
           <Icon name="branch" size={15} />
         </button>
+        {node.parent && (
+          <button className="icon-btn" title="Move out of this group"
+            onClick={() => moveOut(node.id)}>
+            <Icon name="up" size={15} />
+          </button>
+        )}
         <button className="icon-btn" title="Duplicate (Ctrl+D)"
           onClick={() => void duplicateNodes([node.id])}>
           <Icon name="copy" size={15} />
@@ -312,6 +322,7 @@ function Shell({ node, selected, resizable, children }: {
   node: MNode; selected?: boolean; resizable?: boolean; children: React.ReactNode
 }) {
   const sparked = useUI((s) => s.sparkIds.includes(node.id))
+  const dropping = useUI((s) => s.dropTarget === node.id)
   return (
     <>
       {resizable && (
@@ -323,7 +334,8 @@ function Shell({ node, selected, resizable, children }: {
       <Tools node={node} />
       <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''}`
         + ` tone-${node.style.tone ?? 'accent'}${node.style.color ? ' has-colour' : ''}`
-        + `${sparked ? ' spark' : ''}${node.size[1] ? ' sized-h' : ''}`}
+        + `${sparked ? ' spark' : ''}${node.size[1] ? ' sized-h' : ''}`
+        + `${dropping ? ' dropping' : ''}`}
         style={{
           ['--node-color' as string]: accentOf(node),
           width: node.size[0] ? '100%' : undefined,

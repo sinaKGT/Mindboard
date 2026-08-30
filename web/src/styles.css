@@ -380,17 +380,18 @@ a.btn { text-decoration: none; }
 }
 .node-tools .tool-row + .tool-row { border-top: 1px solid var(--mb-border); }
 .node-tools .grow { flex: 1 1 auto; min-width: 18px; }
-.react-flow__node:hover .node-tools, .react-flow__node.selected .node-tools,
-.node-tools:hover {
+/* The toolbar belongs to the *selected* card, not merely a hovered one.
+   Hovering opened it, which meant an opaque panel three rows tall sat over
+   whatever was above that card and swallowed clicks meant for it - on a busy
+   board you could not reach the node above without going round. Hovering still
+   shows the ports, which is what you reach for mid-thought; the toolbar is one
+   click away and stays put while you use it. */
+.react-flow__node.selected .node-tools, .node-tools:hover {
   opacity: 1; pointer-events: auto;
 }
-/* The toolbar floats above the node with a gap. Without this, moving the
-   pointer toward it leaves the node, drops :hover, and the toolbar vanishes
-   before you can reach it. While hovered, the node's hit area reaches up to
-   cover the toolbar; when it is not hovered, nothing is there to block. */
-.react-flow__node:hover::before {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 56px;
-}
+/* With several cards in hand the per-card toolbars would all open at once and
+   bury the one bar that acts on the group of them. */
+.stage.multi .node-tools { opacity: 0 !important; pointer-events: none !important; }
 /* The node toolbar is the app's only dense control cluster - it needs real
    targets, not 16px dots. */
 .node-tools .icon-btn { width: 30px; height: 30px; border-radius: 8px; }
@@ -560,8 +561,13 @@ a.btn { text-decoration: none; }
 /* ----------------------------------------------------------------- ports -- */
 /* Ports read as buttons because they are: click one, then click another node.
    Dragging from them still works for anyone who prefers that. */
+/* 20px, and sitting almost entirely outside the card.
+   An invisible 38px ring around each port was tried and reverted the same hour:
+   it covered the top of every card, so pressing on a title to drag it started a
+   connection instead. Ports do not have to carry the whole job any more - the
+   toolbar has a connect button and `c` does it from the keyboard. */
 .react-flow__node .react-flow__handle {
-  width: 17px; height: 17px; border-radius: 50%;
+  width: 20px; height: 20px; border-radius: 50%;
   background-color: var(--mb-surface-2);
   border: 1.5px solid var(--mb-border-strong);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b93a2' stroke-width='2' stroke-linecap='round'><path d='M8 4.4v7.2M4.4 8h7.2'/></svg>");
@@ -572,10 +578,10 @@ a.btn { text-decoration: none; }
   transition: opacity 150ms var(--mb-ease), transform 200ms var(--mb-spring),
     background-color 150ms var(--mb-ease), border-color 150ms var(--mb-ease);
 }
-.react-flow__node .react-flow__handle-top    { top: -9px;    left: 50%; transform: translateX(-50%) scale(var(--port, 0.6)); }
-.react-flow__node .react-flow__handle-bottom { bottom: -9px; left: 50%; transform: translateX(-50%) scale(var(--port, 0.6)); }
-.react-flow__node .react-flow__handle-left   { left: -9px;   top: 50%;  transform: translateY(-50%) scale(var(--port, 0.6)); }
-.react-flow__node .react-flow__handle-right  { right: -9px;  top: 50%;  transform: translateY(-50%) scale(var(--port, 0.6)); }
+.react-flow__node .react-flow__handle-top    { top: -13px;    left: 50%; transform: translateX(-50%) scale(var(--port, 0.6)); }
+.react-flow__node .react-flow__handle-bottom { bottom: -13px; left: 50%; transform: translateX(-50%) scale(var(--port, 0.6)); }
+.react-flow__node .react-flow__handle-left   { left: -13px;   top: 50%;  transform: translateY(-50%) scale(var(--port, 0.6)); }
+.react-flow__node .react-flow__handle-right  { right: -13px;  top: 50%;  transform: translateY(-50%) scale(var(--port, 0.6)); }
 .react-flow__node:hover .react-flow__handle,
 .react-flow__node.selected .react-flow__handle { opacity: 1; --port: 1; }
 .react-flow__node .react-flow__handle:hover {
@@ -750,3 +756,34 @@ a.btn { text-decoration: none; }
 .mb-node .text ul { list-style: disc; }
 .mb-node .text ol { list-style: decimal; }
 .mb-node .text li::marker { color: var(--node-color, var(--mb-text-faint)); }
+
+
+/* ------------------------------------------------------- multi-selection -- */
+/* Grouping is the thing nobody finds by pressing keys, so with more than one
+   card in hand it says so on the canvas. */
+.selection-bar {
+  display: flex; align-items: center; gap: 3px; padding: 5px 6px;
+  background: var(--mb-surface-2); border: 1px solid var(--mb-border-strong);
+  border-radius: 11px; box-shadow: var(--mb-shadow-lg); white-space: nowrap;
+  animation: pop 140ms var(--mb-ease); z-index: 6; pointer-events: all;
+}
+.selection-bar .count {
+  padding: 0 7px; font-size: 11.5px; color: var(--mb-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.selection-bar .sep { width: 1px; align-self: stretch; margin: 2px 3px; background: var(--mb-border); }
+.selection-bar button {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  border-radius: 8px; font-size: 12.5px; color: var(--mb-text-dim);
+  transition: background 140ms var(--mb-ease), color 140ms var(--mb-ease);
+}
+.selection-bar button:hover { background: var(--mb-surface-3); color: var(--mb-text); }
+.selection-bar button.danger { padding: 0 8px; }
+.selection-bar button.danger:hover { background: #f9758322; color: var(--mb-danger); }
+
+/* a group lights up when a card is about to be dropped into it */
+.mb-node.dropping {
+  border-color: var(--mb-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mb-accent) 40%, transparent);
+  transform: scale(1.02);
+}
