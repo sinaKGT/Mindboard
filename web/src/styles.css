@@ -789,15 +789,6 @@ a.btn { text-decoration: none; }
 }
 
 
-/* --------------------------------------------------------- align guides -- */
-/* Shown only while a card is being dragged, and only where it actually met
-   something: a hairline is a confirmation, not decoration. */
-.align-guide {
-  pointer-events: none; z-index: 3;
-  background: color-mix(in srgb, var(--mb-accent) 80%, transparent);
-}
-.align-guide.v { width: 1px; }
-.align-guide.h { height: 1px; }
 
 
 /* ------------------------------------------------------------- shortcuts -- */

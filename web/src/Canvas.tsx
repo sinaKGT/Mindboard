@@ -26,10 +26,6 @@ interface Level { rfNodes: Node[]; rfEdges: Edge[] }
 /** A card while the board is in motion: where it is, and where it is going. */
 interface Body { x: number; y: number; vx: number; vy: number }
 
-/** A line a dragged card has just lined itself up with. */
-type Guide = { x: number | null; y: number | null; from: number; to: number;
-               across: number; down: number } | null
-
 function buildLevel(
   nodes: Record<string, MNode>, edges: Record<string, MEdge>,
   parent: string | null, jump: (id: string) => void,
@@ -187,21 +183,15 @@ function CanvasInner() {
   }, [runExport, setUI])
 
   // -------------------------------------------------------------- aligning --
-  // Arranging by eye is easier when the eye gets help: as a card comes within
-  // eight screen pixels of lining up with another - edges or centres, across
-  // or down - it settles onto that line and a hairline shows what it met.
-  // Nothing is forced to a grid; move a little further and it lets go again.
-  const SNAP = 8
-  const [guide, setGuide] = useState<Guide>(null)
-  const guideRef = useRef<Guide>(null)
-
-  const showGuide = useCallback((g: Guide) => {
-    const a = guideRef.current
-    const same = (!a && !g) || (a && g && a.x === g.x && a.y === g.y)
-    if (same) return
-    guideRef.current = g
-    setGuide(g)
-  }, [])
+  // As a card comes within a few pixels of lining up with another - edges or
+  // centres, across or down - it settles onto that line. Move a little further
+  // and it lets go. Nothing is forced to a grid.
+  //
+  // This drew a hairline through both cards to say what it had met, the way
+  // design tools do, and Sina called it "very annoying" - fairly: when the card
+  // it matched was across the board, so was the line. Lining up is worth
+  // having, announcing it is not.
+  const SNAP = 6
 
   const alignTo = useCallback((id: string, pos: { x: number; y: number },
                                moving: Set<string>) => {
@@ -216,9 +206,6 @@ function CanvasInner() {
     let dy = 0
     let bestX = reach
     let bestY = reach
-    const found: { x: number | null; y: number | null; from: number; to: number;
-                   across: number; down: number } =
-      { x: null, y: null, from: pos.y, to: pos.y + h, across: pos.x, down: pos.x + w }
 
     for (const n of rfNodesRef.current) {
       if (moving.has(n.id) || n.id.startsWith('ghost:')) continue
@@ -233,9 +220,6 @@ function CanvasInner() {
           if (d >= bestX) continue
           bestX = d
           dx = b - a
-          found.x = b
-          found.from = Math.min(pos.y, n.position.y) - 24
-          found.to = Math.max(pos.y + h, n.position.y + oh) + 24
         }
       }
       for (const a of mineY) {
@@ -244,13 +228,10 @@ function CanvasInner() {
           if (d >= bestY) continue
           bestY = d
           dy = b - a
-          found.y = b
-          found.across = Math.min(pos.x, n.position.x) - 24
-          found.down = Math.max(pos.x + w, n.position.x + ow) + 24
         }
       }
     }
-    return { dx, dy, guide: (found.x === null && found.y === null) ? null : found }
+    return { dx, dy }
   }, [getInternalNode, getZoom])
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
@@ -260,21 +241,19 @@ function CanvasInner() {
 
     // while Alt has the whole graph in motion, lining up with one card is noise
     if (!drags.length || sim.current) {
-      if (!drags.length) showGuide(null)
       setRfNodes((ns) => applyNodeChanges(changes, ns))
       return
     }
 
     const moving = new Set(drags.map((c) => c.id))
     const lead = drags[0]
-    const { dx, dy, guide: g } = alignTo(lead.id, lead.position, moving)
+    const { dx, dy } = alignTo(lead.id, lead.position, moving)
     const nudged = dx || dy
       ? changes.map((c) => (c.type === 'position' && c.position && moving.has(c.id)
         ? { ...c, position: { x: c.position.x + dx, y: c.position.y + dy } } : c))
       : changes
     setRfNodes((ns) => applyNodeChanges(nudged, ns))
-    showGuide(g)
-  }, [alignTo, showGuide])
+  }, [alignTo])
 
   /** Stable, and writes only on a real change.
    *
@@ -486,7 +465,6 @@ function CanvasInner() {
     const where = pt ? screenToFlowPosition({ x: pt.clientX, y: pt.clientY }) : fallback
     const into = where ? groupUnder(where.x, where.y, new Set(carried)) : null
     setUI('dropTarget', null)
-    showGuide(null)
 
     /** Written once the board has stopped moving - the card you dragged and
      *  everything that drifted with it, in one op, so one undo puts the whole
@@ -511,7 +489,7 @@ function CanvasInner() {
     s.live = false
     s.until = Date.now() + SETTLE_MS
     s.done = () => { sim.current = null; settled() }
-  }, [setUI, groupUnder, screenToFlowPosition, getInternalNode, showGuide])
+  }, [setUI, groupUnder, screenToFlowPosition, getInternalNode])
 
   const centre = useCallback((): [number, number] => {
     const box = wrap.current?.getBoundingClientRect()
@@ -809,20 +787,6 @@ function CanvasInner() {
               <path d={`M${linkPath.x1} ${linkPath.y1} L${linkPath.x2} ${linkPath.y2}`} />
               <circle cx={linkPath.x2} cy={linkPath.y2} r={4.5} />
             </svg>
-          </ViewportPortal>
-        )}
-        {guide && (
-          <ViewportPortal>
-            {guide.x !== null && (
-              <div className="align-guide v" style={{ position: 'absolute',
-                transform: `translate(${guide.x}px, ${guide.from}px)`,
-                height: guide.to - guide.from }} />
-            )}
-            {guide.y !== null && (
-              <div className="align-guide h" style={{ position: 'absolute',
-                transform: `translate(${guide.across}px, ${guide.y}px)`,
-                width: guide.down - guide.across }} />
-            )}
           </ViewportPortal>
         )}
         {selectionBox && (

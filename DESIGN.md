@@ -1073,12 +1073,18 @@ there — hold **`Alt`** and the whole model from §18 runs, settle and all. The
 gesture that was "move one card alone" now means "bring the graph with you";
 everything else about it is unchanged.
 
-In place of physics, dragging got what arranging actually needs: **alignment
-guides**. As a card comes within eight screen pixels of lining up with another —
-left, centre or right across; top, middle or bottom down — it settles onto that
-line and a hairline shows what it met. Move a little further and it lets go.
-Nothing is snapped to a grid: a board arranged by eye should stay arranged by
-eye, and a grid is its own kind of stickiness.
+In place of physics, dragging got what arranging actually needs: **lining up**.
+As a card comes within a few screen pixels of matching another — left, centre or
+right across; top, middle or bottom down — it settles onto that line. Move a
+little further and it lets go. Nothing is snapped to a grid: a board arranged by
+eye should stay arranged by eye, and a grid is its own kind of stickiness.
+
+This first drew a hairline through both cards to say what it had met, the way
+design tools do. Sina, on seeing them: *"when i move nodes i see those two blue
+line and they are very annoying"* — fairly, because when the card it matched was
+across the board, so was the line. The lines are gone and the snap is silent;
+the reach came down from eight pixels to six at the same time, so it takes hold
+a little less eagerly.
 
 Implementation note: the snap happens in `onNodesChange`, which is the only
 place a position change can be adjusted before it lands, and it is skipped while
