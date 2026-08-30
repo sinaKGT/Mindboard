@@ -53,9 +53,19 @@ export default function App() {
 
   const doImport = async (file: File) => {
     try {
-      const b = await api.importBundle(file)
-      say(`imported "${b.title}" - ${b.node_count} nodes`)
-      await open(b.id)
+      const result = await api.importBundle(file)
+      if (result.kind === 'board') {
+        say(`imported "${result.title}" - ${result.node_count} nodes`)
+        await open(result.id)
+        return
+      }
+      const { restored, skipped, failed } = result
+      const parts = [`restored ${restored.length} board${restored.length === 1 ? '' : 's'}`]
+      if (skipped.length) parts.push(`${skipped.length} already here`)
+      if (failed.length) parts.push(`${failed.length} failed`)
+      say(parts.join(' \u00b7 '), failed.length > 0)
+      if (restored.length === 1) await open(restored[0].id)
+      else window.dispatchEvent(new CustomEvent('mb:boards-changed'))
     } catch (e: any) {
       say(e.message, true)
     }

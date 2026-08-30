@@ -6,13 +6,14 @@ hands exactly this to an LLM.
 """
 
 import json
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
-from . import BUNDLE_FORMAT, __version__
+from . import BACKUP_FORMAT, BUNDLE_FORMAT, __version__
 from .assets import resolve
-from .boards import board_meta, conn_for, create_board
+from .boards import board_meta, conn_for, create_board, delete_board, list_boards
 from .db import now
 from .ids import ulid
 from .models import EDGE_KINDS, NODE_TYPES
@@ -119,7 +120,7 @@ def validate(data: dict[str, Any]) -> None:
 
 
 def import_bundle(dd: DataDir, zip_path: Path, title_override: Optional[str] = None,
-                  keep_ids: bool = True) -> dict[str, Any]:
+                  keep_ids: bool = True, board_id: Optional[str] = None) -> dict[str, Any]:
     """Validate fully, then write in one transaction. A partial bundle never half-lands."""
     with zipfile.ZipFile(zip_path) as z:
         names = set(z.namelist())
@@ -129,7 +130,7 @@ def import_bundle(dd: DataDir, zip_path: Path, title_override: Optional[str] = N
         validate(data)
 
         src_board = data.get("board", {})
-        bid = ulid()
+        bid = board_id or ulid()
         meta = create_board(
             dd,
             title=title_override or src_board.get("title", "Imported board"),
@@ -199,3 +200,124 @@ def import_bundle(dd: DataDir, zip_path: Path, title_override: Optional[str] = N
         raise BundleError(f"import failed on {len(result['rejected'])} items: "
                           f"{result['rejected'][0]['error']}")
     return board_meta(dd, bid)
+
+
+# --------------------------------------------------------------------------- #
+# whole-library backup
+# --------------------------------------------------------------------------- #
+
+def _slug(text: str, limit: int = 40) -> str:
+    keep = [c if (c.isalnum() or c in "-_") else "-" for c in text.strip().lower()]
+    out = "".join(keep).strip("-")
+    while "--" in out:
+        out = out.replace("--", "-")
+    return out[:limit] or "board"
+
+
+def backup_filename(when: Optional[str] = None) -> str:
+    stamp = (when or now())[:10]
+    return f"mindboard-backup-{stamp}.zip"
+
+
+def create_backup(dd: DataDir, out_path: Path) -> dict[str, Any]:
+    """Every board, media included, in one ordinary zip.
+
+    Each board is written as its own `.mindboard` bundle inside, so a backup is
+    inspectable with any zip tool and restores through the same path a single
+    board does - one format to trust rather than two.
+    """
+    boards = list_boards(dd)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    entries: list[dict[str, Any]] = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for b in boards:
+                member = f"boards/{_slug(b['title'])}-{b['id']}.mindboard"
+                staged = tmpdir / f"{b['id']}.mindboard"
+                export_board(dd, b["id"], staged)
+                z.write(staged, member)
+                staged.unlink(missing_ok=True)
+                entries.append({
+                    "id": b["id"], "title": b["title"], "description": b["description"],
+                    "nodes": b["node_count"], "edges": b["edge_count"],
+                    "created_at": b["created_at"], "updated_at": b["updated_at"],
+                    "file": member,
+                })
+            z.writestr("manifest.json", json.dumps({
+                "format": BACKUP_FORMAT,
+                "app_version": __version__,
+                "created_at": now(),
+                "board_count": len(entries),
+                "boards": entries,
+            }, indent=2, ensure_ascii=False))
+    return {"path": out_path, "boards": entries,
+            "bytes": out_path.stat().st_size if out_path.exists() else 0}
+
+
+def is_backup(zip_path: Path) -> bool:
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            if "manifest.json" not in z.namelist():
+                return False
+            fmt = json.loads(z.read("manifest.json").decode("utf-8")).get("format", "")
+            return isinstance(fmt, str) and fmt.startswith("mindboard-backup/")
+    except Exception:
+        return False
+
+
+def restore_backup(dd: DataDir, zip_path: Path, mode: str = "skip") -> dict[str, Any]:
+    """Put every board in a backup back into the app.
+
+    mode: 'skip' leaves boards that are already here alone (the safe default -
+    restoring twice must not double your library), 'replace' overwrites them,
+    'copy' brings everything in as new boards alongside what you have.
+    """
+    if mode not in ("skip", "replace", "copy"):
+        raise BundleError(f"unknown restore mode {mode!r}")
+
+    with zipfile.ZipFile(zip_path) as z:
+        names = set(z.namelist())
+        if "manifest.json" not in names:
+            raise BundleError("that zip is not a Mindboard backup")
+        manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+        fmt = manifest.get("format", "")
+        if not str(fmt).startswith("mindboard-backup/"):
+            raise BundleError("that zip is not a Mindboard backup")
+        if int(str(fmt).split("/")[1]) > int(BACKUP_FORMAT.split("/")[1]):
+            raise BundleError(f"backup format {fmt} is newer than this version understands")
+
+        present = set(dd.list_board_ids())
+        restored: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        failed: list[dict[str, str]] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for entry in manifest.get("boards", []):
+                member = entry.get("file")
+                if member not in names:
+                    failed.append({"title": entry.get("title", "?"), "error": "missing from the zip"})
+                    continue
+                staged = Path(tmp) / "board.mindboard"
+                staged.write_bytes(z.read(member))
+                exists = entry.get("id") in present
+                try:
+                    if exists and mode == "skip":
+                        skipped.append(entry)
+                        continue
+                    if exists and mode == "replace":
+                        delete_board(dd, entry["id"])
+                        present.discard(entry["id"])
+                    target_id = None if (exists and mode == "copy") else entry.get("id")
+                    meta = import_bundle(dd, staged, board_id=target_id)
+                    present.add(meta["id"])
+                    restored.append(meta)
+                except Exception as exc:
+                    failed.append({"title": entry.get("title", "?"), "error": str(exc)})
+                finally:
+                    staged.unlink(missing_ok=True)
+
+    return {"restored": restored, "skipped": skipped, "failed": failed,
+            "backup_created_at": manifest.get("created_at")}

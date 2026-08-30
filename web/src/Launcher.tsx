@@ -42,6 +42,11 @@ export function Launcher({ onImport }: { onImport: () => void }) {
   }, [say])
 
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    const onChanged = () => void refresh()
+    window.addEventListener('mb:boards-changed', onChanged)
+    return () => window.removeEventListener('mb:boards-changed', onChanged)
+  }, [refresh])
   // keeps "3m ago" honest without a reload
   useEffect(() => {
     const t = setInterval(() => retick((n) => n + 1), 30000)
@@ -92,9 +97,16 @@ export function Launcher({ onImport }: { onImport: () => void }) {
             onClick={() => { setTitle(''); setDescription(''); setModal({ mode: 'new' }) }}>
             <Icon name="plus" size={14} /> New board
           </button>
-          <button className="btn" onClick={onImport}>
+          <button className="btn" onClick={onImport}
+            title="Open a .mindboard bundle, or a backup zip to restore every board">
             <Icon name="upload" size={14} /> Import
           </button>
+          {!!boards?.length && (
+            <a className="btn ghost" href={api.backupUrl()}
+              title="Download every board, media included, as one zip">
+              <Icon name="download" size={14} /> Back up all
+            </a>
+          )}
         </div>
 
         {boards === null ? null : boards.length === 0 ? (

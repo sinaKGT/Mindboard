@@ -103,6 +103,9 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .btn:hover { background: var(--mb-surface-3); border-color: var(--mb-border-strong); }
 .btn.primary { background: var(--mb-accent); border-color: transparent; color: #06121f; font-weight: 600; }
 .btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; color: var(--mb-text-dim); }
+.btn.ghost:hover { background: var(--mb-surface-2); color: var(--mb-text); }
+a.btn { text-decoration: none; }
 
 /* -------------------------------------------------------------- launcher -- */
 .launcher { height: 100%; overflow: auto; padding: 56px 40px 80px; }

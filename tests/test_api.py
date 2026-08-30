@@ -81,3 +81,35 @@ def test_export_then_import_over_http(dd):
                       files={"file": ("b.mindboard", blob.content, "application/zip")}).json()
     assert imported["node_count"] == 1 and imported["id"] != bid
     assert len(c.get("/api/boards", headers=auth()).json()["boards"]) == 2
+
+
+def test_backup_and_restore_over_http(dd, tmp_path):
+    from mindboard.paths import DataDir
+
+    c = client(dd)
+    for title in ("One", "Two"):
+        bid = c.post("/api/boards", json={"title": title}, headers=auth()).json()["id"]
+        n = {"id": ulid(), "type": "text", "pos": [0, 0], "title": f"{title} seed",
+             "content": {"text": "x"}}
+        c.post(f"/api/boards/{bid}/ops", headers=auth(),
+               json={"envelopes": [{"opId": ulid(), "op": {"kind": "node.create", "node": n}}]})
+
+    blob = c.get("/api/backup", headers=auth())
+    assert blob.status_code == 200 and blob.content[:2] == b"PK"
+    assert "mindboard-backup-" in blob.headers.get("content-disposition", "")
+
+    # a different install receives the whole library from that one file
+    fresh = DataDir(tmp_path / "second-machine").ensure()
+    c2 = client(fresh)
+    result = c2.post("/api/boards/import", headers=auth(),
+                     files={"file": ("backup.zip", blob.content, "application/zip")}).json()
+    assert result["kind"] == "backup"
+    assert len(result["restored"]) == 2
+    assert {b["title"] for b in result["restored"]} == {"One", "Two"}
+    assert len(c2.get("/api/boards", headers=auth()).json()["boards"]) == 2
+
+    # and doing it again changes nothing
+    again = c2.post("/api/boards/import", headers=auth(),
+                    files={"file": ("backup.zip", blob.content, "application/zip")}).json()
+    assert again["restored"] == [] and len(again["skipped"]) == 2
+    assert len(c2.get("/api/boards", headers=auth()).json()["boards"]) == 2

@@ -3,6 +3,7 @@ so every /api route requires the per-install token (see DESIGN.md 6)."""
 
 import json
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -17,7 +18,10 @@ from .assets import (
     fetch_url, link_asset, parse_range, resolve, store_bytes, stream_file, thumbnail,
 )
 from .boards import board_meta, conn_for, create_board, delete_board, list_boards
-from .bundle import BundleError, export_board, import_bundle
+from .bundle import (
+    BundleError, backup_filename, create_backup, export_board, import_bundle, is_backup,
+    restore_backup,
+)
 from .ids import ulid
 from .models import BoardCreate, BoardPatch, OpsRequest
 from .ops import apply_envelopes, read_graph
@@ -214,23 +218,35 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         export_board(dd, bid, tmp)
         return FileResponse(
             tmp, media_type="application/zip", filename=tmp.name,
-            background=BackgroundTask(lambda: tmp.parent.exists() and __import__("shutil")
-                                      .rmtree(tmp.parent, ignore_errors=True)),
+            background=BackgroundTask(lambda: shutil.rmtree(tmp.parent, ignore_errors=True)),
+        )
+
+    @app.get("/api/backup")
+    def api_backup():
+        """Every board, media included, as one ordinary zip."""
+        tmp = Path(tempfile.mkdtemp()) / backup_filename()
+        create_backup(dd, tmp)
+        return FileResponse(
+            tmp, media_type="application/zip", filename=tmp.name,
+            background=BackgroundTask(lambda: shutil.rmtree(tmp.parent, ignore_errors=True)),
         )
 
     @app.post("/api/boards/import")
-    async def api_import(file: UploadFile = File(...)):
+    async def api_import(file: UploadFile = File(...), mode: str = Form("skip")):
+        """Takes either one .mindboard bundle or a whole backup zip."""
         data = await file.read()
-        tmp = Path(tempfile.mkdtemp()) / "incoming.mindboard"
+        tmp = Path(tempfile.mkdtemp()) / "incoming.zip"
         tmp.write_bytes(data)
         try:
-            return import_bundle(dd, tmp)
+            if is_backup(tmp):
+                result = restore_backup(dd, tmp, mode=mode)
+                return {"kind": "backup", **result}
+            return {"kind": "board", **import_bundle(dd, tmp)}
         except BundleError as exc:
             raise HTTPException(400, str(exc))
         except Exception as exc:
-            raise HTTPException(400, f"could not read that bundle: {exc}")
+            raise HTTPException(400, f"could not read that file: {exc}")
         finally:
-            import shutil
             shutil.rmtree(tmp.parent, ignore_errors=True)
 
     # -------------------------------------------------------------- static --

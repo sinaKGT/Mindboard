@@ -357,6 +357,31 @@ then a single transaction. A partial bundle never half-lands.
 
 ---
 
+## 7b. Backups
+
+A `.mindboard` bundle carries one board. A **backup** carries the library:
+
+```
+mindboard-backup-2026-08-30.zip
+├── manifest.json                 format, app version, date, one entry per board
+└── boards/
+    ├── nottingham-dt-ideas-01J7….mindboard
+    └── thesis-chapters-01J8….mindboard
+```
+
+It is an ordinary zip of the bundles we already trust, so there is one storage
+format to get right rather than two, and any zip tool can open it. Board file
+names carry the title as well as the id, so the archive is legible a year later.
+
+**Restoring keeps identity.** Each board goes back under its original id, which
+makes restoring the same backup twice a no-op rather than a way to double your
+library — the default `skip` mode leaves boards that are already present alone
+and says so. `--replace` overwrites them from the backup; `--copy` brings them
+in alongside under fresh ids. The same three modes are available over HTTP, and
+the app's **Import** accepts a backup zip as readily as a single bundle.
+
+---
+
 ## 8. Interface and interaction
 
 ### What is permanently on screen
@@ -453,36 +478,49 @@ stylesheet.
 
 ### The user's experience
 
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1    # Windows
+```
 ```bash
-# once — creates its own isolated environment, no Node required
-uv tool install mindboard        # or: pipx install mindboard
-
-mindboard start                  # serves 127.0.0.1:7788 and opens the browser
+./install.sh                                              # macOS / Linux
 ```
 
-That is the whole setup. The published wheel contains the **prebuilt frontend**
-as package data, so installation never touches npm, and `uv tool` / `pipx` give
-the isolation requirement for free — a dedicated venv that cannot collide with
-your research environments.
+One command. The installer finds a Python 3.10+, builds an isolated environment
+*inside the project folder* (uv when present, `venv` otherwise — never a
+system-wide install), installs the package, then hands off to `mindboard
+install`, which prepares storage, generates the local access key, and builds the
+interface if Node is available and it is not already built. Then:
+
+```
+.venv/bin/mindboard run
+```
+
+The published wheel ships the interface prebuilt as package data, so a user who
+installs with `uv tool install mindboard` never needs Node at all — the build
+step in `mindboard install` exists only for source checkouts.
 
 ### Commands
 
 | Command | Does |
 |---|---|
-| `mindboard start [--port 7788] [--data-dir PATH] [--no-open]` | Run the server, open the browser |
-| `mindboard boards` | List boards in the data dir |
-| `mindboard new "Title"` | Create a board |
-| `mindboard export <board> -o file.mindboard` | Export without launching the UI |
-| `mindboard import file.mindboard [--merge]` | Import from the shell |
-| `mindboard doctor` | Check Python version, data dir permissions, port availability, DB integrity, orphaned assets |
-| `mindboard gc` | Delete assets no node references any more |
-| `mindboard where` | Print the data directory path |
+| `mindboard run [--port] [--data-dir] [--no-open] [--dev]` | Serve on 127.0.0.1 and open the browser |
+| `mindboard install [--with-demo] [--skip-build]` | Prepare storage, key and interface. Idempotent |
+| `mindboard backup [-o FILE]` | Every board, media included, into one zip |
+| `mindboard restore FILE [--replace\|--copy]` | Put a whole library back |
+| `mindboard boards` / `new` / `delete` | Board housekeeping |
+| `mindboard export <id> -o F` / `import F` | One board at a time |
+| `mindboard doctor` | Python version, storage permissions, interface built, port free, DB integrity per board |
+| `mindboard gc` | Delete media no node references any more |
+| `mindboard where` | Print the data directory |
+
+`start` still works as a hidden alias for `run`.
 
 ### Data directory
 
 ```
-%APPDATA%\Mindboard\            (Windows — your machine)
+%APPDATA%\Mindboard\            (Windows)
 ~/.local/share/mindboard/       (Linux/macOS)
+├── token                       per-install access key, 0600
 └── boards/
     └── 01J7…/
         ├── board.db            SQLite, WAL
@@ -497,15 +535,13 @@ so a board can live in a synced or project folder if you want.
 ### Developing on it
 
 ```bash
-uv sync                                   # backend + dev deps
-uv run mindboard start --dev              # FastAPI with reload, no embedded UI
+./install.sh
+.venv/bin/mindboard run --dev             # FastAPI with reload
 cd web && npm install && npm run dev      # Vite on :5173, proxying /api
 ```
 
-`npm run build` writes into `src/mindboard/web/`, which the wheel picks up. Only
+`./build.sh` writes into `src/mindboard/web/`, which the wheel picks up. Only
 contributors need Node.
-
----
 
 ## 11. Forward-compatibility with v2 (AI)
 
@@ -544,6 +580,8 @@ Reserved but unused in v1: a `node_embedding(node_id, vec BLOB)` table (for
 mindboard/
 ├── DESIGN.md                    ← this file
 ├── README.md
+├── install.ps1 / install.sh     one-command isolated setup
+├── build.sh                     builds the interface into the package
 ├── pyproject.toml               packaging, CLI entry point, deps
 ├── src/mindboard/
 │   ├── cli.py                   Typer commands
@@ -552,7 +590,7 @@ mindboard/
 │   ├── models.py                Pydantic schemas
 │   ├── ops.py                   op validation + application (the core)
 │   ├── assets.py                upload, hashing, thumbnails, range streaming
-│   ├── bundle.py                export/import of .mindboard
+│   ├── bundle.py                .mindboard bundles, and whole-library backups
 │   ├── migrations/001_init.sql
 │   └── web/                     ← generated: built frontend
 ├── web/
@@ -566,9 +604,10 @@ mindboard/
 │   │   └── api/                 typed client
 │   └── vite.config.ts
 └── tests/
-    ├── test_ops.py              every op + its inverse round-trips
-    ├── test_bundle.py           import(export(b)) == b, incl. assets
-    └── test_meta.py             wrap/unwrap preserves all edges
+    ├── test_ops.py              every op + its inverse; wrap preserves all edges
+    ├── test_bundle.py           import(export(b)) == b, incl. asset bytes
+    ├── test_backup.py           library round-trip; restoring twice is a no-op
+    └── test_api.py              auth, ops, range requests, backup over HTTP
 ```
 
 ---

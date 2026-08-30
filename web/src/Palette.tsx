@@ -63,7 +63,12 @@ export function Palette({ onImport }: { onImport: () => void }) {
           run: () => s.goTo(s.path.length - 1) })
       }
     }
-    list.push({ id: 'import', label: 'Import a .mindboard bundle', group: 'Board', run: onImport })
+    list.push(
+      { id: 'backup', label: 'Back up every board as a zip', group: 'Library',
+        run: () => { flushNow(); setTimeout(() => { location.href = api.backupUrl() }, 350) } },
+      { id: 'import', label: 'Import a bundle, or restore a backup', group: 'Library',
+        run: onImport },
+    )
     return list
   }, [board, path, setUI, onImport])
 

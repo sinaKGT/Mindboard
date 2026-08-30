@@ -1,5 +1,15 @@
 import type { BoardMeta, Envelope, MEdge, MNode } from './types'
 
+export type ImportResult =
+  | ({ kind: 'board' } & BoardMeta)
+  | {
+      kind: 'backup'
+      restored: BoardMeta[]
+      skipped: { id: string; title: string }[]
+      failed: { title: string; error: string }[]
+      backup_created_at?: string
+    }
+
 const params = new URLSearchParams(location.search)
 const fromUrl = params.get('t')
 if (fromUrl) {
@@ -49,14 +59,17 @@ export const api = {
   },
   fromUrl: (boardId: string, url: string) =>
     req<any>(`/boards/${boardId}/assets/from-url`, { method: 'POST', body: JSON.stringify({ url }) }),
-  importBundle: async (file: File) => {
+  /** Accepts a single .mindboard bundle or a whole backup zip. */
+  importBundle: async (file: File, mode: 'skip' | 'replace' | 'copy' = 'skip') => {
     const fd = new FormData()
     fd.append('file', file)
-    return req<BoardMeta>('/boards/import', { method: 'POST', body: fd })
+    fd.append('mode', mode)
+    return req<ImportResult>('/boards/import', { method: 'POST', body: fd })
   },
 
   assetUrl: (boardId: string, sha: string) =>
     `/api/boards/${boardId}/assets/${sha}${token ? `?t=${encodeURIComponent(token)}` : ''}`,
   exportUrl: (boardId: string) =>
     `/api/boards/${boardId}/export${token ? `?t=${encodeURIComponent(token)}` : ''}`,
+  backupUrl: () => `/api/backup${token ? `?t=${encodeURIComponent(token)}` : ''}`,
 }
