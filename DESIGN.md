@@ -481,6 +481,14 @@ it.
 Text size has three ways in: `A` / `A` step it, and clicking the number opens a
 menu of sizes, each previewed at its own size.
 
+**Pictures are contained, never cropped.** `object-fit: contain` throughout: a
+diagram whose top row of labels has been sliced off to make it fit is worse than
+one with a little space around it. Give a node a height and the media takes the
+room you made — it becomes a flex column, the picture grows into the space and
+the caption keeps its own — so resizing never leaves a hole under the text. The
+leftover space around a contained picture is transparent so it reads as the
+card; only video keeps a black backdrop, where letterboxing is expected.
+
 ---
 
 ## 9. Theming

@@ -287,9 +287,22 @@ a.btn { text-decoration: none; }
 .mb-node input.title-input { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
 .mb-node textarea { margin-top: 3px; color: var(--mb-text-dim); overflow: hidden; }
 
-.mb-node .media { display: block; width: 100%; background: #000; }
-.mb-node img.media { object-fit: cover; max-height: 320px; }
-.mb-node video.media { max-height: 340px; }
+.mb-node .media { display: block; width: 100%; }
+/* When a contained picture does not match the node's shape, the leftover space
+   should read as the card, not as a black band around the image. */
+.mb-node img.media { background: transparent; }
+.mb-node video.media { background: #05070a; }
+/* contain, never cover: cropping the top off a diagram to make it fit is the
+   one thing a thinking tool must not do to your own picture */
+.mb-node img.media { object-fit: contain; max-height: 420px; }
+.mb-node video.media { object-fit: contain; max-height: 420px; }
+
+/* Once you have given a node a height, the picture takes the space you made
+   for it and the caption keeps its own. */
+.mb-node.sized-h { display: flex; flex-direction: column; }
+.mb-node.sized-h > * { flex: 0 0 auto; }
+.mb-node.sized-h .media { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; }
+.mb-node.sized-h .body { overflow: hidden; }
 .mb-node .caption { padding: 7px 11px 9px; }
 .mb-node .meta-line { color: var(--mb-text-faint); font-size: 11.5px; margin-top: 3px; }
 

@@ -223,7 +223,8 @@ function Shell({ node, selected, resizable, children }: {
           onResizeEnd={(_, p) => updateNode(node.id, { size: [p.width, p.height] })} />
       )}
       <Tools node={node} />
-      <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''} ${sparked ? 'spark' : ''}`}
+      <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''}`
+        + `${sparked ? ' spark' : ''}${node.size[1] ? ' sized-h' : ''}`}
         style={{
           width: node.size[0] ? '100%' : undefined,
           height: node.size[1] ? '100%' : undefined,
