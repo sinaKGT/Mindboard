@@ -20,16 +20,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "hatchling>=1.24"]
 
 [project.scripts]
 mindboard = "mindboard.cli:main"
 
 [tool.hatch.build.targets.wheel]
+# Everything under the package directory ships, the built interface included.
+# Do NOT add a force-include for src/mindboard/web: it makes an *editable*
+# install copy that one folder into site-packages and skip the .pth entirely,
+# so `import mindboard` finds an empty namespace package and every submodule
+# disappears. See tests/test_packaging.py.
 packages = ["src/mindboard"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/mindboard/web" = "mindboard/web"
+# The built interface is gitignored, so hatchling would skip it; `artifacts`
+# includes it without remapping any path.
+artifacts = ["src/mindboard/web/**"]
 
 [tool.ruff]
 line-length = 100

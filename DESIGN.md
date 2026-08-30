@@ -555,6 +555,20 @@ The published wheel ships the interface prebuilt as package data, so a user who
 installs with `uv tool install mindboard` never needs Node at all — the build
 step in `mindboard install` exists only for source checkouts.
 
+**Packaging trap, learned the hard way.** The built interface is gitignored, so
+hatchling skips it unless told otherwise. The obvious fix — a `force-include`
+mapping `src/mindboard/web` into the wheel — quietly breaks *editable* installs:
+hatchling copies that one folder into `site-packages/mindboard/` and writes no
+`.pth`, so `import mindboard` finds an empty namespace package and every
+submodule disappears with `No module named 'mindboard.cli'`. The correct knob is
+`artifacts = ["src/mindboard/web/**"]`, which includes gitignored files without
+remapping any path. `tests/test_packaging.py` guards both halves: the wheel must
+contain the interface, and the wheel target must never regain a force-include.
+
+Because an install can look successful and still be unusable, both installers
+run `mindboard version` afterwards and rebuild the environment once from scratch
+if it fails, rather than reporting success and leaving a traceback for later.
+
 ### Commands
 
 | Command | Does |
