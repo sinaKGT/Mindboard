@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+node_modules/
+web/dist/
+src/mindboard/web/*
+!src/mindboard/web/.gitkeep
+.pytest_cache/
+.ruff_cache/
+*.mindboard
