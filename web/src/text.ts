@@ -33,12 +33,20 @@ export function videoEmbed(url: string):
   return null
 }
 
-/** Never show a raw address as a node's name. */
+export function providerName(url: string): string | null {
+  const v = videoEmbed(url)
+  if (!v) return null
+  return v.provider === 'youtube' ? 'YouTube' : 'Vimeo'
+}
+
+/** Never show a raw address as a node's name, and never settle for the bare
+ *  host when we know what kind of thing it is. */
 export function niceTitle(given: string | undefined, url: string, host: string): string {
   const clean = (given || '').trim()
-  if (clean && !URL_ONLY.test(clean)) return clean
-  const video = videoEmbed(url)
-  if (video) return video.provider === 'youtube' ? 'YouTube video' : 'Vimeo video'
+  const useless = !clean || URL_ONLY.test(clean) || clean === host
+  if (!useless) return clean
+  const name = providerName(url)
+  if (name) return `${name} video`
   return host || url
 }
 

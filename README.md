@@ -51,7 +51,7 @@ option has a command behind it — see **Commands** below.
 |---|---|
 | New text node | double-click empty canvas |
 | New media node | drag a file in, or paste an image or URL |
-| Video from the web | paste a YouTube or Vimeo link — the preview is saved locally, press play to watch in the node |
+| Link or video from the web | paste any link — its cover is saved locally; click the cover to open it in your browser |
 | Connect | hover a node, click a **⊕** port, then click another node |
 | Connect **and** create | while connecting, click empty canvas instead |
 | Name a relationship | click the edge |

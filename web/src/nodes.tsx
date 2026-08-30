@@ -2,7 +2,8 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  addConnected, deleteNodes, linkifyNode, setBodyList, setStyle, unwrapMeta, updateNode,
+  addConnected, deleteNodes, linkifyNode, refreshLinkPreview, setBodyList, setStyle,
+  unwrapMeta, updateNode,
 } from './actions'
 import { api } from './api'
 import { Icon } from './icons'
@@ -384,56 +385,64 @@ export function VideoNode({ data, selected }: NodeProps) {
 export function LinkNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
   const boardId = useStore((s) => s.boardId)
-  const [playing, setPlaying] = useState(false)
+  const url = node.content.url as string | undefined
+  const provider = node.content.provider as string | undefined
   const thumb = node.content.thumb && boardId
     ? api.assetUrl(boardId, node.content.thumb) : undefined
-  const embed = node.content.embed as string | undefined
+  const lastOpen = useRef(0)
 
-  /** The app sends no referrer by default, and YouTube refuses an embed that
-   *  arrives without one — that is the "Error 153" screen. Relax the policy for
-   *  this one element and tell the player which origin it is playing in. */
-  const playerSrc = useMemo(() => {
-    if (!embed) return undefined
-    try {
-      const u = new URL(embed)
-      if (u.hostname.includes('youtube')) u.searchParams.set('origin', location.origin)
-      return u.toString()
-    } catch {
-      return embed
-    }
-  }, [embed])
+  /** A link opens where links belong: in your browser. Playing it inside the
+   *  node meant embedding the provider's player, which is a request to them
+   *  every time you open a board - and which YouTube refuses outright unless
+   *  you hand over a referrer. */
+  const open = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!url) return
+    const now = Date.now()
+    if (now - lastOpen.current < 500) return   // a double-click is still one intent
+    lastOpen.current = now
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const label = provider ? `Watch on ${provider}` : 'Open in your browser'
 
   return (
     <Shell node={node} selected={selected} resizable>
-      {(thumb || embed) && (
-        <div className="media-frame">
-          {thumb
-            ? <img className="media" src={thumb} alt="" draggable={false} />
-            : <div className="media no-preview" />}
-          {/* nothing is requested from the internet until you press play */}
-          {embed && !playing && (
-            <button className="play nodrag nopan" title="Play here"
-              onDoubleClick={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setPlaying(true) }}>
-              <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                <path d="M8 5.2v13.6L19 12z" fill="currentColor" />
-              </svg>
-            </button>
-          )}
-          {embed && playing && (
-            <iframe className="embed nodrag nopan" src={playerSrc} title={node.title || 'video'}
-              onDoubleClick={(e) => e.stopPropagation()}
-              referrerPolicy="strict-origin-when-cross-origin"
-              allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-              allowFullScreen />
+      {url && (
+        <div className={`media-frame ${thumb ? 'has-cover' : ''}`}
+          onClick={thumb ? open : undefined}
+          onDoubleClick={(e) => e.stopPropagation()}
+          title={thumb ? label : undefined}>
+          {thumb ? (
+            <>
+              <img className="media" src={thumb} alt="" draggable={false} />
+              <span className="open-badge" aria-hidden="true">
+                {provider
+                  ? <svg viewBox="0 0 24 24" width="24" height="24">
+                      <path d="M8 5.2v13.6L19 12z" fill="currentColor" />
+                    </svg>
+                  : <Icon name="external" size={18} />}
+              </span>
+              <span className="open-hint">{label}</span>
+            </>
+          ) : (
+            <div className="no-cover">
+              <button className="cover-btn nodrag nopan"
+                onClick={(e) => { e.stopPropagation(); void refreshLinkPreview(node.id) }}>
+                <Icon name="image" size={13} /> Get cover
+              </button>
+              <button className="cover-btn nodrag nopan" onClick={open}>
+                <Icon name="external" size={13} /> {label}
+              </button>
+            </div>
           )}
         </div>
       )}
       <div className="link-head">
         <span className="fav" style={{ background: accentOf(node) }} />
-        <span className="host">{node.content.host}</span>
+        <span className="host">{provider || node.content.host}</span>
         <a className="icon-btn nodrag" href={node.content.url} target="_blank" rel="noreferrer"
-          title="Open in browser" onClick={(e) => e.stopPropagation()}>
+          title={label} onClick={(e) => e.stopPropagation()}>
           <Icon name="external" size={12} />
         </a>
       </div>

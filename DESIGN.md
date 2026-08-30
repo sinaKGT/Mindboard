@@ -478,15 +478,18 @@ makes the debounced auto-save a no-op for the rest of that edit. Without it the
 `link`, skipped the "is this a URL?" branch, and wrote the raw address back over
 the node as its title and body — a link node displaying its own URL twice.
 
-**The player needs a referrer.** The app sends `Referrer-Policy: no-referrer` on
-every response, which is right for a local tool — and it made YouTube refuse
-every embed with "Error 153", its message for a request that arrives with no
-referrer. The fix is scoped to the one element that needs it: the player iframe
-carries `referrerPolicy="strict-origin-when-cross-origin"` and an `origin`
-parameter, so YouTube sees `http://127.0.0.1:7788` and nothing else in the app
-starts leaking referrers. If a provider still refuses a bare-IP origin,
-`mindboard run --host localhost` serves the same app from an origin they are
-happier with.
+**Why there is no embedded player.** An embed made the app send a request to the
+provider every time a board opened, and YouTube rejected it anyway: the app
+sends `Referrer-Policy: no-referrer`, and YouTube answers a referrer-less embed
+with "Error 153". Relaxing the policy for that one iframe made the request
+legal, but the whole feature was still trading a local, silent board for a
+dependency on Google. A stored cover and `window.open` gives the same thing
+without any of it. A double-click on a cover is still one intent, so a second
+click within 500ms is ignored rather than opening two tabs.
+
+**A link with no cover can ask for one.** Nodes made before covers existed — or
+while the server was mid-upgrade — show a **Get cover** button rather than a
+black rectangle, so a board can be repaired without re-pasting every link.
 
 **The frontend detects video links too.** The same YouTube/Vimeo matching runs
 client-side as a fallback, so a video still gets its player even when the server
@@ -785,18 +788,18 @@ offline and every export is complete.
   **a preview picture stored locally** like any other media (the page's
   `og:image`, or the platform's thumbnail). A board still shows what its links
   are with the network off.
-- Pasted URL pointing at a **video platform** (YouTube, Vimeo) → the same, plus
-  a player. The thumbnail is stored locally and shown with a play button;
-  pressing it swaps in the provider's embed. **Amended 2026-08-30** at Sina's
-  request — the original decision was link-only, on the grounds that a video we
-  cannot store is not really on your board.
-  The trade-off, stated plainly: the picture and the title are yours offline,
-  but *playback* reaches the provider. Nothing is requested until you press
-  play, and YouTube is embedded through `youtube-nocookie.com`, so simply
-  opening a board with video links on it stays silent. Downloading the video
-  itself would need a platform downloader, which stays out of scope.
-- A poster frame is captured client-side at 0.5s and stored as its own asset, so
-  video cards look right without shipping ffmpeg.
+- Pasted URL pointing at a **video platform** (YouTube, Vimeo) → the same: the
+  platform's thumbnail is stored locally as the node's cover, and clicking the
+  cover opens the video in your browser.
+
+  **Settled 2026-08-30, after two attempts.** The first design made platform
+  links references only. The second embedded the provider's player in the node —
+  which YouTube refused outright ("Error 153") because the app sends no
+  referrer, and which meant a board with video links on it talked to Google.
+  The third is what Sina asked for and what should have been obvious: a cover
+  you own, and a click that goes where links go. No iframe, no third-party
+  script, no request to anyone when a board opens. Downloading the video itself
+  would need a platform downloader, which stays out of scope.
 
 **4. Text nodes are plain text, styled well.** No markdown, no rich-text editor.
 What a node gets instead is typography: font size (a scale, not free numbers),

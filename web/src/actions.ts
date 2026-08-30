@@ -1,7 +1,7 @@
 /** Everything the interface can do to a board, expressed as ops. */
 import { api } from './api'
 import { useStore } from './store'
-import { type ListKind, niceTitle, toList, videoEmbed } from './text'
+import { type ListKind, niceTitle, providerName, toList } from './text'
 import type { EdgeKind, MEdge, MNode, NodeType, Op } from './types'
 import { newEdge, newNode } from './types'
 import { useUI } from './ui'
@@ -93,19 +93,17 @@ export async function linkifyNode(nodeId: string, url: string): Promise<void> {
   try {
     const got = await api.fromUrl(boardId, url)
     if (got.kind === 'link') {
-      const video = got.video ?? videoEmbed(url)
+      const provider = providerName(url)
       S().run([{
         kind: 'node.update', id: nodeId,
         patch: {
           type: 'link' as NodeType,
           title: niceTitle(got.title, url, got.host),
-          size: [video || got.thumb ? 360 : 300, null],
+          size: [provider || got.thumb ? 360 : 300, null],
           content: {
             url, host: got.host, excerpt: got.excerpt,
             ...(got.thumb ? { thumb: got.thumb } : {}),
-            ...(video
-              ? { provider: video.provider, video_id: video.video_id, embed: video.embed }
-              : {}),
+            ...(provider ? { provider } : {}),
           },
         },
       }])
@@ -125,6 +123,34 @@ export async function linkifyNode(nodeId: string, url: string): Promise<void> {
     spark(nodeId)
   } catch (err: any) {
     s.say(`could not fetch that link: ${err.message}`, true)
+  }
+}
+
+/** Fetch a cover for a link that has none - after a version where the server
+ *  could not make one, say. Keeps whatever you have written on the node. */
+export async function refreshLinkPreview(nodeId: string): Promise<void> {
+  const s = S()
+  const boardId = s.boardId
+  const node = s.nodes[nodeId]
+  const url = node?.content?.url
+  if (!boardId || !node || typeof url !== 'string') return
+  try {
+    s.say('fetching a cover...')
+    const got = await api.fromUrl(boardId, url)
+    if (got.kind !== 'link') return
+    if (!got.thumb) {
+      s.say('that page offers no picture to use as a cover', true)
+      return
+    }
+    updateNode(nodeId, {
+      title: node.title && node.title !== node.content.host
+        ? node.title
+        : niceTitle(got.title, url, got.host),
+      content: { ...node.content, thumb: got.thumb, excerpt: node.content.excerpt || got.excerpt },
+    })
+    spark(nodeId)
+  } catch (err: any) {
+    s.say(`could not fetch a cover: ${err.message}`, true)
   }
 }
 
@@ -276,26 +302,24 @@ export async function addUrl(url: string, pos: [number, number],
   try {
     const got = await api.fromUrl(boardId, url)
     if (got.kind === 'link') {
-      const video = got.video ?? videoEmbed(url)
+      const provider = providerName(url)
       const node = newNode({
         pos: freeSpot(pos, parent), parent, type: 'link',
         title: niceTitle(got.title, url, got.host),
-        size: [video || got.thumb ? 360 : 300, null],
+        size: [provider || got.thumb ? 360 : 300, null],
         content: {
           url, host: got.host, excerpt: got.excerpt,
-          // the preview picture is stored locally like any other media
+          // the cover picture is stored locally like any other media
           ...(got.thumb ? { thumb: got.thumb } : {}),
-          ...(video
-            ? { provider: video.provider, video_id: video.video_id, embed: video.embed }
-            : {}),
+          ...(provider ? { provider } : {}),
         },
       })
       S().run([{ kind: 'node.create', node }])
       spark(node.id)
       if (got.unreachable) {
-        s.say(video
-          ? 'added the video — could not reach the page for its title'
-          : 'added the link — could not reach the page for a preview')
+        s.say(provider
+          ? `added the ${provider} link — could not reach the page for a cover`
+          : 'added the link — could not reach the page for a cover')
       }
       return node.id
     }
