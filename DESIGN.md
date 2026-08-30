@@ -442,6 +442,7 @@ menu bar entirely (import, export, theme, search, jump-to-node, wrap selection).
 | Move one card alone | Hold `Alt` while dragging |
 | Group into meta-node | Select two or more → a bar appears over them with **Group** (`Ctrl+G` still works) |
 | Into an existing group | Drag the node onto the group — it lights up as you cross it |
+| Move the graph with a card | Hold `Alt` while dragging |
 | Back out of a group | **↑** in the node's toolbar |
 | Connect | **`c`** from the selected node, the **link** button in its toolbar, or a ⊕ port. Then click the other node |
 | Enter / leave meta-node | Double-click / `Esc` |
@@ -1051,3 +1052,42 @@ The commit waits for the board to stop. `onNodeDragStop` no longer writes
 positions; it hands the simulation a callback that runs when the motion dies,
 which diffs every card against the store and writes one `node.move` op with
 everything that actually moved. One undo, one arrangement.
+
+---
+
+## 19. Placing beats physics (2026-08-30)
+
+§18 made the spring simulation the default for every drag. Sina, an hour later:
+*"they are still like sticking on canves and i can't organize them as i want,
+it's very hard"*.
+
+Both halves of that are fair, and they are the same complaint. A card you drag
+is a card you are **placing**; if its neighbours crowd in behind it, if the
+board keeps drifting after you let go, and if a repulsion term shoves things
+apart as you try to put them near each other, then the canvas is arguing with
+you. A simulation is lovely to watch and hopeless to arrange things with.
+
+So the default is now the plain thing: **dragging moves the card you grabbed,
+exactly where you put it, and nothing else moves.** The springs are still
+there — hold **`Alt`** and the whole model from §18 runs, settle and all. The
+gesture that was "move one card alone" now means "bring the graph with you";
+everything else about it is unchanged.
+
+In place of physics, dragging got what arranging actually needs: **alignment
+guides**. As a card comes within eight screen pixels of lining up with another —
+left, centre or right across; top, middle or bottom down — it settles onto that
+line and a hairline shows what it met. Move a little further and it lets go.
+Nothing is snapped to a grid: a board arranged by eye should stay arranged by
+eye, and a grid is its own kind of stickiness.
+
+Implementation note: the snap happens in `onNodesChange`, which is the only
+place a position change can be adjusted before it lands, and it is skipped while
+the simulation is running (lining up with one card is noise when the whole graph
+is in motion). Verified by dragging one card's top edge onto another's: it
+committed at exactly the same y, to the pixel, with the guide visible at the
+moment of release.
+
+A measurement worth keeping for future tests: xyflow spends the first ~10px of
+pointer travel starting the drag, so a Playwright drag lands ten pixels short of
+where the arithmetic says. That is the drag threshold doing its job, not a bug —
+but it invalidated three test runs before it was spotted.

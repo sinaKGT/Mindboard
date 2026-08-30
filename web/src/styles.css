@@ -787,3 +787,14 @@ a.btn { text-decoration: none; }
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--mb-accent) 40%, transparent);
   transform: scale(1.02);
 }
+
+
+/* --------------------------------------------------------- align guides -- */
+/* Shown only while a card is being dragged, and only where it actually met
+   something: a hairline is a confirmation, not decoration. */
+.align-guide {
+  pointer-events: none; z-index: 3;
+  background: color-mix(in srgb, var(--mb-accent) 80%, transparent);
+}
+.align-guide.v { width: 1px; }
+.align-guide.h { height: 1px; }
