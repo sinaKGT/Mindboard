@@ -365,13 +365,21 @@ a.btn { text-decoration: none; }
 .mb-node.ghost .body { padding: 7px 10px; }
 
 .node-tools {
-  position: absolute; bottom: calc(100% + 8px); left: 0; display: flex; flex-wrap: wrap;
-  align-items: center; gap: 3px; padding: 6px; max-width: 352px;
+  position: absolute; bottom: calc(100% + 8px); left: 0;
+  display: flex; flex-direction: column; align-items: stretch; gap: 0;
+  width: max-content; padding: 5px 7px;
   background: var(--mb-surface-2); border: 1px solid var(--mb-border);
   border-radius: 11px; box-shadow: var(--mb-shadow-lg);
   opacity: 0; pointer-events: none; transition: opacity var(--mb-dur) var(--mb-ease);
   z-index: 4;
 }
+/* A row per group - colour, then text, then what happens to the card. Laid out
+   rather than left to wrap, so a control never drifts into the wrong company. */
+.node-tools .tool-row {
+  display: flex; align-items: center; gap: 3px; padding: 4px 0; min-height: 34px;
+}
+.node-tools .tool-row + .tool-row { border-top: 1px solid var(--mb-border); }
+.node-tools .grow { flex: 1 1 auto; min-width: 18px; }
 .react-flow__node:hover .node-tools, .react-flow__node.selected .node-tools,
 .node-tools:hover {
   opacity: 1; pointer-events: auto;
@@ -387,7 +395,8 @@ a.btn { text-decoration: none; }
    targets, not 16px dots. */
 .node-tools .icon-btn { width: 30px; height: 30px; border-radius: 8px; }
 .node-tools .swatch { width: 20px; height: 20px; border-radius: 50%; border: 1px solid #0005; }
-.node-tools .sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--mb-border); }
+.node-tools .sep { width: 1px; align-self: stretch; margin: 3px 5px; background: var(--mb-border); }
+.node-tools .icon-btn.on .swatch { box-shadow: 0 0 0 2px var(--mb-surface-2), 0 0 0 3.5px currentColor; }
 
 /* ----------------------------------------------------------------- edges -- */
 .mb-edge-path { fill: none; stroke: var(--mb-edge); stroke-width: 1.6;
@@ -647,7 +656,15 @@ a.btn { text-decoration: none; }
 
 /* ------------------------------------------------------------ edge labels -- */
 .kind-glyph { display: block; flex: none; }
-.mb-edge-label.bare { padding: 3px; border-radius: 50%; opacity: 0.8; }
+.mb-edge-label .kind-word { color: var(--mb-text-dim); }
+.mb-edge-label .edge-note { color: var(--mb-text); }
+.mb-edge-label .edge-note::before { content: '·'; margin: 0 5px; color: var(--mb-text-faint); }
+.mb-edge-label.picked {
+  background: var(--mb-surface-2); color: var(--mb-text); cursor: default;
+}
+.mb-edge-label.picked .kind-word { color: var(--mb-text); }
+.mb-edge-label .edge-del { margin-left: 2px; }
+.mb-edge-halo { pointer-events: none; }
 .react-flow__edge:hover .mb-edge-label.bare { opacity: 1; }
 .mb-edge-label .count {
   font-variant-numeric: tabular-nums; font-weight: 600; color: var(--mb-text);

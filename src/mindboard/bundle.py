@@ -6,6 +6,7 @@ hands exactly this to an LLM.
 """
 
 import json
+import re
 import tempfile
 import zipfile
 from pathlib import Path
@@ -20,17 +21,34 @@ from .models import EDGE_KINDS, NODE_TYPES
 from .ops import apply_envelopes, read_graph
 from .paths import DataDir
 
-ASSET_KEYS = ("sha256", "poster")
+SHA_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 
 def referenced_assets(nodes: list[dict[str, Any]]) -> set[str]:
+    """Every hash a node points at, whatever key it hides under.
+
+    Matching on the shape of a hash rather than on a list of key names is
+    deliberate. Media lives in content.sha256, a video's poster frame in
+    content.poster, a link's cover picture in content.thumb - and the next kind
+    of card will invent its own key. A key missed here is a file silently left
+    out of every export and backup, and then deleted by `gc`: the two ways this
+    app could lose something the user put on a board.
+    """
     out: set[str] = set()
-    for n in nodes:
-        content = n.get("content") or {}
-        for key in ASSET_KEYS:
-            v = content.get(key)
-            if isinstance(v, str) and len(v) == 64:
+
+    def walk(v: Any) -> None:
+        if isinstance(v, str):
+            if SHA_RE.match(v):
                 out.add(v)
+        elif isinstance(v, dict):
+            for item in v.values():
+                walk(item)
+        elif isinstance(v, list):
+            for item in v:
+                walk(item)
+
+    for n in nodes:
+        walk(n.get("content") or {})
     return out
 
 

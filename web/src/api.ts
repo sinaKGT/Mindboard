@@ -61,6 +61,12 @@ export const api = {
    *  when it is a video we can play, its embed address. */
   fromUrl: (boardId: string, url: string) =>
     req<any>(`/boards/${boardId}/assets/from-url`, { method: 'POST', body: JSON.stringify({ url }) }),
+  /** Give this board its own copy of a file another board holds - what a node
+   *  pasted across boards needs, since each board owns its media outright. */
+  copyAsset: (boardId: string, fromBoard: string, sha: string) =>
+    req<{ sha256: string; mime: string }>(`/boards/${boardId}/assets/copy`, {
+      method: 'POST', body: JSON.stringify({ from_board: fromBoard, sha256: sha }),
+    }),
   /** Accepts a single .mindboard bundle or a whole backup zip. */
   importBundle: async (file: File, mode: 'skip' | 'replace' | 'copy' = 'skip') => {
     const fd = new FormData()

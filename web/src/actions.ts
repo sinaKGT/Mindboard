@@ -3,7 +3,7 @@ import { api } from './api'
 import { useStore } from './store'
 import { type ListKind, niceTitle, providerName, toList } from './text'
 import type { EdgeKind, MEdge, MNode, NodeType, Op } from './types'
-import { newEdge, newNode } from './types'
+import { newEdge, newNode, ulid } from './types'
 import { useUI } from './ui'
 
 const S = () => useStore.getState()
@@ -202,6 +202,156 @@ export function unwrapMeta(metaId: string) {
       id: k.id, parent: meta.parent, x: meta.pos[0] + k.pos[0], y: meta.pos[1] + k.pos[1],
     })),
   }])
+}
+
+// ------------------------------------------------------------ copy/paste -- //
+
+export interface Clip {
+  format: 'mindboard/clip@1'
+  board: string | null
+  nodes: MNode[]
+  edges: MEdge[]
+}
+
+/** The last copy taken in the app. The system clipboard carries the readable
+ *  text of those nodes; this carries their shape. Kept for the tab as well as
+ *  in memory, so copying on one board and opening another does not lose it. */
+const CLIP_KEY = 'mb_clip'
+let clip: Clip | null = null
+
+export function setClip(c: Clip | null) {
+  clip = c
+  try {
+    if (c) sessionStorage.setItem(CLIP_KEY, JSON.stringify(c))
+    else sessionStorage.removeItem(CLIP_KEY)
+  } catch { /* private mode: the in-memory copy still works */ }
+}
+
+export function getClip(): Clip | null {
+  if (clip) return clip
+  try {
+    const raw = sessionStorage.getItem(CLIP_KEY)
+    const parsed = raw ? JSON.parse(raw) as Clip : null
+    if (parsed?.format === 'mindboard/clip@1' && Array.isArray(parsed.nodes)) clip = parsed
+  } catch { /* nothing kept */ }
+  return clip
+}
+
+const SHA = /^[0-9a-f]{64}$/
+
+/** A group brings its contents: copying a meta-node that arrived empty on the
+ *  other side would be a copy of nothing. */
+function withDescendants(ids: string[]): MNode[] {
+  const all = S().nodes
+  const seen = new Set<string>()
+  const out: MNode[] = []
+  const take = (id: string) => {
+    const n = all[id]
+    if (!n || seen.has(id)) return
+    seen.add(id)
+    out.push(n)
+    for (const k of Object.values(all)) if (k.parent === id) take(k.id)
+  }
+  ids.forEach(take)
+  return out
+}
+
+export function buildClip(ids: string[]): Clip | null {
+  const picked = withDescendants(ids)
+  if (!picked.length) return null
+  const inside = new Set(picked.map((n) => n.id))
+  return {
+    format: 'mindboard/clip@1',
+    board: S().boardId,
+    nodes: JSON.parse(JSON.stringify(picked)),
+    // relationships come along only when both ends do
+    edges: JSON.parse(JSON.stringify(
+      Object.values(S().edges).filter((e) => inside.has(e.source) && inside.has(e.target)))),
+  }
+}
+
+/** What the system clipboard gets: paste into any other app and you get the
+ *  words, not a wall of JSON. */
+export function clipText(c: Clip): string {
+  const parts = c.nodes.map((n) => {
+    const body = typeof n.content.text === 'string' ? n.content.text.trim()
+      : typeof n.content.url === 'string' ? n.content.url : ''
+    return [n.title.trim(), body].filter(Boolean).join('\n')
+  }).filter(Boolean)
+  return parts.join('\n\n')
+    || `${c.nodes.length} Mindboard node${c.nodes.length === 1 ? '' : 's'}`
+}
+
+function hashesIn(nodes: MNode[]): string[] {
+  const out = new Set<string>()
+  const walk = (v: any) => {
+    if (typeof v === 'string') { if (SHA.test(v)) out.add(v) }
+    else if (Array.isArray(v)) v.forEach(walk)
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk)
+  }
+  nodes.forEach((n) => walk(n.content))
+  return [...out]
+}
+
+export async function pasteClip(c: Clip, at: [number, number],
+                                parent: string | null): Promise<string[]> {
+  const s = S()
+  const boardId = s.boardId
+  if (!boardId || !c.nodes.length) return []
+
+  // Pasted into another board, the media comes too: a board owns its files
+  // outright, so it can be exported on its own and still show everything.
+  if (c.board && c.board !== boardId) {
+    await Promise.all(hashesIn(c.nodes).map((sha) =>
+      api.copyAsset(boardId, c.board as string, sha).catch(() => null)))
+  }
+
+  const inside = new Set(c.nodes.map((n) => n.id))
+  const fresh = new Map(c.nodes.map((n) => [n.id, ulid()]))
+  const roots = c.nodes.filter((n) => !inside.has(n.parent ?? ''))
+  const minX = Math.min(...roots.map((n) => n.pos[0]))
+  const minY = Math.min(...roots.map((n) => n.pos[1]))
+  const [ax, ay] = freeSpot(at, parent, [roots[0]?.size[0] ?? 320, 200])
+  const dx = ax - minX
+  const dy = ay - minY
+
+  const ops: Op[] = c.nodes.map((n) => {
+    const top = !inside.has(n.parent ?? '')
+    return {
+      kind: 'node.create' as const,
+      node: {
+        ...n,
+        id: fresh.get(n.id) as string,
+        parent: top ? parent : (fresh.get(n.parent as string) as string),
+        pos: (top ? [Math.round(n.pos[0] + dx), Math.round(n.pos[1] + dy)]
+          : [...n.pos]) as [number, number],
+        provenance: 'user',
+      },
+    }
+  })
+  for (const e of c.edges) {
+    ops.push({
+      kind: 'edge.create',
+      edge: { ...e, id: ulid(), source: fresh.get(e.source) as string,
+              target: fresh.get(e.target) as string },
+    })
+  }
+  s.run(ops)
+  const ids = [...fresh.values()]
+  spark(...ids)
+  s.say(`pasted ${roots.length} node${roots.length === 1 ? '' : 's'}`)
+  return ids
+}
+
+/** Copy in place - the same machinery, without going near the clipboard. */
+export function duplicateNodes(ids: string[]): Promise<string[]> {
+  const c = buildClip(ids)
+  if (!c) return Promise.resolve([])
+  const inside = new Set(c.nodes.map((n) => n.id))
+  const roots = c.nodes.filter((n) => !inside.has(n.parent ?? ''))
+  const at: [number, number] = [Math.min(...roots.map((n) => n.pos[0])) + 44,
+                                Math.min(...roots.map((n) => n.pos[1])) + 40]
+  return pasteClip(c, at, S().nodes[ids[0]]?.parent ?? null)
 }
 
 // ----------------------------------------------------------------- media -- //

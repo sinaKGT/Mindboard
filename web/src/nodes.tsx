@@ -2,8 +2,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  addConnected, deleteNodes, linkifyNode, refreshLinkPreview, setBodyList, setStyle,
-  unwrapMeta, updateNode,
+  addConnected, deleteNodes, duplicateNodes, linkifyNode, refreshLinkPreview, setBodyList, setStyle, unwrapMeta, updateNode,
 } from './actions'
 import { api } from './api'
 import { Icon } from './icons'
@@ -222,74 +221,89 @@ function Tools({ node }: { node: MNode }) {
   return (
     <div className="node-tools nodrag nopan" onDoubleClick={(e) => e.stopPropagation()}
       onMouseLeave={() => setSizeOpen(false)}>
-      {NODE_COLOURS.slice(0, 6).map((c) => (
-        <button key={c} className="icon-btn" title="Colour" onClick={() => setStyle(node, { color: c })}>
-          <span className="swatch" style={{ background: c }} />
-        </button>
-      ))}
-      <button className="icon-btn" title="Default colour"
-        onClick={() => setStyle(node, { color: undefined })}>
-        <Icon name="x" size={14} />
-      </button>
-      <span className="sep" />
-      <span className="size-group">
-        <button className="icon-btn" title="Smaller text" aria-label="Smaller text"
-          onClick={() => setStyle(node, { fontSize: Math.max(11, size - 1) })}>
-          <span className="size-a small">A</span>
-        </button>
-        <button className="size-value" title="Pick a text size"
-          onClick={() => setSizeOpen((v) => !v)}>{size}</button>
-        <button className="icon-btn" title="Larger text" aria-label="Larger text"
-          onClick={() => setStyle(node, { fontSize: Math.min(34, size + 1) })}>
-          <span className="size-a big">A</span>
-        </button>
-        {sizeOpen && (
-          <div className="size-menu">
-            {SIZES.map((s) => (
-              <button key={s} className={s === size ? 'on' : ''}
-                onClick={() => { setStyle(node, { fontSize: s }); setSizeOpen(false) }}>
-                <span className="sample" style={{ fontSize: Math.min(s, 19) }}>A</span>
-                <span className="n">{s}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </span>
-      <span className="sep" />
-      <span className="tone-group" title="How far the colour carries">
-        {TONES.map((t) => (
-          <button key={t.key} className={`tone-chip ${t.key} ${tone === t.key ? 'on' : ''}`}
-            title={t.label} aria-label={t.label}
-            style={{ ['--node-color' as string]: accentOf(node) }}
-            onClick={() => setStyle(node, { tone: t.key })} />
+      {/* One row per thing you might be doing: how it looks, what the words do,
+          what happens to the card. Nothing wraps into a row it does not belong to. */}
+      <div className="tool-row">
+        {NODE_COLOURS.slice(0, 6).map((c) => (
+          <button key={c} className={`icon-btn ${node.style.color === c ? 'on' : ''}`}
+            title="Colour" onClick={() => setStyle(node, { color: c })}>
+            <span className="swatch" style={{ background: c }} />
+          </button>
         ))}
-      </span>
-      <span className="sep" />
-      <button className={`icon-btn ${listKind === 'bullet' ? 'on' : ''}`} title="Bullet list"
-        onClick={() => setBodyList(node, listKind === 'bullet' ? 'none' : 'bullet')}>
-        <Icon name="bullets" size={15} />
-      </button>
-      <button className={`icon-btn ${listKind === 'number' ? 'on' : ''}`} title="Numbered list"
-        onClick={() => setBodyList(node, listKind === 'number' ? 'none' : 'number')}>
-        <Icon name="numbers" size={15} />
-      </button>
-      <span className="sep" />
-      {node.type === 'meta' && (
-        <>
-          <button className="icon-btn" title="Open" onClick={() => enter(node.id)}>
-            <Icon name="enter" size={15} />
+        <button className="icon-btn" title="Default colour"
+          onClick={() => setStyle(node, { color: undefined })}>
+          <Icon name="x" size={14} />
+        </button>
+        <span className="sep" />
+        <span className="tone-group" title="How far the colour carries">
+          {TONES.map((t) => (
+            <button key={t.key} className={`tone-chip ${t.key} ${tone === t.key ? 'on' : ''}`}
+              title={t.label} aria-label={t.label}
+              style={{ ['--node-color' as string]: accentOf(node) }}
+              onClick={() => setStyle(node, { tone: t.key })} />
+          ))}
+        </span>
+      </div>
+
+      <div className="tool-row">
+        <span className="size-group">
+          <button className="icon-btn" title="Smaller text" aria-label="Smaller text"
+            onClick={() => setStyle(node, { fontSize: Math.max(11, size - 1) })}>
+            <span className="size-a small">A</span>
           </button>
-          <button className="icon-btn" title="Ungroup" onClick={() => unwrapMeta(node.id)}>
-            <Icon name="layers" size={15} />
+          <button className="size-value" title="Pick a text size"
+            onClick={() => setSizeOpen((v) => !v)}>{size}</button>
+          <button className="icon-btn" title="Larger text" aria-label="Larger text"
+            onClick={() => setStyle(node, { fontSize: Math.min(34, size + 1) })}>
+            <span className="size-a big">A</span>
           </button>
-        </>
-      )}
-      <button className="icon-btn" title="Add connected node" onClick={() => addConnected(node)}>
-        <Icon name="branch" size={15} />
-      </button>
-      <button className="icon-btn danger" title="Delete" onClick={() => deleteNodes([node.id])}>
-        <Icon name="trash" size={15} />
-      </button>
+          {sizeOpen && (
+            <div className="size-menu">
+              {SIZES.map((s) => (
+                <button key={s} className={s === size ? 'on' : ''}
+                  onClick={() => { setStyle(node, { fontSize: s }); setSizeOpen(false) }}>
+                  <span className="sample" style={{ fontSize: Math.min(s, 19) }}>A</span>
+                  <span className="n">{s}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </span>
+        <span className="sep" />
+        <button className={`icon-btn ${listKind === 'bullet' ? 'on' : ''}`} title="Bullet list"
+          onClick={() => setBodyList(node, listKind === 'bullet' ? 'none' : 'bullet')}>
+          <Icon name="bullets" size={15} />
+        </button>
+        <button className={`icon-btn ${listKind === 'number' ? 'on' : ''}`} title="Numbered list"
+          onClick={() => setBodyList(node, listKind === 'number' ? 'none' : 'number')}>
+          <Icon name="numbers" size={15} />
+        </button>
+      </div>
+
+      <div className="tool-row">
+        {node.type === 'meta' && (
+          <>
+            <button className="icon-btn" title="Open" onClick={() => enter(node.id)}>
+              <Icon name="enter" size={15} />
+            </button>
+            <button className="icon-btn" title="Ungroup" onClick={() => unwrapMeta(node.id)}>
+              <Icon name="layers" size={15} />
+            </button>
+            <span className="sep" />
+          </>
+        )}
+        <button className="icon-btn" title="Add connected node" onClick={() => addConnected(node)}>
+          <Icon name="branch" size={15} />
+        </button>
+        <button className="icon-btn" title="Duplicate (Ctrl+D)"
+          onClick={() => void duplicateNodes([node.id])}>
+          <Icon name="copy" size={15} />
+        </button>
+        <span className="grow" />
+        <button className="icon-btn danger" title="Delete" onClick={() => deleteNodes([node.id])}>
+          <Icon name="trash" size={15} />
+        </button>
+      </div>
     </div>
   )
 }

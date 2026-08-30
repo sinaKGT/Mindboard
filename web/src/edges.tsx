@@ -1,4 +1,7 @@
-import { EdgeLabelRenderer, Position, getBezierPath, useInternalNode, type EdgeProps } from '@xyflow/react'
+import {
+  EdgeLabelRenderer, Position, getBezierPath, useInternalNode, useReactFlow,
+  type EdgeProps,
+} from '@xyflow/react'
 import { useEffect, useRef, useState } from 'react'
 
 import { deleteEdges, updateEdge } from './actions'
@@ -100,6 +103,22 @@ export function LabeledEdge(props: EdgeProps) {
 
   const sourceNode = useInternalNode(source)
   const targetNode = useInternalNode(target)
+  const { setNodes } = useReactFlow()
+  const selected = useUI((s) => (edge ? s.selectedEdges.includes(edge.id) : false))
+
+  /** A relationship you can pick up: one click selects it (Delete removes it,
+   *  and its own X sits right there), a double click renames it. Selection is
+   *  kept here rather than in the canvas library, which owns only the nodes. */
+  const pick = () => {
+    if (!edge) return
+    setUI('selectedEdges', [edge.id])
+    setNodes((ns) => ns.map((n) => (n.selected ? { ...n, selected: false } : n)))
+  }
+  const remove = () => {
+    if (!edge) return
+    setUI('selectedEdges', [])
+    deleteEdges([edge.id])
+  }
   const sparked = useUI((s) => (edge ? s.sparkIds.includes(edge.id) : false))
 
   useEffect(() => { if (!editing) setLabel(edge?.label ?? '') }, [edge?.label, editing])
@@ -125,14 +144,19 @@ export function LabeledEdge(props: EdgeProps) {
     <>
       {/* fill and stroke live on the element, not only in CSS: an exported
           image is a clone, and a path that loses `fill: none` fills itself black */}
+      {selected && (
+        <path d={path} className="mb-edge-halo" fill="none"
+          style={{ fill: 'none', stroke: colour, strokeWidth: spec.width + 7, opacity: 0.22 }} />
+      )}
       <path d={path} className={`mb-edge-path ${sparked ? 'spark' : ''}`} pathLength={1}
         fill="none"
-        style={{ fill: 'none', stroke: colour, strokeWidth: spec.width,
+        style={{ fill: 'none', stroke: colour, strokeWidth: spec.width + (selected ? 1.2 : 0),
                  strokeDasharray: spec.dash }}
         markerEnd={edge?.directed !== false && spec.arrow ? props.markerEnd : undefined} />
       <path d={path} className="mb-edge-hit" fill="none" stroke="transparent"
-        style={{ fill: 'none', stroke: 'transparent', strokeWidth: 18 }}
-        onClick={() => edge && setUI('editingEdgeId', id)} />
+        style={{ fill: 'none', stroke: 'transparent', strokeWidth: 22 }}
+        onClick={pick}
+        onDoubleClick={() => edge && setUI('editingEdgeId', id)} />
       <EdgeLabelRenderer>
         <div className="nodrag nopan"
           style={{ position: 'absolute', transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)`, pointerEvents: 'all' }}>
@@ -156,22 +180,32 @@ export function LabeledEdge(props: EdgeProps) {
                 ))}
               </span>
               <button title="Delete" className="edge-del" onMouseDown={(e) => e.preventDefault()}
-                onClick={() => deleteEdges([edge.id])}>
+                onClick={remove}>
                 <Icon name="trash" size={12} />
               </button>
             </div>
           ) : (
-            <div className={`mb-edge-label ${edge?.label || bundled ? '' : 'bare'}`}
-              onClick={() => edge && setUI('editingEdgeId', id)}
+            <div className={`mb-edge-label ${selected ? 'picked' : ''}`}
+              style={selected ? { borderColor: colour } : undefined}
+              onClick={pick}
+              onDoubleClick={() => edge && setUI('editingEdgeId', id)}
               title={bundled
                 ? bundle.map((b) => b.label || KIND_LABEL[b.kind]).join(' · ')
                 : (edge ? `${KIND_LABEL[kind]}${edge.label ? ` — ${edge.label}` : ''}` : '')}>
               <span style={{ color: colour, display: 'flex' }}>
                 <KindGlyph kind={kind} />
               </span>
-              {bundled
-                ? <span className="count">{bundle.length}</span>
-                : (edge?.label ? <span>{edge.label}</span> : null)}
+              {/* the relationship says what it is in words, not colour alone */}
+              <span className="kind-word">{KIND_LABEL[kind]}</span>
+              {edge?.label ? <span className="edge-note">{edge.label}</span> : null}
+              {bundled ? <span className="count">+{bundle.length - 1}</span> : null}
+              {selected && edge ? (
+                <button className="edge-del" title="Remove this relationship"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => { e.stopPropagation(); remove() }}>
+                  <Icon name="x" size={11} />
+                </button>
+              ) : null}
             </div>
           )}
         </div>

@@ -54,7 +54,12 @@ option has a command behind it — see **Commands** below.
 | Link or video from the web | paste any link — its cover is saved locally; click the cover to open it in your browser |
 | Connect | hover a node, click a **⊕** port, then click another node |
 | Connect **and** create | while connecting, click empty canvas instead |
-| Name a relationship | click the edge |
+| Name a relationship | double-click the edge |
+| Remove a relationship | click it, then the **✕** on its label — or `Delete` |
+| Move a node with what it is connected to | just drag it — connected nodes follow, less the further away they are |
+| Move one node on its own | hold `Alt` while dragging |
+| Copy / cut / paste nodes | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` — relationships and group contents come too, across boards as well |
+| Duplicate a node | `Ctrl+D`, or the ⧉ button in its toolbar |
 | Write on any node | double-click it — including on a picture |
 | Change text size | **A / A** in the toolbar, or click the number for a menu |
 | Bullet or numbered list | the list buttons in the toolbar — Enter continues the list as you type |
@@ -66,6 +71,21 @@ option has a command behind it — see **Commands** below.
 | Tidy the current level | `Ctrl+L` |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` |
 | Everything else | `Ctrl+K` |
+
+## Where your things are kept
+
+Everything you put on a board — a video you upload, a picture you drag in, the
+cover of a link you paste — is **copied into Mindboard's own folder**. Nothing
+points back at the file you dragged from, so you can move or delete the original
+and the board is unaffected, and a backup carries the whole of it.
+
+```
+mindboard where          # prints the folder
+```
+
+On Windows it is `%APPDATA%\Mindboard`, on macOS
+`~/Library/Application Support/Mindboard`, and each board is its own folder
+inside it: `board.db` plus an `assets` folder of the files it shows.
 
 ## Backing up
 

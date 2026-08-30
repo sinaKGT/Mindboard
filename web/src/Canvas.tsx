@@ -7,8 +7,9 @@ import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  addConnected, addFile, addTextNode, addUrl, autoLayout, connect, deleteEdges, deleteNodes,
-  unwrapMeta, wrapSelection,
+  addConnected, addFile, addTextNode, addUrl, autoLayout, buildClip, clipText, connect,
+  deleteEdges, deleteNodes, duplicateNodes, getClip, pasteClip, setClip, unwrapMeta,
+  wrapSelection,
 } from './actions'
 import { edgeTypes } from './edges'
 import { exportBoardImage, type ImageKind } from './exportImage'
@@ -134,6 +135,8 @@ function CanvasInner() {
 
   const level = useMemo(() => buildLevel(nodes, edges, parent, jump), [nodes, edges, parent, jump])
   const [rfNodes, setRfNodes] = useState<Node[]>(level.rfNodes)
+  const rfNodesRef = useRef<Node[]>(level.rfNodes)
+  rfNodesRef.current = rfNodes
   useEffect(() => { setRfNodes(level.rfNodes) }, [level.rfNodes])
 
   // entering or leaving a meta-node lands you looking at its contents
@@ -177,10 +180,91 @@ function CanvasInner() {
     setRfNodes((ns) => applyNodeChanges(changes, ns))
   }, [])
 
+  // --------------------------------------------------------- elastic drag --
+  // A mind map is held together by its relationships, not by a grid: pull one
+  // card and what it is connected to comes along, less and less with distance,
+  // so the shape of an idea survives being moved. Hold Alt to move one alone.
+  const HOP_PULL = [0.55, 0.26, 0.1]
+  const drag = useRef<{
+    from: Map<string, { x: number; y: number }>
+    pull: Map<string, number>
+    lead: string
+  } | null>(null)
+
+  const onNodeDragStart = useCallback((event: MouseEvent | TouchEvent, node: Node,
+                                       dragged: Node[]) => {
+    drag.current = null
+    if ((event as MouseEvent).altKey || node.id.startsWith('ghost:')) return
+    const moving = new Set(dragged.map((n) => n.id))
+    moving.add(node.id)
+
+    const near = new Map<string, string[]>()
+    const join = (a: string, b: string) => {
+      const list = near.get(a)
+      if (list) list.push(b)
+      else near.set(a, [b])
+    }
+    for (const e of level.rfEdges) {
+      if (e.source.startsWith('ghost:') || e.target.startsWith('ghost:')) continue
+      join(e.source, e.target)
+      join(e.target, e.source)
+    }
+
+    const pull = new Map<string, number>()
+    let ring = [...moving]
+    const seen = new Set(ring)
+    for (const strength of HOP_PULL) {
+      const next: string[] = []
+      for (const id of ring) {
+        for (const other of near.get(id) ?? []) {
+          if (seen.has(other)) continue
+          seen.add(other)
+          pull.set(other, strength)
+          next.push(other)
+        }
+      }
+      if (!next.length) break
+      ring = next
+    }
+    if (!pull.size) return
+
+    const from = new Map<string, { x: number; y: number }>()
+    for (const n of rfNodesRef.current) {
+      if (pull.has(n.id) || n.id === node.id) from.set(n.id, { ...n.position })
+    }
+    drag.current = { from, pull, lead: node.id }
+  }, [level.rfEdges])
+
+  const onNodeDrag = useCallback((_: unknown, node: Node) => {
+    const d = drag.current
+    if (!d || node.id !== d.lead) return
+    const start = d.from.get(node.id)
+    if (!start) return
+    const dx = node.position.x - start.x
+    const dy = node.position.y - start.y
+    setRfNodes((ns) => ns.map((n) => {
+      const k = d.pull.get(n.id)
+      const origin = d.from.get(n.id)
+      if (!k || !origin) return n
+      return { ...n, position: { x: origin.x + dx * k, y: origin.y + dy * k } }
+    }))
+  }, [])
+
   const commitMoves = useCallback((_: unknown, __: Node, dragged: Node[]) => {
+    const seen = new Set<string>()
     const moves = dragged
       .filter((n) => !n.id.startsWith('ghost:'))
       .map((n) => ({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) }))
+    moves.forEach((m) => seen.add(m.id))
+    const d = drag.current
+    if (d) {
+      // the followers land in the same op, so one undo puts everything back
+      for (const n of rfNodesRef.current) {
+        if (!d.pull.has(n.id) || seen.has(n.id)) continue
+        moves.push({ id: n.id, x: Math.round(n.position.x), y: Math.round(n.position.y) })
+      }
+    }
+    drag.current = null
     if (moves.length) useStore.getState().run([{ kind: 'node.move', moves }])
   }, [])
 
@@ -241,8 +325,17 @@ function CanvasInner() {
         if (path.length) goTo(path.length - 1)
         return
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selected.length) {
-        e.preventDefault(); deleteNodes(selected); return
+      const selEdges = useUI.getState().selectedEdges
+      if ((e.key === 'Delete' || e.key === 'Backspace') && (selected.length || selEdges.length)) {
+        e.preventDefault()
+        if (selEdges.length) deleteEdges(selEdges)
+        if (selected.length) deleteNodes(selected)
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'd' && selected.length) {
+        e.preventDefault()
+        void duplicateNodes(selected).then((ids) => reveal(ids[0] ?? null))
+        return
       }
       if (e.key === 'Enter' && selected.length === 1) {
         e.preventDefault(); setUI('editingId', selected[0])
@@ -250,7 +343,34 @@ function CanvasInner() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [nodes, parent, path, undo, redo, goTo, setUI, fitView, runExport, stopLinking])
+  }, [nodes, parent, path, undo, redo, goTo, setUI, fitView, runExport, stopLinking, reveal])
+
+  // ---------------------------------------------------------- copy / cut --
+  // The clipboard gets the words, so pasting into any other app reads sensibly;
+  // the copy kept here is what a paste back into Mindboard rebuilds from.
+  useEffect(() => {
+    const take = (e: ClipboardEvent, cut: boolean) => {
+      if (typing(e.target)) return
+      const picked = useUI.getState().selected
+      if (!picked.length) return
+      const clip = buildClip(picked)
+      if (!clip) return
+      e.preventDefault()
+      e.clipboardData?.setData('text/plain', clipText(clip))
+      setClip(clip)
+      const n = clip.nodes.length
+      say(`${cut ? 'cut' : 'copied'} ${n} node${n === 1 ? '' : 's'}`)
+      if (cut) deleteNodes(picked)
+    }
+    const onCopy = (e: ClipboardEvent) => take(e, false)
+    const onCut = (e: ClipboardEvent) => take(e, true)
+    window.addEventListener('copy', onCopy)
+    window.addEventListener('cut', onCut)
+    return () => {
+      window.removeEventListener('copy', onCopy)
+      window.removeEventListener('cut', onCut)
+    }
+  }, [say])
 
   // --------------------------------------------------------------- paste --
   useEffect(() => {
@@ -264,7 +384,16 @@ function CanvasInner() {
           files.length === 1).then((id) => i === 0 && reveal(id)))
         return
       }
-      const text = e.clipboardData?.getData('text/plain')?.trim()
+      const text = e.clipboardData?.getData('text/plain')?.replace(/\r\n/g, '\n').trim()
+      // nodes copied from a board come back as nodes - matched against the copy
+      // kept at copy time, so an unrelated clipboard never turns into cards
+      const clip = getClip()
+      if (clip && text === clipText(clip)) {
+        e.preventDefault()
+        const [cx, cy] = centre()
+        void pasteClip(clip, [cx, cy], parent).then((ids) => reveal(ids[0] ?? null))
+        return
+      }
       if (!text) return
       e.preventDefault()
       const [x, y] = centre()
@@ -323,9 +452,15 @@ function CanvasInner() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
         onNodeDragStop={commitMoves}
-        onSelectionChange={({ nodes: sel }) =>
-          setUI('selected', sel.filter((n) => !n.id.startsWith('ghost:')).map((n) => n.id))}
+        onSelectionChange={({ nodes: sel }) => {
+          const picked = sel.filter((n) => !n.id.startsWith('ghost:')).map((n) => n.id)
+          setUI('selected', picked)
+          // picking a card puts down whatever relationship was in hand
+          if (picked.length) setUI('selectedEdges', [])
+        }}
         onConnect={(c) => {
           if (c.source && c.target) connect(c.source, c.target)
           stopLinking()
@@ -362,6 +497,7 @@ function CanvasInner() {
           stopLinking()
         }}
         onPaneClick={(e) => {
+          setUI('selectedEdges', [])
           const active = useUI.getState().linking
           if (!active) return
           const src = useStore.getState().nodes[active.sourceId]

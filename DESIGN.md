@@ -152,7 +152,7 @@ CREATE TABLE node_asset (                      -- many-to-many, enables GC
 // video
 { "sha256": "cd34…", "poster": "ef56…", "start_ms": 0, "loop": false }
 // link
-{ "url": "https://…", "title": "…", "favicon": "…", "excerpt": "…" }
+{ "url": "https://…", "host": "…", "excerpt": "…", "thumb": "9a7b…", "provider": "YouTube" }
 // file
 { "sha256": "…", "filename": "notes.pdf" }
 // meta
@@ -161,6 +161,13 @@ CREATE TABLE node_asset (                      -- many-to-many, enables GC
 
 Keeping the payload in one JSON column means a new node type in v2 is a
 frontend component plus a schema entry — **no migration**.
+
+Every one of those hashes is a file the board owns, whichever key it sits under
+(`sha256`, `poster`, `thumb`, and whatever the next card type invents). Export,
+backup and `gc` therefore find them **by shape** — a 64-character hex string
+anywhere in `content_json` — never by a list of key names. The list version of
+this shipped first and had already lost `thumb`: link covers were left out of
+every bundle and `gc` would have deleted them off disk. See §16.
 
 ### Two decisions worth flagging now
 
@@ -428,7 +435,11 @@ menu bar entirely (import, export, theme, search, jump-to-node, wrap selection).
 | New media node | Drag a file onto the canvas, or paste an image / URL |
 | Connect | Hover a node and four **⊕ ports** appear. *Click* one, a line follows the cursor, click any node to finish. Dragging from the same port still works for anyone who prefers it |
 | Connect + create | Drag from a port — or, while linking, click **empty canvas** → creates a node and connects it. This is the fast idea-flow path — the single most important interaction in the app |
-| Label a relationship | Click the edge → inline input on the line |
+| Select a relationship | Click it — the line lights up and its label grows an ✕. `Delete` removes it |
+| Label a relationship | Double-click the edge → inline input on the line |
+| Copy / cut / paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` — takes the cards, the relationships between them, and the contents of any group |
+| Duplicate | `Ctrl+D`, or the ⧉ button on a card |
+| Move one card alone | Hold `Alt` while dragging |
 | Group into meta-node | Select → `Ctrl+G` |
 | Enter / leave meta-node | Double-click / `Esc` |
 | Search & jump | `Ctrl+K`, type, `Enter` — canvas pans and highlights |
@@ -860,3 +871,81 @@ Hovering a card reveals rename, export and delete. Clicking enters the canvas an
 launcher is gone until you ask for it (`Ctrl+K` → *Switch board*, or the
 breadcrumb root). Same dark palette, same type scale — it reads as the same
 application, not a separate shell.
+
+
+---
+
+## 16. Second pass on the canvas (2026-08-30)
+
+Seven things Sina asked for after living with v1 for a day. Recorded because
+each one changed a decision, not just a line of code.
+
+### Media belongs to the board, and the whole of it gets backed up
+
+Anything dropped, pasted or uploaded is **copied into the app's own folder** —
+`%APPDATA%\Mindboard\boards\<board>\assets\<xx>\<sha256>.<ext>` on Windows,
+`~/Library/Application Support/Mindboard/...` on macOS, `mindboard where` prints
+it anywhere. A node stores the hash and the original file name, never a path
+into the user's disk, so moving or deleting the original cannot empty a card,
+and a backup is complete by construction.
+
+Two things were wrong and are now fixed:
+
+- **`referenced_assets` matched a fixed list of keys** (`sha256`, `poster`). A
+  link's cover picture lives under `thumb`, so covers were silently missing from
+  every `.mindboard` bundle and every backup — and `mindboard gc` would have
+  deleted them from disk while the node still showed them. It now scans
+  `content_json` for anything shaped like a hash. Tests pin all three kinds.
+- **Uploads were read whole into memory** (`await file.read()`). An hour of
+  screen recording is gigabytes. `store_stream` now copies a megabyte at a time
+  into a `.part` file beside its destination, hashing as it goes, and renames it
+  into place only once it is whole — so a failed upload leaves nothing behind and
+  a duplicate costs no second copy. The endpoint became a plain `def`, so it
+  runs on a worker thread and a long upload does not stall the app.
+
+`POST /boards/{id}/assets/copy` gives one board its own copy of another board's
+file. Each board stays a complete thing: export it, delete every other board,
+and it still shows everything.
+
+### Copy and paste
+
+`Ctrl+C` puts the **readable text** of the selected cards on the system
+clipboard — paste into any other app and you get the words — while the shape of
+those cards is kept in the tab (`sessionStorage`, so it survives opening another
+board). A paste is recognised by matching the clipboard text against that copy,
+which is what stops an unrelated clipboard from turning into cards.
+
+What travels: the cards, the relationships whose **both** ends were copied, and
+everything inside a copied group. Media travels as a hash, and if the paste
+lands on a different board the file is copied there first. The whole paste is
+one op, so one `Ctrl+Z` takes it back.
+
+### Relationships read in words and are easy to remove
+
+The mid-edge chip now says what the relationship is — *causes*, *is part of* —
+next to its glyph, with any label the user typed after a middle dot. Colour and
+shape alone were never enough, and are useless in a printed export.
+
+Selection could not live in xyflow: the edges array is derived from the store
+and re-supplied on every render, so the library's own edge selection was
+overwritten immediately. Edge selection is ours (`ui.selectedEdges`); node
+selection stays xyflow's, because node changes already flow back through
+`onNodesChange`.
+
+### The card toolbar is laid out, not wrapped
+
+It was one flex row with dividers, wrapping wherever the width ran out — which
+put the *default colour* ✕ next to the font size and left the bin on a row of
+its own. It is now three deliberate rows separated by hairlines: **colour**
+(swatches, default, the three tones), **text** (size, bullet and numbered
+lists), **the card itself** (open/ungroup for a group, add-connected, duplicate,
+and the bin pushed to the far right, away from everything else).
+
+### Dragging pulls the graph with it
+
+A mind map is held together by its relationships. Dragging a card now pulls what
+it is connected to along with it: 55% of the movement at one hop, 26% at two,
+10% at three, nothing beyond. The shape of an idea survives being moved instead
+of stretching out of recognition. Hold `Alt` to move one card alone. Followers
+land in the same `node.move` op as the card that pulled them, so one undo puts
+the whole arrangement back.

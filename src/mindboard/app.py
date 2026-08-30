@@ -15,8 +15,8 @@ from starlette.background import BackgroundTask
 
 from . import __version__
 from .assets import (
-    fetch_bytes, fetch_url, link_asset, parse_range, resolve, store_bytes, stream_file,
-    thumbnail,
+    copy_asset, fetch_bytes, fetch_url, link_asset, parse_range, resolve, store_bytes,
+    store_stream, stream_file, thumbnail,
 )
 from .boards import board_meta, conn_for, create_board, delete_board, list_boards
 from .bundle import (
@@ -133,7 +133,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
 
     # -------------------------------------------------------------- assets --
     @app.post("/api/boards/{bid}/assets")
-    async def api_upload_asset(
+    def api_upload_asset(
         bid: str,
         file: UploadFile = File(...),
         node_id: Optional[str] = Form(None),
@@ -142,19 +142,38 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         height: Optional[int] = Form(None),
         duration_ms: Optional[int] = Form(None),
     ):
+        """Take a copy of the file. The board owns it from here on.
+
+        Streamed rather than read whole: an hour of screen recording is several
+        gigabytes, and this endpoint should not need that much memory to accept
+        one. A plain `def` on purpose - it runs on a worker thread, so a long
+        upload does not stall the rest of the app.
+        """
         board_or_404(bid)
-        data = await file.read()
-        if not data:
-            raise HTTPException(400, "empty file")
         c = conn_for(dd, bid)
-        info = store_bytes(
-            dd, c, bid, data,
-            declared_mime=file.content_type or "",
-            orig_name=file.filename or "",
-            width=width, height=height, duration_ms=duration_ms,
-        )
+        try:
+            info = store_stream(
+                dd, c, bid, file.file,
+                declared_mime=file.content_type or "",
+                orig_name=file.filename or "",
+                width=width, height=height, duration_ms=duration_ms,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         if node_id:
             link_asset(c, node_id, info["sha256"], role)
+        return info
+
+    @app.post("/api/boards/{bid}/assets/copy")
+    def api_copy_asset(bid: str, payload: dict):
+        """Copy one file from another board - what a node pasted across boards needs."""
+        board_or_404(bid)
+        src = (payload or {}).get("from_board", "")
+        sha = (payload or {}).get("sha256", "")
+        board_or_404(src)
+        info = copy_asset(dd, src, conn_for(dd, src), bid, conn_for(dd, bid), sha)
+        if info is None:
+            raise HTTPException(404, "no such asset")
         return info
 
     @app.post("/api/boards/{bid}/assets/from-url")
