@@ -20,6 +20,7 @@ import { Shortcuts } from './Shortcuts'
 import { ThemeSheet } from './ThemeSheet'
 import type { MEdge, MNode } from './types'
 import { useUI } from './ui'
+import { Viewer } from './Viewer'
 
 interface Level { rfNodes: Node[]; rfEdges: Edge[] }
 
@@ -882,6 +883,9 @@ export function Canvas() {
   return (
     <ReactFlowProvider>
       <CanvasInner />
+      {/* outside the stage on purpose: pointer, double-click and drop events
+          on the viewer must never bubble into the canvas's own handlers */}
+      <Viewer />
     </ReactFlowProvider>
   )
 }

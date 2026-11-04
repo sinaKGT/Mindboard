@@ -367,11 +367,33 @@ export function ImageNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
   const boardId = useStore((s) => s.boardId)
   const sha = node.content.sha256
+  const down = useRef<{ x: number; y: number } | null>(null)
+
+  /** A click on the picture opens it full screen, the way a click on a link's
+   *  cover opens the link. Detected from pointer travel, like a port: a press
+   *  that moves is xyflow dragging the card, and xyflow swallows the `click`
+   *  after any movement at all, so a hand that wobbles by a pixel would
+   *  otherwise never get the viewer. Modifier clicks are selection, and a click
+   *  while connecting is finishing the connection - neither opens anything. */
+  const onPointerDown = (e: React.PointerEvent) => {
+    const plain = e.button === 0 && !(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)
+    down.current = plain ? { x: e.clientX, y: e.clientY } : null
+  }
+  const onPointerUp = (e: React.PointerEvent) => {
+    const start = down.current
+    down.current = null
+    if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_SLOP) return
+    const ui = useUI.getState()
+    if (ui.linking) return
+    ui.set('viewing', { nodeId: node.id, openedAt: Date.now() })
+  }
+
   return (
     <Shell node={node} selected={selected} resizable>
       {sha && boardId
-        ? <img className="media" src={api.assetUrl(boardId, sha)} alt={node.content.alt ?? ''}
-            draggable={false} />
+        ? <img className="media viewable" src={api.assetUrl(boardId, sha)}
+            alt={node.content.alt ?? ''} draggable={false} title="Click to view full screen"
+            onPointerDown={onPointerDown} onPointerUp={onPointerUp} />
         : null}
       <NodeText node={node} placeholder="Untitled image"
         bodyPlaceholder="What does this image show?" />

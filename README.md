@@ -60,7 +60,8 @@ option has a command behind it — see **Commands** below.
 | Move a node **with** what it is connected to | hold `Alt` and drag — the links behave like springs, so the graph swings along and settles |
 | Copy / cut / paste nodes | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` — relationships and group contents come too, across boards as well |
 | Duplicate a node | `Ctrl+D`, or the ⧉ button in its toolbar |
-| Write on any node | double-click it — including on a picture |
+| See a picture full screen | click it. Scroll to zoom, drag to move, double-click for actual size, **F** for the whole screen, `Esc` to close |
+| Write on any node | double-click it — on a picture card, double-click the caption, or select the card and press `Enter` |
 | Change text size | **A / A** in the toolbar, or click the number for a menu |
 | Bullet or numbered list | the list buttons in the toolbar — Enter continues the list as you type |
 | Recolour a node | pick a colour, then one of the three tones: bar, tinted, or solid |

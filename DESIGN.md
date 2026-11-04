@@ -433,6 +433,7 @@ menu bar entirely (import, export, theme, search, jump-to-node, wrap selection).
 |---|---|
 | New text node | **`a`** — lands under the pointer, in edit mode. Double-clicking empty canvas does the same |
 | New media node | Drag a file onto the canvas, or paste an image / URL |
+| See a picture full screen | Click it (§21) |
 | Connect | Hover a node and four **⊕ ports** appear. *Click* one, a line follows the cursor, click any node to finish. Dragging from the same port still works for anyone who prefers it |
 | Connect + create | Drag from a port — or, while linking, click **empty canvas** → creates a node and connects it. This is the fast idea-flow path — the single most important interaction in the app |
 | Select a relationship | Click it — the line lights up and its label grows an ✕. `Delete` removes it |
@@ -517,9 +518,10 @@ body, converts that node in place. Pasting a YouTube address into a text
 box and got the text — reasonable behaviour for a text box, and useless. The
 address is never what you meant.
 
-**Double-click anywhere on a node writes on it**, handled once by the canvas so
-it works over a picture as readily as over its caption. Only a `<video>` keeps
-its own double-click, for the player. Dropping a single file also opens its
+**Double-click anywhere on a node writes on it**, handled once by the canvas.
+Two things keep their own: a `<video>`, for the player, and — since §21 — the
+picture on an image card, where a single click opens it full screen. Write on a
+picture card by double-clicking its caption, or select it and press `Enter`. Dropping a single file also opens its
 caption straight away — a picture usually arrives with something to say about
 it.
 
@@ -1139,3 +1141,80 @@ One trap worth recording: the first version took the pointer. A 236×278 panel
 with a background sitting over a corner of the canvas meant a card underneath it
 could not be dragged, which a drag-into-group test caught immediately.
 `pointer-events: none` on the panel, `auto` on its close button.
+---
+
+## 21. Pictures, full screen (v2, 2026-11-04)
+
+A picture on a card is shown at card size, which is fine for a photo and
+useless for a screenshot of a page: the text in it is too small to read. **A
+click on the picture now opens it full screen** — the same rule link covers
+already followed, where a click opens the thing itself.
+
+The viewer fills the window on near-black, fitted but never blown up past the
+picture's own pixels (a small picture enlarged to fill the screen only looks
+worse). Scroll zooms around the pointer, dragging moves the picture,
+double-click flips between fitted and actual pixels, `0` / `1` / `+` / `-` do the
+same from the keyboard, **F** takes it to the whole screen, and `Esc`, the ✕, or
+a click on the dark around it closes it. The file is the one the card already
+loaded, so opening it fetches nothing. It is interface state in `ui.ts` — never
+an op, never saved, nothing to undo — and lives in `Viewer.tsx`.
+
+**What it cost.** Double-clicking the picture used to start writing on the card
+(§8). It cannot do both: the first click of a double-click has already opened
+the viewer. Writing on a picture card is now a double-click on its caption, or
+`Enter` with the card selected.
+
+### Traps, and what holds each one shut
+
+- **The click is measured, not listened for.** xyflow suppresses the `click`
+  after *any* pointer movement — a hand that wobbles by one pixel would never
+  get the viewer. The picture records where the press began and opens on
+  release if the pointer travelled less than `CLICK_SLOP` (6px), exactly as a
+  port does. More than that is xyflow dragging the card, which still works from
+  anywhere on the picture. A modifier click is selection, and a click while
+  connecting is finishing the connection; neither opens anything.
+- **Modal in fact, not just in looks.** The canvas listens for keys and the
+  clipboard on `window`. With a card selected behind the viewer, `Delete` would
+  remove it, `Esc` would also leave the group, `Ctrl+X` would cut it, `Ctrl+V`
+  would paste onto the board, `Ctrl+E` would export. The viewer stops
+  `keydown`, `keyup`, `copy`, `cut` and `paste` in the capture phase at
+  `window`, before any other listener sees them. One guard in the one place
+  that knows a modal is open, rather than a check in every handler that might
+  one day be written.
+- **Mounted outside the stage.** The viewer is a sibling of the canvas, not a
+  child, so its pointer, double-click and drop events never bubble into the
+  canvas's own handlers. It also cancels drops itself — otherwise a file dropped
+  on it would make the browser navigate away to the file.
+- **The second click of a double-click lands on the viewer.** Left alone it
+  would close it (a click on the dark) or zoom it (a double-click on the
+  picture). For half a second after opening the viewer ignores both — the same
+  rule, and the same 500ms, as a link cover.
+- **Pointer capture moves every click to the root.** Dragging holds pointer
+  capture, so the browser reports clicks and double-clicks as landing on the
+  viewer itself, never on the picture. "Was that on the picture?" is answered
+  from geometry, not from `event.target`.
+- **Sized, not scaled.** The picture is zoomed by setting its width and height
+  and moved with `translate`. A CSS `scale()` lets the browser raster the
+  picture once and stretch the result, which blurs exactly when you zoom in to
+  read. From 300% up it renders as pixels rather than as a smear.
+- **The wheel is a native listener.** React's wheel handler is passive, so it
+  cannot `preventDefault`, and a trackpad pinch (which arrives as ctrl+wheel)
+  would zoom the whole page instead of the picture.
+
+### Verified
+
+In a browser against a scratch board (a 2400×1600 page of small text, a
+260×170 picture, a picture inside a group): click opens fitted at 39%; the
+small picture opens at exactly 100%; scrolling zooms around the pointer;
+double-click goes to actual pixels at the point clicked and back; drag pans
+without closing; a click on the dark closes. With the card selected behind
+the viewer, `Delete`, `a`, `Ctrl+E`, a `cut` and a `paste` changed nothing —
+same node count, same board revision. `Esc` inside a group closed the viewer
+and stayed in the group. Connecting by clicking a picture made the edge and
+opened nothing; dragging a card by its picture moved it and opened nothing; a
+double-click on the picture opened the viewer once and left it open.
+
+**Not verified:** true full screen. The automated browser's input never counts
+as a user gesture, and the Fullscreen API refuses anything else. It is the
+standard API and a real key press qualifies, but that check was left to a
+person.

@@ -19,6 +19,9 @@ interface UI {
   /** The group a dragged node is hovering over, about to go inside. */
   dropTarget: string | null
   sparkIds: string[]
+  /** The image card open full screen. While it is set the canvas behind it
+   *  takes no keys, clipboard or drops - see Viewer.tsx. */
+  viewing: { nodeId: string; openedAt: number } | null
   set<K extends keyof UI>(key: K, value: UI[K]): void
 }
 
@@ -35,5 +38,6 @@ export const useUI = create<UI>()((set) => ({
   selectedEdges: [],
   dropTarget: null,
   sparkIds: [],
-  set: (key, value) => set({ [key]: value } as any),
+  viewing: null,
+  set:(key, value) => set({ [key]: value } as any),
 }))

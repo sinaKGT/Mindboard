@@ -833,3 +833,57 @@ a.btn { text-decoration: none; }
 }
 .keys-chip:hover { color: var(--mb-text); border-color: var(--mb-border-strong); }
 .stage.exporting .keys, .stage.exporting .keys-chip { display: none; }
+
+/* ---------------------------------------------------------------- viewer -- */
+/* A picture opened full screen (Viewer.tsx). Always dark, whatever the theme:
+   a picture on a white page reads washed out, and the point is to read it. */
+.mb-node img.media.viewable { cursor: zoom-in; }
+
+.viewer {
+  position: fixed; inset: 0; z-index: 55; overflow: hidden; outline: none;
+  background: #05070af2; backdrop-filter: blur(6px);
+  cursor: grab; user-select: none; touch-action: none;
+  animation: fade 140ms var(--mb-ease);
+}
+.viewer:active { cursor: grabbing; }
+/* Sized by width and height, moved by translate - never scaled by transform,
+   which would raster the picture once and blur it as you zoom in. */
+.viewer-img {
+  position: absolute; left: 0; top: 0; max-width: none; max-height: none;
+  box-shadow: 0 12px 60px -12px #000;
+  animation: fade 180ms var(--mb-ease);
+}
+/* close enough to count pixels: show them as pixels, not as a smear */
+.viewer-img.pixels { image-rendering: pixelated; }
+.viewer.easing .viewer-img {
+  transition: width 180ms var(--mb-ease), height 180ms var(--mb-ease),
+    transform 180ms var(--mb-ease);
+}
+
+.viewer-bar {
+  position: absolute; top: 12px; right: 14px; display: flex; align-items: center; gap: 2px;
+  padding: 3px; border-radius: 10px; cursor: default;
+  background: #12151bcc; border: 1px solid #ffffff14;
+}
+.viewer-btn, .viewer-zoom {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 30px; border-radius: 7px; color: #a3abb9;
+  transition: background var(--mb-dur) var(--mb-ease), color var(--mb-dur) var(--mb-ease);
+}
+.viewer-btn { width: 30px; }
+.viewer-zoom { min-width: 52px; padding: 0 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.viewer-btn:hover, .viewer-zoom:hover { background: #ffffff14; color: #f2f4f8; }
+
+/* backed like the bar above, so it stays legible over a zoomed-in picture
+   rather than printing itself across the page being read */
+.viewer-caption {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  width: max-content; max-width: min(760px, 90vw); text-align: center; pointer-events: none;
+  padding: 6px 14px 7px; border-radius: 10px;
+  background: #12151bcc; border: 1px solid #ffffff14; backdrop-filter: blur(6px);
+}
+.viewer-title {
+  color: #e7eaf0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.viewer-hint { margin-top: 2px; color: #8b93a2; font-size: 11.5px; }
