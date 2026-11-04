@@ -15,7 +15,7 @@ const KEYS: { keys: string[]; what: string }[] = [
   { keys: ['a'], what: 'new card where you point' },
   { keys: ['c'], what: 'connect it, then click a card' },
   { keys: ['drag'], what: 'move a card' },
-  { keys: ['click a picture'], what: 'see it full screen' },
+  { keys: ['click a picture or PDF'], what: 'open it' },
   { keys: [ALT, 'drag'], what: 'move it with its links' },
   { keys: ['drop on a group'], what: 'put the card inside' },
   { keys: [MOD, 'G'], what: 'group what is selected' },

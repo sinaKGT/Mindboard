@@ -77,18 +77,34 @@ def open_in_browser(url: str, delay: float = 1.0) -> None:
                      daemon=True).start()
 
 
+def _launch(path: Path) -> None:
+    """Hand a path to whatever this computer opens it with. Raises OSError when
+    nothing will - on Windows, a file type with no app associated."""
+    if sys.platform.startswith("win"):
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return
+    cmd = ["open", str(path)] if sys.platform == "darwin" else ["xdg-open", str(path)]
+    try:
+        subprocess.run(cmd, check=True, timeout=15,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        raise OSError(f"could not open {path.name}") from exc
+
+
 def open_folder(path: Path) -> bool:
     """Show a folder in Explorer / Finder / the desktop file manager."""
     try:
-        if sys.platform.startswith("win"):
-            os.startfile(str(path))  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.run(["open", str(path)], check=False)
-        else:
-            subprocess.run(["xdg-open", str(path)], check=False)
+        _launch(path)
         return True
     except Exception:
         return False
+
+
+def open_file(path: Path) -> None:
+    """Open a file in the app this computer uses for its type - a PDF in your
+    PDF reader. Only ever given a working copy (assets.working_copy), never a
+    path that came from a request. Raises OSError if no app takes it."""
+    _launch(path)
 
 
 def quiet_disconnects() -> None:

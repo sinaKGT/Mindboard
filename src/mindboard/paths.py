@@ -50,6 +50,16 @@ class DataDir:
     def thumbs_dir(self, board_id: str) -> Path:
         return self.board_dir(board_id) / "thumbs"
 
+    @property
+    def opened(self) -> Path:
+        """Copies of board files handed to another app to open - a PDF to your
+        PDF reader. Outside the board folders on purpose: a reader holding one
+        open must not stop a board from being deleted. Regenerable; `gc` clears it."""
+        return self.root / "opened"
+
+    def opened_dir(self, board_id: str) -> Path:
+        return self.opened / board_id
+
     def asset_path(self, board_id: str, sha256: str, ext: str = "") -> Path:
         # sharded so a board with thousands of images stays browsable
         return self.assets_dir(board_id) / sha256[:2] / f"{sha256}{ext}"

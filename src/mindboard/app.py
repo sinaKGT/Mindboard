@@ -13,10 +13,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from . import __version__
+from . import __version__, runtime
 from .assets import (
-    copy_asset, fetch_bytes, fetch_url, link_asset, parse_range, resolve, store_bytes,
-    store_stream, stream_file, thumbnail,
+    NotOpenable, copy_asset, fetch_bytes, fetch_url, link_asset, parse_range, resolve,
+    store_bytes, store_stream, stream_file, thumbnail, working_copy,
 )
 from .boards import board_meta, conn_for, create_board, delete_board, list_boards
 from .bundle import (
@@ -240,6 +240,31 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                    "Content-Length": str(end - start + 1)}
         return StreamingResponse(stream_file(path, start, end), status_code=206,
                                  media_type=mime, headers=headers)
+
+    @app.post("/api/boards/{bid}/assets/{sha}/open")
+    def api_open_asset(bid: str, sha: str):
+        """Open one of the board's files in this computer's own app for it - a
+        PDF in your PDF reader.
+
+        A browser cannot start an app; this server can, because it runs on the
+        same machine as the person using it. What it opens is a read-only copy
+        under the file's real name (assets.working_copy), found by hash in this
+        board's own records - never a path from the request. Not an op: opening
+        a file changes nothing on the board.
+        """
+        board_or_404(bid)
+        try:
+            path = working_copy(dd, conn_for(dd, bid), bid, sha)
+        except FileNotFoundError:
+            raise HTTPException(404, "no such file on this board")
+        except NotOpenable as exc:
+            raise HTTPException(415, str(exc))
+        try:
+            runtime.open_file(path)
+        except OSError:
+            raise HTTPException(
+                409, f"no app on this computer opens {path.suffix.lstrip('.').upper()} files")
+        return {"opened": path.name}
 
     @app.get("/api/boards/{bid}/assets/{sha}/thumb")
     def api_get_thumb(bid: str, sha: str, size: int = 480):

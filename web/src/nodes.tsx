@@ -363,37 +363,44 @@ export function TextNode({ data, selected }: NodeProps) {
   )
 }
 
+/** A click that opens what a card holds - a picture full screen, a PDF in your
+ *  reader - the way a click on a link's cover opens the link.
+ *
+ *  Detected from pointer travel, like a port: a press that moves is xyflow
+ *  dragging the card, and xyflow swallows the `click` after any movement at
+ *  all, so a hand that wobbles by a pixel would otherwise never get it.
+ *  Modifier clicks are selection, and a click while connecting is finishing
+ *  the connection - neither opens anything. */
+function useClickToOpen(open: () => void) {
+  const down = useRef<{ x: number; y: number } | null>(null)
+  return {
+    onPointerDown: (e: React.PointerEvent) => {
+      const plain = e.button === 0 && !(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)
+      down.current = plain ? { x: e.clientX, y: e.clientY } : null
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      const start = down.current
+      down.current = null
+      if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_SLOP) return
+      if (useUI.getState().linking) return
+      open()
+    },
+  }
+}
+
 export function ImageNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
   const boardId = useStore((s) => s.boardId)
   const sha = node.content.sha256
-  const down = useRef<{ x: number; y: number } | null>(null)
-
-  /** A click on the picture opens it full screen, the way a click on a link's
-   *  cover opens the link. Detected from pointer travel, like a port: a press
-   *  that moves is xyflow dragging the card, and xyflow swallows the `click`
-   *  after any movement at all, so a hand that wobbles by a pixel would
-   *  otherwise never get the viewer. Modifier clicks are selection, and a click
-   *  while connecting is finishing the connection - neither opens anything. */
-  const onPointerDown = (e: React.PointerEvent) => {
-    const plain = e.button === 0 && !(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)
-    down.current = plain ? { x: e.clientX, y: e.clientY } : null
-  }
-  const onPointerUp = (e: React.PointerEvent) => {
-    const start = down.current
-    down.current = null
-    if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) >= CLICK_SLOP) return
-    const ui = useUI.getState()
-    if (ui.linking) return
-    ui.set('viewing', { nodeId: node.id, openedAt: Date.now() })
-  }
+  const press = useClickToOpen(() =>
+    useUI.getState().set('viewing', { nodeId: node.id, openedAt: Date.now() }))
 
   return (
     <Shell node={node} selected={selected} resizable>
       {sha && boardId
         ? <img className="media viewable" src={api.assetUrl(boardId, sha)}
             alt={node.content.alt ?? ''} draggable={false} title="Click to view full screen"
-            onPointerDown={onPointerDown} onPointerUp={onPointerUp} />
+            {...press} />
         : null}
       <NodeText node={node} placeholder="Untitled image"
         bodyPlaceholder="What does this image show?" />
@@ -503,18 +510,51 @@ export function LinkNode({ data, selected }: NodeProps) {
   )
 }
 
+/** What a file's name says it is, for its badge: PDF, DOCX, ZIP. */
+const extOf = (name: string) => (name.match(/\.([a-z0-9]{1,5})$/i)?.[1] ?? 'file').toUpperCase()
+
 export function FileNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node
   const boardId = useStore((s) => s.boardId)
+  const say = useStore((s) => s.say)
+  const sha = node.content.sha256 as string | undefined
+  // files fetched from a pasted link kept their name under `alt` before `filename`
+  const name: string = node.content.filename || node.content.alt || node.title || 'file'
+  const openable = !!sha && (node.content.mime === 'application/pdf' || /\.pdf$/i.test(name))
+  const lastOpen = useRef(0)
+
+  /** A PDF opens where you read PDFs - in your own reader, from a read-only
+   *  copy the server hands it. A double-click is still one intent. */
+  const press = useClickToOpen(() => {
+    if (!boardId || !sha) return
+    const now = Date.now()
+    if (now - lastOpen.current < 500) return
+    lastOpen.current = now
+    api.openAsset(boardId, sha)
+      .then((r) => say(`opened ${r.opened} in your PDF reader`))
+      .catch((err: Error) => say(err.message, true))
+  })
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation()
+
   return (
     <Shell node={node} selected={selected} resizable>
-      <div className="link-head">
-        <span className="fav" style={{ background: accentOf(node) }} />
-        <span className="host">{node.content.filename}</span>
-        {boardId && node.content.sha256 ? (
-          <a className="icon-btn nodrag" href={api.assetUrl(boardId, node.content.sha256)}
-            download={node.content.filename} onClick={(e) => e.stopPropagation()}>
-            <Icon name="download" size={12} />
+      <div className={`doc-face${openable ? ' openable' : ''}`}
+        title={openable ? 'Open in your PDF reader' : undefined}
+        // the click opens the file; writing on the card is the caption's job
+        onDoubleClick={openable ? stop : undefined}
+        {...(openable ? press : {})}>
+        <span className="doc-badge" style={{ ['--node-color' as string]: accentOf(node) }}>
+          {extOf(name)}
+        </span>
+        <span className="doc-label">
+          <span className="doc-name">{name}</span>
+          {openable ? <span className="doc-hint">Opens in your PDF reader</span> : null}
+        </span>
+        {boardId && sha ? (
+          <a className="icon-btn nodrag" href={api.assetUrl(boardId, sha)} download={name}
+            title="Save a copy somewhere else"
+            onClick={stop} onPointerDown={stop} onPointerUp={stop}>
+            <Icon name="download" size={13} />
           </a>
         ) : null}
       </div>

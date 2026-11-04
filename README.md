@@ -61,7 +61,8 @@ option has a command behind it — see **Commands** below.
 | Copy / cut / paste nodes | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` — relationships and group contents come too, across boards as well |
 | Duplicate a node | `Ctrl+D`, or the ⧉ button in its toolbar |
 | See a picture full screen | click it. Scroll to zoom, drag to move, double-click for actual size, **F** for the whole screen, `Esc` to close |
-| Write on any node | double-click it — on a picture card, double-click the caption, or select the card and press `Enter` |
+| Open a PDF | drop it on the board, then click it — it opens in your own PDF reader. What opens is a read-only copy, so to keep notes you make there, use *Save as* |
+| Write on any node | double-click it — on a picture or PDF card, double-click the caption, or select the card and press `Enter` |
 | Change text size | **A / A** in the toolbar, or click the number for a menu |
 | Bullet or numbered list | the list buttons in the toolbar — Enter continues the list as you type |
 | Recolour a node | pick a colour, then one of the three tones: bar, tinted, or solid |
@@ -93,6 +94,10 @@ mindboard where          # prints the folder
 On Windows it is `%APPDATA%\Mindboard`, on macOS
 `~/Library/Application Support/Mindboard`, and each board is its own folder
 inside it: `board.db` plus an `assets` folder of the files it shows.
+
+Beside them, an `opened` folder holds the read-only copies handed to your PDF
+reader. They are only copies: `mindboard gc` clears them, and nothing is lost if
+you delete the folder.
 
 ## Backing up
 

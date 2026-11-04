@@ -193,6 +193,9 @@ def delete_board(dd: DataDir, board_id: str) -> bool:
             c.close()
         except Exception:
             pass
+    # copies opened in another app go too, as far as that app allows
+    from .assets import clear_opened
+    clear_opened(dd.opened_dir(board_id))
     d = dd.board_dir(board_id)
     if d.exists():
         shutil.rmtree(d)

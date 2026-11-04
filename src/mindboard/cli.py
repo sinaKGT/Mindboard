@@ -349,7 +349,8 @@ def doctor(data_dir: Optional[str] = DataDirOpt, port: int = DEFAULT_PORT):
 
 @app.command()
 def gc(data_dir: Optional[str] = DataDirOpt, dry_run: bool = typer.Option(False, "--dry-run")):
-    """Delete media no node references any more."""
+    """Delete media no node references any more, and copies opened in other apps."""
+    from .assets import clear_opened
     from .boards import conn_for, list_boards
     from .bundle import referenced_assets
     from .ops import read_graph
@@ -367,6 +368,9 @@ def gc(data_dir: Optional[str] = DataDirOpt, dry_run: bool = typer.Option(False,
             if not dry_run:
                 p.unlink(missing_ok=True)
                 c.execute("DELETE FROM asset WHERE sha256=?", (row["sha256"],))
+    # working copies handed to a PDF reader are regenerable; any still open stay
+    _, copies = clear_opened(dd.opened, dry_run=dry_run)
+    freed += copies
     verb = "would free" if dry_run else "freed"
     typer.echo(f"{verb} {freed / 1024 / 1024:.1f} MB")
 

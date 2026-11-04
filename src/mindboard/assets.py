@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import tempfile
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -389,3 +390,118 @@ def stream_file(path: Path, start: int, end: int, chunk: int = 512 * 1024) -> It
                 break
             remaining -= len(data)
             yield data
+
+
+# ------------------------------------------------------- opening elsewhere --
+# A file the board owns can be handed to another app on this computer - a PDF
+# to your PDF reader. Three rules make that safe (DESIGN.md 22):
+#
+#  1. Only types listed here, judged by the type sniffed at upload *and* by the
+#     file's own first bytes. A program renamed `x.pdf` is stored as a PDF,
+#     because unknown bytes fall back to the declared type; it does not start
+#     with `%PDF-`, so it is refused here.
+#  2. The extension on the copy is written by us, from this table. Windows picks
+#     what to run by extension alone, so a file handed over can only ever reach
+#     the app for that type.
+#  3. The app gets a read-only copy, never the board's own file. That one is
+#     named by its hash; a reader saving notes into it would make the name a
+#     lie, and change every card that shares the file.
+
+OPENABLE: dict[str, tuple[str, bytes]] = {
+    "application/pdf": (".pdf", b"%PDF-"),
+}
+
+# path separators of both kinds, and everything else Windows refuses in a name
+_UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+_WIN_RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])$", re.IGNORECASE)
+
+
+class NotOpenable(ValueError):
+    """This file is not one Mindboard will hand to another app."""
+
+
+def safe_stem(name: str, fallback: str = "document") -> str:
+    """A file name, without its extension, that every OS will accept."""
+    stem = _UNSAFE_CHARS.sub("_", name or "").strip()
+    stem = stem.rsplit(".", 1)[0] if "." in stem else stem
+    stem = stem.strip(" .")
+    if not stem:
+        return fallback
+    if _WIN_RESERVED.match(stem.split(".")[0]):
+        stem = f"_{stem}"
+    return stem[:120].rstrip(" .")
+
+
+def working_copy(dd: DataDir, conn: sqlite3.Connection, board_id: str, sha: str) -> Path:
+    """A read-only copy of one of the board's files, under its real name, for
+    another app to open. Made once, then reused.
+
+    Lives in `opened/<board>/<first 16 of the hash>/<name>.<ext>`: the hash in
+    the folder keeps two different files called `notes.pdf` apart, and keeps the
+    name itself clean for the reader's title bar.
+
+    Raises FileNotFoundError for a file the board does not have, NotOpenable
+    for one it will not hand over.
+    """
+    row = conn.execute("SELECT mime, orig_name FROM asset WHERE sha256=?", (sha,)).fetchone()
+    src = resolve(dd, conn, board_id, sha)
+    if row is None or src is None:
+        raise FileNotFoundError(sha)
+    rule = OPENABLE.get(row["mime"])
+    if rule is None:
+        raise NotOpenable("only PDFs open in another app, for now")
+    ext, magic = rule
+    with src.open("rb") as fh:
+        if fh.read(len(magic)) != magic:
+            raise NotOpenable(f"that file is not really a {ext.lstrip('.').upper()}")
+
+    out = dd.opened_dir(board_id) / sha[:16] / f"{safe_stem(row['orig_name'] or '')}{ext}"
+    if out.exists() and out.stat().st_size == src.stat().st_size:
+        return out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # copied beside its destination and renamed into place, so an app never
+    # opens half a file, and two quick clicks never write the same .part
+    fd, tmp_name = tempfile.mkstemp(dir=str(out.parent), suffix=".part")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        shutil.copyfile(src, tmp)
+        if out.exists():
+            os.chmod(out, stat.S_IREAD | stat.S_IWRITE)
+        os.replace(tmp, out)
+    finally:
+        tmp.unlink(missing_ok=True)
+    # read-only: a reader asks for "Save as" rather than writing over the copy
+    os.chmod(out, stat.S_IREAD)
+    return out
+
+
+def clear_opened(root: Path, dry_run: bool = False) -> tuple[int, int]:
+    """Remove working copies under `root`. Returns (files, bytes) removed.
+
+    Files an app still holds open are left where they are - Windows will not
+    delete them, and they are only copies.
+    """
+    files = freed = 0
+    if not root.exists():
+        return 0, 0
+    for p in sorted(root.rglob("*"), reverse=True):
+        try:
+            if p.is_dir():
+                if not dry_run:
+                    p.rmdir()   # only succeeds once empty
+                continue
+            size = p.stat().st_size
+            if not dry_run:
+                os.chmod(p, stat.S_IREAD | stat.S_IWRITE)
+                p.unlink()
+            files += 1
+            freed += size
+        except OSError:
+            continue
+    if not dry_run:
+        try:
+            root.rmdir()
+        except OSError:
+            pass
+    return files, freed

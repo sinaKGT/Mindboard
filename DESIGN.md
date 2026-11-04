@@ -434,6 +434,7 @@ menu bar entirely (import, export, theme, search, jump-to-node, wrap selection).
 | New text node | **`a`** — lands under the pointer, in edit mode. Double-clicking empty canvas does the same |
 | New media node | Drag a file onto the canvas, or paste an image / URL |
 | See a picture full screen | Click it (§21) |
+| Open a PDF in your own reader | Click the card's face (§22) |
 | Connect | Hover a node and four **⊕ ports** appear. *Click* one, a line follows the cursor, click any node to finish. Dragging from the same port still works for anyone who prefers it |
 | Connect + create | Drag from a port — or, while linking, click **empty canvas** → creates a node and connects it. This is the fast idea-flow path — the single most important interaction in the app |
 | Select a relationship | Click it — the line lights up and its label grows an ✕. `Delete` removes it |
@@ -519,9 +520,10 @@ box and got the text — reasonable behaviour for a text box, and useless. The
 address is never what you meant.
 
 **Double-click anywhere on a node writes on it**, handled once by the canvas.
-Two things keep their own: a `<video>`, for the player, and — since §21 — the
-picture on an image card, where a single click opens it full screen. Write on a
-picture card by double-clicking its caption, or select it and press `Enter`. Dropping a single file also opens its
+Three things keep their own: a `<video>`, for the player; the picture on an
+image card, where a single click opens it full screen (§21); and the face of a
+PDF card, where a single click opens it in your reader (§22). Write on those
+cards by double-clicking the caption, or select one and press `Enter`. Dropping a single file also opens its
 caption straight away — a picture usually arrives with something to say about
 it.
 
@@ -1218,3 +1220,100 @@ double-click on the picture opened the viewer once and left it open.
 as a user gesture, and the Fullscreen API refuses anything else. It is the
 standard API and a real key press qualifies, but that check was left to a
 person.
+
+---
+
+## 22. A PDF opens in your own reader (v2, 2026-11-04)
+
+Dropping a PDF already made a `file` card holding the board's own copy (§16).
+What it could not do was the obvious thing: **a click on a PDF card now opens it
+in the PDF reader this computer already uses.** The card's top became a
+*document face* — a turned-page badge with the file's kind, its name, and
+"Opens in your PDF reader" — and that face takes the click, by the same
+pointer-travel rule as a picture (`useClickToOpen` in `nodes.tsx`, shared by
+both).
+
+**The server opens it, because the browser cannot.** No web page may start an
+app. Mindboard's server can, because it runs on the same machine as the person
+using it: `POST /api/boards/{id}/assets/{sha}/open` hands the file to the
+system's own opener — `os.startfile` on Windows, `open` / `xdg-open` elsewhere —
+the same path the launcher's *Open the data folder* has always used
+(`runtime._launch`). Nothing leaves the machine, and it is not an op: opening a
+file changes nothing on the board.
+
+**Linking the original was never possible.** An earlier plan offered to point
+at the file where it lives on disk, so a reader's annotations would land in the
+person's own copy. A browser never tells a page where a dropped file came from
+— a deliberate privacy rule — so a board can only ever hold its own copy, which
+is what §16 wanted anyway.
+
+### A read-only copy, never the board's file
+
+The board's file is named by its hash. A reader that saved annotations into it
+would make that name a lie: the bundle checksum would fail on import, and every
+card sharing those bytes would change at once. So the reader gets a copy:
+
+```
+<data dir>/opened/<board>/<first 16 of the hash>/<original name>.pdf
+```
+
+- **Its real name**, so the reader's title bar says `Siting report.pdf`, not 64
+  hex characters. The hash in the folder keeps two different `notes.pdf` apart.
+- **Read-only**, so a reader asks for *Save as* rather than writing over it.
+  Notes made in a reader therefore stay out of the board for now; bringing
+  them back as a new version of the card (one undoable op) was considered and
+  left for a later step.
+- **Outside the board folders.** A reader holding a file open stops Windows
+  deleting it; under the board folder, that would stop the *board* being
+  deleted. Copies are regenerable: `mindboard gc` clears them, deleting a board
+  clears its own, and either skips any a reader still has open.
+- **Made once, then reused**, copied beside its destination and renamed into
+  place, so a reader never opens half a file and two quick clicks never write
+  the same temporary file.
+
+### What will and will not be handed over
+
+Only types listed in `assets.OPENABLE` — today just PDF — and three checks have
+to agree:
+
+1. **The type sniffed at upload.** A picture or a CSV is refused (415).
+2. **The file's own first bytes.** Unknown bytes fall back to the declared type
+   at upload, so a program renamed `invoice.pdf` *is* stored as a PDF. It does
+   not begin with `%PDF-`, and that is what decides.
+3. **The extension is ours.** Windows chooses what to run by extension alone, so
+   the copy's name ends in the extension from `OPENABLE`, never whatever the
+   upload claimed. Whatever reaches the opener can only reach a PDF reader.
+
+The file is found by hash in the board's own records; the request never carries
+a path. Names are cleaned for every OS — separators of both kinds, the
+characters Windows refuses, reserved names like `CON` and `LPT1`, and anything
+past 120 characters. With no PDF app installed the answer is a plain "no app on
+this computer opens PDF files" (409), not a traceback.
+
+New file cards also carry their `mime` in `content`, so the card knows a PDF
+without guessing; older cards fall back to the `.pdf` on their name, and files
+fetched from a pasted link now get a `filename` as well.
+
+### Verified
+
+`tests/test_open.py`, 17 cases, with the system opener replaced so the suite
+never opens a window: the copy has the real name, identical bytes, is read-only
+and lives outside the board, whose own file keeps its hash and stays writable;
+reopening reuses the read-only copy; two files called `notes.pdf` stay apart;
+a PNG and a program dressed as a PDF are refused and nothing is launched; an
+unknown file, another board's file, a missing board and a missing key are
+refused; no PDF app gives the plain message; names are cleaned; `gc` clears
+copies and keeps the board's file; deleting a board takes its copies.
+
+In a browser, against a server whose opener only logged what it was given: a
+click on a PDF card handed over one read-only `Siting report.pdf` and said so;
+a card made before this change (no `mime`) opened the same way; a double-click
+opened it once and did not start editing; a CSV card showed its badge and
+opened nothing; dragging a card by its face moved it and opened nothing;
+connecting to a PDF card made the edge and opened nothing; the caption still
+takes a double-click to write. The picture viewer still opens after the click
+handling became shared.
+
+**Not verified here:** an actual reader window. That needs the real opener on a
+real desktop — including whether Windows lets the reader come to the front, or
+opens it behind the browser.

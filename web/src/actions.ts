@@ -116,7 +116,11 @@ export async function linkifyNode(nodeId: string, url: string): Promise<void> {
           type,
           title: got.orig_name || url.split('/').pop() || 'media',
           size: [320, null],
-          content: { sha256: got.sha256, alt: got.orig_name, source_url: url },
+          content: {
+            sha256: got.sha256, alt: got.orig_name, source_url: url,
+            // a file card shows its name and badge from these
+            ...(type === 'file' ? { filename: got.orig_name, mime: got.mime } : {}),
+          },
         },
       }])
     }
@@ -464,7 +468,7 @@ export async function addFile(file: File, pos: [number, number], parent: string 
       title: file.name.replace(/\.[^.]+$/, ''),
       size: [type === 'file' ? null : 320, null],
       content: type === 'file'
-        ? { sha256: info.sha256, filename: file.name }
+        ? { sha256: info.sha256, filename: file.name, mime: info.mime }
         : { sha256: info.sha256, alt: file.name, ...probed },
     })
     S().run([{ kind: 'node.create', node }])

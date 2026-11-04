@@ -67,6 +67,10 @@ export const api = {
     req<{ sha256: string; mime: string }>(`/boards/${boardId}/assets/copy`, {
       method: 'POST', body: JSON.stringify({ from_board: fromBoard, sha256: sha }),
     }),
+  /** Open one of the board's files in this computer's own app for it - a PDF
+   *  in your PDF reader. The server hands over a read-only copy; see app.py. */
+  openAsset: (boardId: string, sha: string) =>
+    req<{ opened: string }>(`/boards/${boardId}/assets/${sha}/open`, { method: 'POST' }),
   /** Accepts a single .mindboard bundle or a whole backup zip. */
   importBundle: async (file: File, mode: 'skip' | 'replace' | 'copy' = 'skip') => {
     const fd = new FormData()
