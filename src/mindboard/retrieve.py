@@ -1,37 +1,26 @@
 """Finding the cards a question is about: GraphRAG for a mind map
-(DESIGN.md 29).
+(DESIGN.md 29, 30).
 
-A board too big to send whole is searched instead. Two searches - by meaning
-(embeddings) and by wording (the full-text index the app already keeps) - are
-fused; the best cards seed a walk along the person's own typed relationships
-and into groups; the strongest cards that fit a token budget go to the model,
-with a short outline of the board's groups so a broad question still sees its
-shape.
-
-Card vectors are a derived index, like the full-text one: regenerable, never
-exported, never an op. Each is kept with a hash of the text it was made from,
-so a card is embedded again only when what it says has changed.
+A board too big to send whole is searched instead, against the board's search
+index (search_index.py): BM25 keywords with stemming and meaning by embedding,
+fused by reciprocal rank; phrases the person quoted are searched exactly and
+join the fusion; a typo search joins when the keywords found little. The best cards seed a walk along
+the person's own typed relationships and into groups; the strongest cards that
+fit a token budget go to the model, with a short outline of the board's groups
+so a broad question still sees its shape.
 """
 
 from __future__ import annotations
 
-import hashlib
-import re
-import sqlite3
-from array import array
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
-QUERY_INSTRUCT = ("Instruct: Given a question about a person's mind map, retrieve the "
-                  "cards that help answer it\nQuery:")
+from .search_index import QUERY_INSTRUCT, BoardIndex
+
 WHOLE_UNDER = 4000      # tokens of card text under which a board is sent whole (pictures come on top)
 BUDGET = 5000           # tokens of cards a search may send
-CANDIDATES = 24         # from each search
-SEEDS = 10              # the best of them, from which the walk starts
+SEEDS = 10              # the best fused cards, from which the walk starts
 RRF_K = 60
-STOP = set("""a an and are as at be but by can do does for from has have how i in is it its
-me my of on or our so that the their them then there these they this to was we what when
-where which who why will with you your about into over than also any all more most""".split())
 
 
 class Embedder(Protocol):
@@ -42,93 +31,13 @@ class Embedder(Protocol):
 class Found:
     ids: list[str]                                   # in the order they go to the model
     total: int                                       # cards on the board
-    how: str                                         # "meaning and wording" | "wording"
+    how: str                                         # what the search went by, in words
     scores: dict[str, float] = field(default_factory=dict)
 
 
-# ----------------------------------------------------------------- index --
-
-def card_doc(node: dict, nodes: dict[str, dict]) -> str:
-    """What a card says, as one passage to embed: title, where it sits, its words."""
-    c = node.get("content") or {}
-    parts = [node.get("title") or ""]
-    trail, cur = [], nodes.get(node.get("parent") or "")
-    while cur:
-        trail.insert(0, cur.get("title") or "")
-        cur = nodes.get(cur.get("parent") or "")
-    if trail:
-        parts.append("in " + " / ".join(t for t in trail if t))
-    for key in ("text", "summary", "excerpt", "alt", "filename", "url"):
-        value = str(c.get(key) or "").strip()
-        if value and value not in parts:
-            parts.append(value)
-    return "\n".join(p for p in parts if p)[:1500]
-
-
-def _hash(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
-
-
-def _pack(vec: list[float]) -> bytes:
-    return array("f", vec).tobytes()
-
-
-def _unpack(blob: bytes) -> list[float]:
-    a = array("f")
-    a.frombytes(blob)
-    return a.tolist()
-
-
-def refresh(conn: sqlite3.Connection, nodes: dict[str, dict], embedder: Embedder,
-            model: str) -> dict[str, list[float]]:
-    """Every card's vector, embedding only the cards that are new or changed."""
-    have = {r["node_id"]: r for r in conn.execute(
-        "SELECT node_id, model, text_hash, vec FROM node_embedding")}
-    docs = {nid: card_doc(n, nodes) for nid, n in nodes.items()}
-    stale = [nid for nid, doc in docs.items()
-             if nid not in have or have[nid]["model"] != model
-             or have[nid]["text_hash"] != _hash(doc)]
-    vectors = {nid: _unpack(have[nid]["vec"]) for nid in docs if nid not in stale}
-    if stale:
-        fresh = embedder.embed([docs[nid] for nid in stale])
-        for nid, vec in zip(stale, fresh):
-            vectors[nid] = vec
-            conn.execute(
-                "INSERT OR REPLACE INTO node_embedding (node_id, model, vec, text_hash) "
-                "VALUES (?,?,?,?)", (nid, model, _pack(vec), _hash(docs[nid])))
-    return vectors
-
-
-# ---------------------------------------------------------------- search --
-
-def _terms(question: str) -> list[str]:
-    words = re.findall(r"\w+", question.lower())
-    return [w for w in words if len(w) > 2 and w not in STOP][:12]
-
-
-def by_wording(conn: sqlite3.Connection, question: str, scope: set[str]) -> list[str]:
-    terms = _terms(question)
-    if not terms:
-        return []
-    match = " OR ".join(f'"{t}"*' for t in terms)
-    try:
-        rows = conn.execute("SELECT node_id FROM node_fts WHERE node_fts MATCH ? "
-                            "ORDER BY bm25(node_fts) LIMIT ?", (match, CANDIDATES * 3)).fetchall()
-    except sqlite3.OperationalError:
-        return []
-    return [r["node_id"] for r in rows if r["node_id"] in scope][:CANDIDATES]
-
-
-def by_meaning(qvec: list[float], vectors: dict[str, list[float]],
-               scope: set[str]) -> tuple[list[str], dict[str, float]]:
-    sims = {nid: sum(a * b for a, b in zip(qvec, v)) for nid, v in vectors.items() if nid in scope}
-    ranked = sorted(sims, key=sims.get, reverse=True)[:CANDIDATES]
-    return ranked, sims
-
-
 def fuse(*rankings: list[str]) -> dict[str, float]:
-    """Reciprocal rank fusion: a card near the top of either list rises; a card
-    near the top of both rises most. No scores to calibrate between searches."""
+    """Reciprocal rank fusion: a card near the top of any list rises; a card
+    near the top of several rises most. No scores to calibrate between them."""
     score: dict[str, float] = {}
     for ranking in rankings:
         for rank, nid in enumerate(ranking):
@@ -162,28 +71,39 @@ def walk(seeds: dict[str, float], nodes: dict[str, dict], edges: list[dict],
     return out
 
 
-def search(conn: sqlite3.Connection, question: str, nodes: dict[str, dict], edges: list[dict],
-           cost: dict[str, int], embedder: Optional[Embedder] = None,
-           model: str = "", budget: int = BUDGET) -> Found:
-    """The cards to send for this question, strongest first, within budget.
-
-    `cost` is each card's size in tokens as it would be sent. Without an
-    embedder - not installed, or not answering - it searches by wording alone
-    rather than fail.
-    """
-    scope = set(nodes)
+def candidates(index: BoardIndex, question: str, embedder: Optional[Embedder]
+               ) -> tuple[dict[str, float], dict[str, float], list[str]]:
+    """Fused candidates, the meaning similarities, and which searches ran."""
+    used = []
+    exact = index.exact(question)         # only quoted phrases (search_index.phrases)
+    keyword = index.keyword(question)
+    lists = [exact, keyword] if exact else [keyword]
+    used += ["exact phrases"] if exact else []
+    used += ["keywords"]
+    if len(keyword) < 5:
+        lists.append(index.typos(question))
+        used.append("near-spellings")
     sims: dict[str, float] = {}
-    meaning: list[str] = []
-    how = "wording"
     if embedder is not None:
         try:
-            vectors = refresh(conn, nodes, embedder, model)
             qvec = embedder.embed([f"{QUERY_INSTRUCT}{question.strip()}"[:2000]])[0]
-            meaning, sims = by_meaning(qvec, vectors, scope)
-            how = "meaning and wording"
+            meaning, sims = index.meaning(qvec)
+            lists.append(meaning)
+            used.append("meaning")
         except Exception:
-            meaning, sims, how = [], {}, "wording"
-    fused = fuse(meaning, by_wording(conn, question, scope))
+            pass
+    return fuse(*lists), sims, used
+
+
+def search(index: BoardIndex, question: str, nodes: dict[str, dict], edges: list[dict],
+           cost: dict[str, int], embedder: Optional[Embedder] = None,
+           budget: Optional[int] = None) -> Found:
+    """The cards to send for this question, strongest first, within budget.
+    `index` must be synced to the board; `cost` is each card's size in tokens
+    as it would be sent."""
+    budget = BUDGET if budget is None else budget      # read now, not when imported
+    fused, sims, used = candidates(index, question, embedder)
+    fused = {k: v for k, v in fused.items() if k in nodes}
     if not fused:                      # nothing matched at all: the board's shape is all there is
         fused = {nid: 0.0 for nid in list(nodes)[:SEEDS]}
     seeds = dict(sorted(fused.items(), key=lambda kv: kv[1], reverse=True)[:SEEDS])
@@ -199,6 +119,7 @@ def search(conn: sqlite3.Connection, question: str, nodes: dict[str, dict], edge
             continue
         chosen.append(nid)
         spent += c
+    how = ", ".join(used[:-1]) + f" and {used[-1]}" if len(used) > 1 else used[0]
     return Found(chosen, len(nodes), how, {n: scored[n] for n in chosen})
 
 

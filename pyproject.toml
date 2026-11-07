@@ -17,6 +17,10 @@ dependencies = [
   "rich>=13.0",
   "pillow>=10.0",
   "httpx>=0.27",
+  # Ask your board's search index (search_index.py): Tantivy for exact and
+  # stemmed keyword search, numpy for exact vector search
+  "tantivy>=0.27",
+  "numpy>=2.0",
 ]
 
 [project.optional-dependencies]

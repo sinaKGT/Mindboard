@@ -17,6 +17,7 @@ from typing import Any, Iterator, Optional
 
 from . import retrieve
 from .assets import resolve
+from .search_index import BoardIndex
 from .ops import read_graph
 from .paths import DataDir
 
@@ -163,6 +164,19 @@ def _picture(dd: DataDir, conn: sqlite3.Connection, bid: str, sha: str) -> Optio
     return url, (w * h) // (32 * 32) + 16   # Qwen sees a picture in 32-pixel squares
 
 
+def board_index(dd: DataDir, conn: sqlite3.Connection, bid: str, nodes: dict[str, dict],
+                embedder: Optional[retrieve.Embedder], embed_model: str) -> BoardIndex:
+    """The board's search index, brought up to the board's current revision."""
+    row = conn.execute("SELECT revision FROM board WHERE id=?", (bid,)).fetchone()
+    index = BoardIndex.get(dd, bid)
+    try:
+        index.sync(nodes, row["revision"] if row else 0, embedder, embed_model)
+    except Exception:
+        # the embedder failed: keep the text index, search without meaning
+        index.sync(nodes, row["revision"] if row else 0, None, index.model)
+    return index
+
+
 def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
           question: str = "", history: Optional[list[dict]] = None,
           embedder: Optional[retrieve.Embedder] = None, embed_model: str = "") -> Context:
@@ -185,8 +199,9 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
         # a follow-up ("which of those...") is searched with what led up to it
         asked = [str(t.get("text", "")) for t in (history or []) if t.get("role") == "user"]
         query = " ".join(asked[-2:] + [question])
-        found = retrieve.search(conn, query, nodes, graph["edges"],
-                                {i: estimate(blocks[i]) for i in ids}, embedder, embed_model)
+        index = board_index(dd, conn, bid, nodes, embedder, embed_model)
+        found = retrieve.search(index, query, nodes, graph["edges"],
+                                {i: estimate(blocks[i]) for i in ids}, embedder)
         ids, mode, how = found.ids, "search", found.how
 
     inside = set(ids)

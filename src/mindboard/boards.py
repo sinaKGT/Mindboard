@@ -193,9 +193,12 @@ def delete_board(dd: DataDir, board_id: str) -> bool:
             c.close()
         except Exception:
             pass
-    # copies opened in another app go too, as far as that app allows
+    # copies opened in another app go too, as far as that app allows, and the
+    # board's search index, which is only ever derived from it
     from .assets import clear_opened
+    from .search_index import BoardIndex
     clear_opened(dd.opened_dir(board_id))
+    BoardIndex.drop(dd, board_id)
     d = dd.board_dir(board_id)
     if d.exists():
         shutil.rmtree(d)

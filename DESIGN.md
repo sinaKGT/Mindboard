@@ -1892,3 +1892,110 @@ the question before it; chosen cards are never searched.
 
 **Not yet:** pictures described once when added, so what is *in* a picture can
 be searched — the next step.
+
+---
+
+## 30. A real search engine, and measuring instead of guessing (2026-11-07)
+
+Asked for: something more capable than a SQLite table for search; exact
+search, reranking and RRF beside vector search; and answers to complex,
+multi-hop questions that need planning before retrieval. Planned as three
+steps, each measured: (1) the search engine and a way to measure it, (2) a
+reranker and graph ranking, (3) planning and multi-hop retrieval. This is (1).
+
+### The engine
+
+Chosen after checking what is local, embedded and silent:
+
+- **Tantivy** (0.27, MIT, a 4 MB wheel with no dependencies) — a Rust search
+  engine in the Lucene family. It brings what the FTS5 table did badly:
+  English stemming ("evaluating" finds "evaluation"), phrase queries, per-field
+  boosts and typo-tolerant terms.
+- **Exact vector search with numpy.** At mind-map scale — hundreds to a few
+  thousand cards — comparing a question with every card is about a millisecond
+  and loses nothing. An approximate index pays only at millions of items, and
+  pays in accuracy.
+- Turned down: **LanceDB** — an 86 MB wheel plus pyarrow, and no way to be sure
+  from here that it sends nothing anywhere.
+
+`search_index.py` keeps one index per board in `<data>/search/<board>/`: a
+Tantivy index of three fields — **title** (boosted ×2), **body** (the card's
+note, a link's address and excerpt, a file's name) and **path** (its groups,
+×0.5) — and `vectors.npz` with each card's vector beside a hash of the passage
+it was made from. SQLite stays the record; the index is derived from it,
+re-synced whenever the board's revision moves on (text in full —
+milliseconds; vectors only for passages that changed, or all of them for a new
+model), never exported, never written by a feature. It lives outside the board
+folder for the reason `opened/` does: an index Tantivy holds open must never
+stop a board being deleted, and deleting a board drops its index.
+
+A person's question is never handed to Tantivy's query language — a stray
+quote or colon is syntax there. It is cut into clean words first, and
+phrases and typos go through Tantivy's parser rather than its hand-built
+queries: those take words as they are, while the index holds them stemmed, so
+a phrase built by hand never matched.
+
+### Measuring
+
+`evaluate.py` and `mindboard ai eval` score retrieval against a **test set**:
+questions about one board, each with the cards a good search returns. It is
+the person's own and names their cards, so it lives in `<data>/evals/`, never
+in the repository. Four numbers per strategy: **hit@5** (a right card in the
+first five), **recall@10** (share of the right cards in the first ten),
+**MRR** (how high the first right card ranks) and **sent** (share of the right
+cards among those that reach the model within the budget) — overall and by
+kind of question.
+
+The first set: twenty questions about *RAG Deep Knowledge* — twelve simple,
+two whose wording differs from the cards', two in several parts, four that
+need a path through the person's links — drafted from the board's cards and
+150 relationships, and theirs to correct.
+
+### What the numbers said
+
+The baseline, before any change — SQLite FTS5 plus vectors kept in SQLite:
+
+| | hit@5 | rec@10 | MRR | sent |
+|---|---|---|---|---|
+| wording (FTS5) | 0.90 | 0.70 | 0.88 | 0.76 |
+| meaning (embeddings) | 1.00 | 0.72 | 1.00 | 0.82 |
+| fused + walk, as sent | 0.95 | 0.76 | 0.92 | 0.96 |
+
+After the new engine:
+
+| | hit@5 | rec@10 | MRR | sent |
+|---|---|---|---|---|
+| keyword (Tantivy, stemmed) | 0.95 | 0.74 | 0.87 | 0.80 |
+| meaning (exact cosine) | 1.00 | 0.72 | 1.00 | 0.85 |
+| keyword + meaning, fused | 1.00 | 0.72 | 0.91 | 0.89 |
+| fused + walk, as sent | 1.00 | 0.76 | 0.91 | 0.97 |
+
+The keyword search is better, as intended — questions worded unlike their
+cards went from 0.00 to 0.50, questions in several parts to 1.00 — and the
+search as sent never misses outright now (hit@5 1.00). Overall it is level
+with before, honestly so: meaning was already carrying most of the load. The
+remaining weakness is plain in the per-question detail — cards reachable only
+through the person's links ("which chunking methods keep context across
+boundaries?" finds *Sliding Window* at 0.20; multi-hop questions 0.68) — and
+that is what step 2's graph ranking and reranker are for.
+
+**Exact phrases, reversed by measurement.** Every pair of neighbouring words
+was first searched as a phrase and fused with the rest. Measured: pairs like
+"rag system" match many generic cards, and at every weight tried (1, ½, ¼)
+they made the ranking worse — fused recall fell to 0.67. Exact search now
+takes only phrases the person put in quotes; the planner of step 3 is where
+exact names belong.
+
+**The vision part was kept off the card again** — and pictures read at 373
+tokens a second instead of 2,160. The memory estimate assumed 1.5 GB over the
+model's weights; measured, the 9B takes almost exactly its file size loaded,
+and the embedding server, started first, took its share before the check ran.
+The estimate is now 0.6 GB over the weights with a 0.5 GB margin; a cold
+whole-board question went from 51 s to 22 s, model loading included.
+
+Migration 002's `text_hash` column on `node_embedding` is no longer used —
+vectors moved to the index — and stays, harmless, as migrations do. 133 tests,
+`tests/test_retrieve.py` rewritten for the engine: stemming, title boost,
+group paths, quoted phrases, typos, exact meaning order, incremental and
+re-modelled embedding, surviving a restart, dropping with the board, fusion,
+walk, budget, wording-only fallback, and the evaluator itself.

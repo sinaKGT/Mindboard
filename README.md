@@ -157,10 +157,20 @@ mindboard ai ask --board "Sensor siting" --all "What am I missing?"
 ```
 
 With nothing added, a small board is read whole. A bigger one is **searched**:
-Mindboard finds the cards your question is about — by meaning and by wording —
-follows your relationships from them, and sends the best ones with an outline
-of the board's groups. The panel says how many cards it used. A follow-up is
-searched together with the question before it.
+Mindboard finds the cards your question is about — by meaning, and by keywords
+with stemming (so *evaluating* finds *evaluation*), titles counting double and
+small typos forgiven; put words in "quotes" to require them exactly — follows
+your relationships from them, and sends the best ones with an outline of the
+board's groups. The panel says how many cards it used. A follow-up is searched
+together with the question before it.
+
+To measure how well search finds the right cards, write a test set — questions
+about a board, each with the cards a good search returns — into
+`<data folder>/evals/<board name>.json`, and run:
+
+```
+mindboard ai eval --board "RAG Deep Knowledge" --detail
+```
 
 Cards you add yourself are used exactly — a group brings everything inside
 it — with their pictures and the relationships between them. Whatever it takes

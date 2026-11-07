@@ -108,8 +108,12 @@ class Tier:
     @property
     def run_gib(self) -> float:
         """Graphics memory it takes while loaded: weights, its memory of the
-        conversation (32k tokens, q8_0) and working space."""
-        return self.model.size / 2 ** 30 + 1.5
+        conversation (32k tokens, q8_0) and working space. Measured, not
+        guessed: the 9B took 8.9 GB loaded on a 16 GB card, against an 8.9 GB
+        file - this family keeps little per-token memory - so 0.6 GB over the
+        weights covers it. The first estimate (1.5) kept the vision part off a
+        card it fitted on, and read pictures five times slower (DESIGN.md 30)."""
+        return self.model.size / 2 ** 30 + 0.6
 
 
 _Q35_9B = ("unsloth/Qwen3.5-9B-GGUF", "3885219b6810b007914f3a7950a8d1b469d598a5")
@@ -800,7 +804,8 @@ def vision_fits(inst: Install) -> bool:
                                   capture_output=True, text=True, timeout=10).stdout.split()[0])
     except Exception:
         return False
-    return free / 1024 >= inst.tier.run_gib + inst.tier.vision.size / 2 ** 30 + 1.0
+    # free memory is read now, after the embedding server took its share
+    return free / 1024 >= inst.tier.run_gib + inst.tier.vision.size / 2 ** 30 + 0.5
 
 
 class LocalModel:

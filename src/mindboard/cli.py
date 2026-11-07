@@ -455,6 +455,47 @@ def ai_ask(
     raise typer.Exit(0 if ok else 1)
 
 
+@ai_app.command("eval")
+def ai_eval(
+    board: str = typer.Option(..., "--board", "-b", help="Board title (or part of it), or id."),
+    test_set: Optional[str] = typer.Option(None, "--set",
+                                           help="Test set file; default: <data>/evals/<board>.json"),
+    detail: bool = typer.Option(False, "--detail", help="Show every question."),
+    data_dir: Optional[str] = DataDirOpt,
+):
+    """Measure how well retrieval finds the right cards, against a test set."""
+    from pathlib import Path
+
+    from . import evaluate, llm
+    from .boards import list_boards
+    from .llm_setup import _pick
+
+    dd = _dd(data_dir)
+    b = _pick(list_boards(dd), board, "board")
+    path = Path(test_set) if test_set else evaluate.default_set_path(dd, b["title"])
+    if not path.exists():
+        typer.echo(f"  No test set at {path}")
+        raise typer.Exit(1)
+    data = evaluate.load_set(path)
+    inst = llm.find_install()
+    if inst is None or inst.embedder is None:
+        typer.echo("  The embedding model is not installed - run: mindboard ai install")
+        raise typer.Exit(1)
+    embedder = llm.EmbedModel(inst)
+    try:
+        reports = evaluate.run(dd, data, embedder, inst.embedder.name)
+    finally:
+        embedder.stop()
+    kinds = list(dict.fromkeys(q["kind"] for q in data["questions"]))
+    typer.echo(f"\n  {b['title']}: {len(data['questions'])} questions\n")
+    typer.echo("\n".join("  " + line for line in evaluate.table(reports, kinds).splitlines()))
+    if detail:
+        for r in reports:
+            typer.echo(f"\n  {r.strategy}")
+            for s in r.scores:
+                typer.echo(f"    rec@10 {s.recall10:.2f}  MRR {s.mrr:.2f}  [{s.kind}] {s.question[:70]}")
+
+
 @ai_app.command("status")
 def ai_status():
     """Say whether Ask your board is set up, and where."""
