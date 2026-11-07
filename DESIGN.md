@@ -1338,21 +1338,25 @@ few computers and miserable on the rest.
 The rule that decides it: **a model held whole in graphics memory is fast; one
 that spills into system RAM reads its spilled layers at RAM speed**, several
 times slower. A smaller model that fits beats a larger one that does not. So
-Mindboard ships four pinned sizes and installs the largest that fits:
+Mindboard pins a few sizes and installs the largest that fits:
 
 | Size | Model | Download | For |
 |---|---|---|---|
-| large | Qwen3.8-27B, IQ4_XS | 15.2 GB | a 16 GB card; a Mac with 24 GB or more |
-| medium | Qwen3.5-9B, Q8_0 | 10.4 GB | a 12 GB card; an 18 GB Mac |
-| small | Qwen3.5-9B, Q4_K_M | 6.6 GB | an 8 GB card; a 16 GB Mac |
+| full | Qwen3.5-9B, Q8_0 | 10.4 GB | a 12 GB card or more; a Mac with 24 GB or more |
+| compact | Qwen3.5-9B, Q4_K_M | 6.6 GB | an 8 GB card; a 16 GB Mac |
 | light | Qwen3.5-4B, Q4_K_M | 3.4 GB | everything else, graphics card or not |
 
-All four are one family — one architecture, one chat template, all of them
-read pictures — so everything built on top behaves the same on each; only
-depth and speed differ. All Apache-2.0. The 27B (August 2026) is three times
-the 9B and newer, and finding what a map is *missing* leans on what the model
-itself knows, which is where size pays. Thresholds sit just under each class of
-card as its driver reports it: a "16 GB" card shows about 15.9 GiB.
+All are one family — one architecture, one chat template, all of them read
+pictures — so everything built on top behaves the same on each; only depth and
+speed differ. All Apache-2.0. Thresholds sit just under each class of card as
+its driver reports it: a "12 GB" card shows about 11.9 GiB.
+
+**Reversed: the 27B.** The first top size was Qwen3.8-27B (IQ4_XS, 15.2 GB), on
+the argument that finding what a map is *missing* leans on what the model
+itself knows, where size pays. In use it was far too slow to think with —
+minutes before a first word on a whole board (§27) — and the decision was
+plain: **Qwen3.5 9B, not 27B.** Speed is what makes asking your board worth
+doing; the 27B is no longer offered at all, and a test holds that.
 
 **Sizing happens before anything downloads**, so the person sees the choice and
 why: NVIDIA cards through `nvidia-smi`; other cards on Windows through the
@@ -1370,13 +1374,14 @@ parameters active per token). The files are unsloth's community GGUFs — Qwen
 publishes none for these — so each is pinned by commit and checksum rather than
 trusted by name.
 
-**Someone else may hold the card.** Ollama, LM Studio and games all use the same
-memory. The model still loads, slowly; so before loading, `memory_shortfall`
-compares free graphics memory with what this size needs and says so in words —
-*"only 3.6 GB of graphics memory is free and this model wants 14.8 GB — LM
-Studio and Ollama are using the rest"* — naming programs that run models, not a
-browser holding a sliver. That sentence is the real one, from the machine this
-was built on, while Ollama was busy.
+**The card may be shared.** Other programs use the same graphics memory. The
+model still loads, slowly; so before loading, `memory_shortfall` compares free
+graphics memory with what this size needs and says so in words — *"Mindboard's
+model needs 10.4 GB of graphics memory and only 3.6 GB is free, so answers will
+be much slower. Free up the graphics card for full speed."* It speaks of memory
+only. An earlier version named the programs holding the card, and read as if
+Mindboard depended on them; Mindboard runs its own llama.cpp and relies on
+nothing else, so it names nothing else.
 
 ### Installing: pinned, verified, resumable, never automatic
 
@@ -1449,8 +1454,8 @@ file over; a wrong file is deleted; an archive cannot write outside its folder;
 a full disk is refused before anything starts; the CUDA runtime lands beside the
 server; the server listens on 127.0.0.1 only, demands its key, has a new key
 each start, explains a failed load, unloads when idle, and dies when the process
-holding it is killed outright; the memory warning names Ollama and not a
-browser; the setup screen draws for every size, with and without a card.
+holding it is killed outright; the memory warning reports free memory; the
+setup screen draws for every size, with and without a card.
 
 That last test exists because the screen crashed the first time it was drawn
 for real: a closing markup tag written without its `f` prefix, on exactly the
@@ -1472,9 +1477,9 @@ card while it worked showed why: 55 W, the cores at 320–390 MHz of a possible
 of its speed, and that is the person's setting, not Mindboard's to change.
 
 **Not verified:** speed at full power on that machine (the card was busy with
-Ollama when the profile changed, and a measurement beside it would have measured
-the competition); the Vulkan, Metal and processor builds; the `medium`,
-`small` and `light` sizes in use; sizing on AMD, Intel and Apple hardware.
+another program when the profile changed, and a measurement beside it would
+have measured the competition); the Vulkan, Metal and processor builds; the
+smaller sizes in use; sizing on AMD, Intel and Apple hardware.
 
 ---
 
@@ -1566,8 +1571,8 @@ shown; each refusal has its status; one question at a time; not set up says
 how; walking away stops the stand-in mid-answer and frees the model. The whole
 suite ran six times in a row clean.
 
-Against the real model (Qwen3.8 27B, with LM Studio holding 6 GB of the card,
-so slowly — 2–4 tokens a second, as the memory warning predicted): asked where
+Against the real model (Qwen3.8 27B, with another program holding 6 GB of the
+card, so slowly — 2–4 tokens a second, as the memory warning predicted): asked where
 the lidar should go, with *Sensors*, *Corner mount* and *Site sketch* in
 context, it cited the corner-mount card, the Lidar card from inside the group,
 and the sketch — and read *"LIDAR HERE 4.2 m"* above pole 3 from the picture
@@ -1577,3 +1582,313 @@ and put its own suggestions after *Beyond your board:*. No citation had to be
 removed in either answer. One soft spot: a cited point also carried general
 knowledge ("typically required") — the line between the voices holds, but not
 perfectly.
+
+---
+
+## 25. The panel, and the Stop that did not stop (v2, 2026-11-07)
+
+### On the canvas
+
+Every card's toolbar gets a bubble: **Add to context**, pressed again to take
+the card out. The bar over a multiple selection gets **Ask**, which adds them
+all. A card in context carries a small bubble in its corner and a faint accent
+ring, so what the model will read is visible on the board itself; a group's
+entry in the panel says how many cards it brings (*Sensors · 3 cards*).
+
+The panel sits on the right, opened by adding the first card, by the bubble in
+the dock, or by `Ctrl+J`; `Esc` or ✕ folds it away. Top: the cards in context.
+Middle: the conversation — every `[[card]]` in an answer becomes a chip with
+the card's title that goes to the card, entering its group if it has to; the
+model's own part sits under *Beyond your board — the model's own knowledge*,
+dashed and dimmer; removed citations are counted under the answer. Bottom: the
+question box (Enter sends), **What am I missing here?** as a first question,
+**Think deeper**, and **Stop**. Before the first words it says what it is doing
+— reading the cards, loading the model, thinking — and a memory warning, when
+there is one, sits above the answer it explains.
+
+An answer is never HTML: only `**bold**`, line breaks and citations are
+interpreted, so nothing a model writes can become markup on the page.
+
+### Screen state, not the board's
+
+The context and the conversation are never ops and never saved with the board
+(asked, and answered: only while open). They live in `askStore.ts`, mirrored to
+`sessionStorage` per board, so a refresh keeps them and closing the tab ends
+them. What is worth keeping becomes a card — the next step — so the map stays
+the record, not a chat log beside it.
+
+Typing in the panel never reaches the canvas: its keys go to a text box, which
+the canvas already ignores. `Esc` from anywhere in the panel closes the panel
+and stops there — it must not also walk the canvas out of the group it shows.
+
+### The Stop that did not stop
+
+The first Stop looked right and was not. In the browser the answer halted and
+said *Stopped*; on the server the model wrote on — and the next question was
+told *still answering the last question*, for good.
+
+The cause was two facts together. **This server never learns that a browser
+hung up**: uvicorn, with nothing left to read from the connection, keeps
+sending into it, and the send waits forever once nobody reads. And **the answer
+was pulled by that send**: each piece of the model's output was fetched only
+when the previous one had gone out. So the stuck send froze the model's stream
+mid-answer, inside the one slot, holding it. Shielding the clean-up from
+cancellation, and asking `is_disconnected()` between pieces, both changed
+nothing — a trace showed the endpoint simply parked inside the send.
+
+Two changes made it right, and both stay:
+
+- **The answer is made on its own thread** and handed over through a queue. The
+  response can stall without stalling the model; an answer nobody is reading
+  runs to its end and frees the slot.
+- **Stop is said, not implied.** The panel's Stop calls
+  `POST /api/boards/{id}/ask/stop` and then hangs up. The model checks between
+  pieces, hangs up on llama-server, which stops generating, and the slot is
+  free at once. Where a server does hear a hang-up, the same stop happens on
+  its own.
+
+The tests drive a real server, because the test client cannot hang up the way
+a browser does: Stop frees the model straight away — the stand-in logs being
+hung up on, and the next question is answered in seconds — and a hang-up nobody
+hears no longer stalls anything: the answer finishes and the next question is
+answered. The second test is the bug exactly as it was seen.
+
+### Verified
+
+In a browser against a server whose model was the stand-in: the toolbar bubble
+adds a card and opens the panel, and the card carries its mark; a drag-selected
+set added from **Ask** shows *Sensors · 3 cards* and does not list a card twice;
+a typed question with `a` and `c` in it created no cards; the answer showed a
+citation chip, the memory warning, the removed-citation count and the
+beyond-the-board part; clicking a citation of a card inside a group opened the
+group; `Esc` in the panel closed only the panel, inside a group; `Ctrl+J`
+brought it back with the conversation; a refresh kept the context and all ten
+turns; **Stop**, clicked, halted the answer, the stand-in logged being hung up
+on, and the next question was answered. 103 tests, three runs clean.
+
+Two things about the test tooling, so the next session does not lose time to
+them: in the browser pane a Shift-click does not add to a selection — xyflow
+listens for the Shift key itself, not the flag on the click — so multiple
+selection was made with a drag box; and the pane's frame changes shape when the
+window does, so click positions taken from the page must be scaled by its
+current width, not an earlier one.
+
+**Not verified:** the panel against the real model (the card was held by LM
+Studio throughout; the real model answered the same route in §24); the
+not-set-up and too-much messages in the panel itself (the route's answers are
+tested; the panel shows whatever reason it is given).
+
+---
+
+## 26. "Reinstall / update" deleted the program it was running from (2026-11-07)
+
+Choosing **7 Reinstall / update** in the launcher menu left Mindboard unable to
+start: *"Mindboard installed but will not run"*. Three faults lined up.
+
+1. **The menu ran the installer from inside the environment it updates.** The
+   menu is `.venv\Scripts\mindboard.exe`; Windows will not delete or replace a
+   program that is running. The installer got halfway — `pyvenv.cfg` and part
+   of `Lib` gone, `mindboard.exe` locked in place — and stopped.
+2. **The installer replaced instead of updating.** It ran `uv venv .venv` every
+   time. Older uv reused an existing environment; newer uv asks whether to
+   replace it, and in a script answers *yes* by itself.
+3. **The launcher only checked that `mindboard.exe` existed.** A half-deleted
+   environment still has it, so double-clicking would have run a broken program
+   rather than repair it.
+
+And the fixes, one per fault:
+
+- **Option 7 on Windows hands over.** The installer opens in its own window and
+  the menu closes, so nothing runs from `.venv` while it works. (On macOS and
+  Linux a running program can be replaced, so it still runs in place.)
+- **A working environment is updated, never replaced** — the package is
+  reinstalled into it. Only a missing or broken one is rebuilt, and then with
+  `--clear`, which says what is meant instead of letting uv ask. Before
+  touching anything the Windows installer waits up to 30 seconds for programs
+  running from `.venv` to close, then says plainly that Mindboard is still
+  open rather than half-delete it.
+- **The launchers check that Mindboard runs** (`mindboard version`), not that a
+  file exists, and set it up again if it does not.
+
+Verified on the machine where it broke: the fixed installer rebuilt the
+half-deleted environment (the broken remains could not be used, and its
+rebuild-from-scratch fallback took over); run again on the working
+environment it updated in place and left `pyvenv.cfg` as it was; with a
+program running from `.venv` it waited, then updated once it closed; with one
+that never closed it gave up after 30 seconds with that message and left the
+environment working. Boards and the downloaded model were never touched — they
+live outside `.venv`. 103 tests pass on the rebuilt environment.
+
+Not verified: option 7's hand-over itself (it opens a window on the person's
+screen; the installer's waiting, which it relies on, is verified above).
+
+---
+
+## 27. The first real question (2026-11-07)
+
+The first question asked on a real board — twelve cards, some with pictures,
+*"what we know about design patterns?"* — sat on *"Loading the model…"* and
+looked dead. Read from the server's log, it was not dead; it was slow, and the
+panel was saying the wrong thing:
+
+- The model had loaded in 13 s. It was then **reading 13,700 tokens at 60–70 a
+  second** — 3½ minutes — because another program had taken part of the graphics
+  card ten seconds after Mindboard's model started, and `--fit` moved layers into
+  system RAM. The panel called all of it "loading".
+- Every follow-up would have been as slow: the cards travelled *after* the
+  conversation, so the start of the prompt changed each turn and llama-server
+  could reuse none of what it had read.
+- The memory warning named the other program, and read as if Mindboard ran on
+  it — when Mindboard runs its own llama.cpp and the other program was only
+  sharing the card.
+
+And one request on top: with nothing added, a question should be about the
+**whole board**.
+
+What changed:
+
+- **Cards first.** System, then the cards (and their pictures), then a short
+  "I have read these cards", then the conversation, then the new question. The
+  start is identical from one question to the next, so llama-server reads only
+  what is new. A test holds the first three messages equal across turns.
+- **The panel says what is happening.** llama-server is asked for
+  `return_progress`; the panel shows *Starting the model* only while it starts,
+  then *Reading your cards — 45% of 13,700 tokens*, noting how much was already
+  read before; without progress it still gives the size.
+- **The warning speaks of memory only**, and names no other program: *Mindboard's
+  model needs 10.4 GB of graphics memory and only 3.6 GB is free, so answers will
+  be much slower. Free up the graphics card for full speed.*
+- **Nothing added means the whole board** — every card, groups' contents and
+  relationships included, shown as *Whole board · N cards*; adding cards
+  narrows it. Pictures come with the whole board only up to 6,000 tokens'
+  worth, so a board of screenshots stays askable; a left-out picture's card
+  still goes in by its title and caption, the panel says how many were left
+  out, and cards chosen by hand always bring their pictures.
+
+106 tests. **Not yet verified against the real model:** the progress fields
+(`total`, `cache`, `processed` — the build carries `prompt_progress` and
+`processed`; the panel falls back to the size if they differ) and the reuse of
+the cards between questions; both show in the server log on the next real
+question.
+
+---
+
+## 28. Qwen3.5 9B, and the picture that was on the wrong chip (2026-11-07)
+
+Decided: **Mindboard runs Qwen3.5 9B through its own llama.cpp, and relies on
+nothing else.** The 27B is gone from the list (§23), and the memory warning
+names no other program (§23).
+
+Measured on the machine it is built on (RTX 5080 Laptop, 16 GB), the 9B at
+Q8_0, entirely on the card: **5,400 tokens a second reading, 80 writing**
+(llama.cpp's benchmark), loaded in 5 s, 8.9 GB of graphics memory. The 27B had
+been reading a whole board at 60–70.
+
+Then a whole-board question on a real board — *RAG Deep Knowledge*, 135 cards,
+43 pictures, of which the whole-board budget takes 11 — ran at 695 tokens a
+second, not 5,400. The pictures: the vision part had been put on the processor,
+a choice made when the 27B left the card no room. With the 9B there is room, so
+`vision_fits()` now places it at each start — on the GPU when free memory holds
+the model, the vision part and a margin, on the processor when it does not (and
+on a Mac always, the memory being one). The same question:
+
+| | vision on processor | vision on GPU |
+|---|---|---|
+| reading 20,094 tokens | 29 s (695/s) | 5.9 s (3,415/s) |
+| first words | ~30 s | 6.1 s |
+| a follow-up's first words | — | **0.5 s** (862 new tokens read; the rest reused) |
+
+The follow-up figure is §27's cards-first order at work: llama-server read
+only the new turn. The answers themselves were good — nineteen citations on the
+first, every one a real card, none removed — and told on themselves usefully:
+twice the model said the details were *"in the associated image"*, of cards
+whose pictures the whole-board budget had left out. That is the case for what
+comes next: pictures described once, when they are added, so a question can
+find what is in them without reading every image every time.
+
+`mindboard ai ask --all` had sent every card by hand, which skips that budget;
+it now asks the whole board exactly as the panel does.
+
+---
+
+## 29. GraphRAG: searching a board too big to send (2026-11-07)
+
+Sending the whole board works while the board is small. It stops working twice
+over as a board grows: the prompt outgrows what the model can read in one go,
+and the pictures stop fitting — on a 135-card board with 43 pictures, 32 were
+left out and the model said so (*"the details are in the associated image"*).
+So a board too big to send is **searched**, and only what the question is about
+goes to the model (`retrieve.py`).
+
+### The strategy
+
+1. **Small boards are still read whole.** Under 4,000 tokens of card text
+   (pictures come on top, within their own budget) nothing is searched: the
+   most complete answer is the one that sees everything, and at this size it
+   is also fast. Cards added to the context by hand are never searched either
+   — they are exactly what was asked about.
+2. **Two searches, fused.** *By meaning*: every card is embedded — title,
+   where it sits, its words — with Qwen3-Embedding 0.6B (Qwen's own GGUF,
+   0.64 GB, pinned like everything else), run by Mindboard's llama.cpp as a
+   second, small server. The question is embedded with Qwen's retrieval
+   instruction and compared by cosine. *By wording*: the full-text index the
+   app already keeps (FTS5, BM25). The two rankings are merged by reciprocal
+   rank fusion — no scores to calibrate between them, and a card near the top
+   of both rises most.
+3. **A walk along the person's own links.** From the best ten cards, one step
+   along their relationships in either direction, and from a matching group
+   into its cards. A neighbour scores half the card that led to it, nudged up
+   if it matches too — so *Ragas*, which shares no words with "how do I check
+   retrieval quality?", arrives because the person linked it to the card that
+   does. This is the graph in GraphRAG, and the graph is theirs: typed claims
+   about what connects, not edges a model guessed.
+4. **A budget, then the outline.** The strongest cards are taken in order
+   until 5,000 tokens are spent, their pictures within the picture budget, the
+   relationships among them, and an outline of the board's groups (each with
+   its count of cards) so a broad question still sees the board's shape.
+5. **Follow-ups are searched with what led up to them.** The search text is
+   the last two questions and the new one — "which of those are open source?"
+   alone would find nothing.
+
+### The index
+
+Card vectors live in `node_embedding`, the table v1 reserved for exactly this
+(§11), with one column added: the hash of the text each vector was made from.
+Before a search, cards that are new, edited or embedded by another model are
+embedded again — the rest never are; a deleted card's row goes with it. It is a
+derived index like the full-text one: regenerable, never exported, never an op.
+Without the embedding model — not installed, or not answering — search falls
+back to wording alone rather than fail, and the panel says which it used.
+
+### Measured
+
+On *RAG Deep Knowledge* (135 cards): the embedding model loads and embeds the
+whole board in under 2 s the first time, 0.6 s for 135 cards; a question about
+open-source evaluation tools went to the model with 42 of the 135 cards
+instead of all of them. Found on the way: the "send it whole" limit first
+counted only text (8,000 tokens), so this board — 7,100 tokens of text, plus
+pictures — was always sent whole; it is now 4,000.
+
+`tests/test_retrieve.py`, 15 cases with a stand-in embedder: what a card is
+embedded as; only new, edited or re-modelled cards are embedded; a deleted card
+takes its vector; the best match comes first; a linked card with no words in
+common comes in above unrelated ones; a matching group brings its cards; the
+budget holds; no embedder, or a broken one, means wording alone; the outline;
+a small board is read whole, a big one searched; a follow-up is searched with
+the question before it; chosen cards are never searched.
+
+### Two fixes from using it
+
+- **Going to a card did nothing for a card off screen.** It used `fitView` on
+  the card; the canvas renders only cards in view, and xyflow can only fit a
+  card it has measured. It now centres the card from the board's own data,
+  zoomed so it reads, clear of the Ask panel, ringed twice so the eye finds
+  it. Verified with every card panned off screen: the cited card came to the
+  middle of the space beside the panel at 115%.
+- **An answer being written pinned the panel to the bottom.** It now follows
+  only while the reader is at the bottom; scrolling up lets go, scrolling back
+  down picks it up, a new question comes back down. Verified mid-answer: at the
+  top it stayed at the top while the answer kept coming.
+
+**Not yet:** pictures described once when added, so what is *in* a picture can
+be searched — the next step.

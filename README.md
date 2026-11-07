@@ -101,18 +101,17 @@ you delete the folder.
 
 ## Ask your board — the local model
 
-Ask your board runs a language model **on this computer**, through llama.cpp,
-reading pictures as well as text. Setting it up is a one-time download; after
-that, asking a board never uses the internet.
+Ask your board runs **Qwen3.5 9B on this computer**, through its own llama.cpp,
+reading pictures as well as text. It relies on nothing else. Setting it up is a
+one-time download; after that, asking a board never uses the internet.
 
-It picks the largest model that fits your graphics card whole — a model that
-fits answers several times faster than a bigger one that spills over:
+It picks the version that fits your graphics card whole — a model that fits
+answers several times faster than one that spills over:
 
 | Size | Model | Download | For |
 |---|---|---|---|
-| large | Qwen3.8 27B | 15.2 GB | a 16 GB graphics card, or a Mac with 24 GB or more |
-| medium | Qwen3.5 9B, full quality | 10.4 GB | a 12 GB card |
-| small | Qwen3.5 9B, compact | 6.6 GB | an 8 GB card, or a 16 GB Mac |
+| full | Qwen3.5 9B | 10.4 GB | a 12 GB graphics card or more, or a Mac with 24 GB or more |
+| compact | Qwen3.5 9B, compact | 6.6 GB | an 8 GB card, or a 16 GB Mac |
 | light | Qwen3.5 4B | 3.4 GB | any computer, graphics card or not |
 
 It tells you what it found and what it picked before downloading anything;
@@ -136,21 +135,41 @@ Apple silicon the Metal build, and a computer without a card the processor
 build. The model loads when first asked, unloads after 20 minutes without
 questions, and always stops with Mindboard.
 
-Asking happens on the canvas (coming next); until then, from a terminal:
+### Asking on the canvas
+
+Select a card and press the **bubble** in its toolbar to add it to the context —
+or select several and press **Ask** on the bar above them. A group brings
+everything inside it. Cards in context carry a small bubble in their corner.
+
+The panel on the right (`Ctrl+J`, or the bubble in the bottom-right corner)
+lists what is in context and holds the conversation. Answers stream in; every
+card an answer draws on is a chip you can click to go to it, even inside a
+group, and anything the model adds from its own knowledge sits apart under
+**Beyond your board**. **What am I missing here?** is one click away, **Think
+deeper** lets the model think first, and **Stop** stops it. The conversation
+lasts while the board is open in that tab — save what matters as a card.
+
+Or from a terminal:
 
 ```
 mindboard ai ask --board "Sensor siting" --card "Sensors" --card "Site sketch" "Where should the lidar go?"
 mindboard ai ask --board "Sensor siting" --all "What am I missing?"
 ```
 
-The model sees exactly the cards you name — a group brings everything inside
+With nothing added, a small board is read whole. A bigger one is **searched**:
+Mindboard finds the cards your question is about — by meaning and by wording —
+follows your relationships from them, and sends the best ones with an outline
+of the board's groups. The panel says how many cards it used. A follow-up is
+searched together with the question before it.
+
+Cards you add yourself are used exactly — a group brings everything inside
 it — with their pictures and the relationships between them. Whatever it takes
 from your cards it cites; whatever it adds from its own knowledge comes after
 **Beyond your board:**, uncited. Citations of cards that were not in context are
 removed. Add `--think` to let it think first (slower, deeper).
 
-**If answers are slow:** another program running a model (Ollama, LM Studio)
-may be holding the graphics card — the check says so by name. On a laptop, a
+**If answers are slow:** the panel says when the graphics card has less free
+memory than the model needs — free up the card for full speed. On a laptop, a
 quiet or battery-saving power mode can hold the card to a fraction of its speed.
 
 ## Backing up

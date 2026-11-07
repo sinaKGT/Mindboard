@@ -15,6 +15,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
+from . import retrieve
 from .assets import resolve
 from .ops import read_graph
 from .paths import DataDir
@@ -23,6 +24,10 @@ MAX_SIDE = 1024            # pictures are shrunk to this; larger costs time, not
 CONTEXT_TOKENS = 32768     # what the model is started with (llm.LocalModel)
 ANSWER_TOKENS = 3072
 THINKING_TOKENS = 8192
+# Asking about the whole board brings pictures only up to this many tokens: a
+# board of thirty screenshots would otherwise be too much to ask about at all.
+# Cards chosen by hand always bring their pictures.
+WHOLE_BOARD_PICTURE_TOKENS = 6000
 BEYOND = "Beyond your board:"
 CITE = re.compile(r"\[\[([0-9A-Za-z]{26})\]\]")
 
@@ -66,6 +71,13 @@ class Context:
     cards: list[str]                       # every card the model sees, groups expanded
     text: str
     pictures: list[Picture] = field(default_factory=list)
+    whole: bool = False                    # nothing chosen: the whole board
+    pictures_left_out: int = 0
+    # how the cards were chosen: "chosen" by hand, the "whole" board sent
+    # entire, or found by a "search" of a board too big to send (retrieve.py)
+    mode: str = "chosen"
+    total: int = 0                         # cards on the board
+    how: str = ""                          # what a search went by
 
     @property
     def tokens(self) -> int:
@@ -151,48 +163,94 @@ def _picture(dd: DataDir, conn: sqlite3.Connection, bid: str, sha: str) -> Optio
     return url, (w * h) // (32 * 32) + 16   # Qwen sees a picture in 32-pixel squares
 
 
-def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str]) -> Context:
+def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
+          question: str = "", history: Optional[list[dict]] = None,
+          embedder: Optional[retrieve.Embedder] = None, embed_model: str = "") -> Context:
+    """The context for a question. Nothing chosen means the whole board: asking
+    about everything is where a conversation starts, and adding cards narrows it."""
     graph = read_graph(conn, bid)
     nodes = {n["id"]: n for n in graph["nodes"]}
-    ids = expand(nodes, chosen)
+    whole = not chosen
+    ids = (expand(nodes, [n["id"] for n in graph["nodes"] if not n.get("parent")]) if whole
+           else expand(nodes, chosen))
     if not ids:
-        raise AskError("add a card to the context first")
+        raise AskError("this board has no cards yet" if whole
+                       else "none of those cards are on this board any more")
+    blocks = {i: card_text(nodes[i], nodes) for i in ids}
+    mode, how = ("whole" if whole else "chosen"), ""
+
+    # A board too big to send whole is searched instead (retrieve.py). Cards
+    # chosen by hand are never searched: they are exactly what was asked about.
+    if whole and question.strip() and sum(estimate(b) for b in blocks.values()) > retrieve.WHOLE_UNDER:
+        # a follow-up ("which of those...") is searched with what led up to it
+        asked = [str(t.get("text", "")) for t in (history or []) if t.get("role") == "user"]
+        query = " ".join(asked[-2:] + [question])
+        found = retrieve.search(conn, query, nodes, graph["edges"],
+                                {i: estimate(blocks[i]) for i in ids}, embedder, embed_model)
+        ids, mode, how = found.ids, "search", found.how
+
     inside = set(ids)
-    blocks = [card_text(nodes[i], nodes) for i in ids]
     pictures: list[Picture] = []
+    left_out = 0
+    budget = WHOLE_BOARD_PICTURE_TOKENS
     for i in ids:
         n = nodes[i]
         c = n.get("content") or {}
         sha = c.get("sha256") if n["type"] == "image" else c.get("poster") if n["type"] == "video" else None
-        got = _picture(dd, conn, bid, sha) if sha else None
+        if not sha:
+            continue
+        if mode != "chosen" and budget <= 0:
+            left_out += 1             # its card's title and caption still go in
+            continue
+        got = _picture(dd, conn, bid, sha)
         if got:
             pictures.append(Picture(i, *got))
+            budget -= got[1]
 
     edges = [e for e in graph["edges"]
              if e["source"] in inside and e["target"] in inside]
     links = [f"[{e['source']}] {KIND_WORDS.get(e['kind'], e['kind'])} [{e['target']}]"
              + (f" ({e['label']})" if e.get("label") else "") for e in edges]
-    text = "CARDS\n" + "\n\n".join(blocks)
+    if mode == "search":
+        text = (f"BOARD OUTLINE (its groups)\n{retrieve.outline(nodes)}\n\n"
+                f"CARDS (the {len(ids)} of the board's {len(nodes)} that match the question)\n")
+    else:
+        text = "CARDS (the whole board)\n" if whole else "CARDS\n"
+    text += "\n\n".join(blocks[i] for i in ids)
     if links:
         text += "\n\nRELATIONSHIPS\n" + "\n".join(links)
-    return Context(ids, text, pictures)
+    return Context(ids, text, pictures, whole=whole, pictures_left_out=left_out,
+                   mode=mode, total=len(nodes), how=how)
 
 
 # ------------------------------------------------------------- messages --
 
+READY = "I have read these cards. Ask away."
+
+
 def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
-    """The context travels with the newest question, so it is always the cards
-    in context *now*; earlier turns keep only what was said."""
-    msgs: list[dict] = [{"role": "system", "content": SYSTEM}]
-    for turn in history:
-        if turn.get("role") in ("user", "assistant") and str(turn.get("text", "")).strip():
-            msgs.append({"role": turn["role"], "content": str(turn["text"])})
+    """The cards come first and stay put; the conversation follows them; the
+    newest question comes last.
+
+    The order is for speed. llama-server reuses whatever start of the prompt it
+    has already read, so with the cards first a follow-up reads only what is
+    new. With the cards after the conversation - as this first did - every
+    question changed the start of the prompt, and a 13,700-token context was
+    read again from the top each time: four minutes on a shared graphics card.
+    The short reply after the cards keeps the turns alternating, as the chat
+    template expects. Change the cards and the start changes - and they are
+    read again, as they should be."""
     parts: list[dict[str, Any]] = [{"type": "text", "text": ctx.text}]
     for p in ctx.pictures:
         parts.append({"type": "text", "text": f"PICTURE on card [{p.card}]:"})
         parts.append({"type": "image_url", "image_url": {"url": p.data_url}})
-    parts.append({"type": "text", "text": f"QUESTION\n{question.strip()}"})
-    msgs.append({"role": "user", "content": parts})
+    msgs: list[dict] = [{"role": "system", "content": SYSTEM},
+                        {"role": "user", "content": parts},
+                        {"role": "assistant", "content": READY}]
+    for turn in history:
+        if turn.get("role") in ("user", "assistant") and str(turn.get("text", "")).strip():
+            msgs.append({"role": turn["role"], "content": str(turn["text"])})
+    msgs.append({"role": "user", "content": question.strip()})
     return msgs
 
 
@@ -205,7 +263,9 @@ def check_fits(ctx: Context, question: str, history: list[dict], think: bool) ->
         raise AskError(
             f"that is too much to ask about at once: about {used:,} tokens "
             f"({len(ctx.cards)} cards, {len(ctx.pictures)} pictures) where {room:,} fit"
-            + (" - try without thinking deeper" if think else " - take some cards out"))
+            + (" - try without thinking deeper" if think
+               else " - add only the cards you mean to the context" if ctx.whole
+               else " - take some cards out"))
     return used
 
 
@@ -238,13 +298,18 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     """Everything the person sees, in order: what went in, the thinking, the
     words as they come, and finally the checked answer."""
     used = check_fits(ctx, question, history, think)
-    yield {"event": "context", "cards": ctx.cards, "pictures": len(ctx.pictures), "tokens": used}
+    yield {"event": "context", "cards": ctx.cards, "pictures": len(ctx.pictures), "tokens": used,
+           "whole": ctx.whole, "pictures_left_out": ctx.pictures_left_out,
+           "mode": ctx.mode, "total": ctx.total, "how": ctx.how}
     text: list[str] = []
     timings: dict = {}
     for ev in model.stream(messages(ctx, question, history),
                            max_tokens=ANSWER_TOKENS + (THINKING_TOKENS if think else 0),
                            think=think):
-        if ev["type"] == "text":
+        if ev["type"] == "progress":
+            yield {"event": "progress", "total": ev["total"], "cached": ev["cached"],
+                   "done": ev["done"]}
+        elif ev["type"] == "text":
             text.append(ev["text"])
             yield {"event": "text", "text": ev["text"]}
         elif ev["type"] == "thinking":
@@ -252,5 +317,5 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
         elif ev["type"] == "done":
             timings = ev
     result = check_citations("".join(text), set(ctx.cards))
-    yield {"event": "done", **result,
+    yield {"event": "done", **result, "stopped": bool(timings.get("stopped")),
            "tokens_per_second": timings.get("tokens_per_second")}

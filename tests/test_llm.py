@@ -74,14 +74,14 @@ def test_files_that_share_a_folder_are_the_same_files():
 
 
 @pytest.mark.parametrize("memory, expected", [
-    (16303 / 1024, "large"),        # a "16 GB" card, as its driver reports it
-    (24 * 1.0, "large"),
-    (12282 / 1024, "medium"),       # 12 GB
-    (8188 / 1024, "small"),         # an 8 GB laptop card
+    (16303 / 1024, "full"),         # a "16 GB" card, as its driver reports it
+    (24 * 1.0, "full"),
+    (12282 / 1024, "full"),         # 12 GB
+    (8188 / 1024, "compact"),       # an 8 GB laptop card
     (6.0, "light"),
     (None, "light"),                # no graphics card at all
-    (32 * 2 / 3, "large"),          # a 32 GB Mac's share
-    (16 * 2 / 3, "small"),          # a 16 GB Mac
+    (32 * 2 / 3, "full"),           # a 32 GB Mac's share
+    (16 * 2 / 3, "compact"),        # a 16 GB Mac
     (8 * 2 / 3, "light"),           # an 8 GB Mac
 ])
 def test_picks_the_largest_model_that_fits_whole(memory, expected):
@@ -89,8 +89,14 @@ def test_picks_the_largest_model_that_fits_whole(memory, expected):
     assert llm.choose_tier(accel).key == expected
 
 
+def test_the_model_is_qwen_9b_never_the_27b():
+    """Decided in use: the 27B was far too slow to think with. It is not offered."""
+    assert llm.TIERS[0].model.name.startswith("Qwen3.5-9B")
+    assert not any("27B" in t.model.name for t in llm.TIERS)
+
+
 def test_a_size_can_be_asked_for_by_name():
-    assert llm.choose_tier(None, "large").key == "large"
+    assert llm.choose_tier(None, "full").key == "full"
     with pytest.raises(llm.SetupError, match="no model size"):
         llm.choose_tier(None, "huge")
 
@@ -111,29 +117,25 @@ def test_built_in_graphics_do_not_count_as_a_card(monkeypatch):
     assert llm.detect_accelerator("windows", "vulkan") is None
 
 
-def _nvidia_says(monkeypatch, free_mib: int, apps: list[str]):
-    def run(cmd, **kw):
-        if any("memory.free" in c for c in cmd):
-            return subprocess.CompletedProcess(cmd, 0, stdout=f"{free_mib}\n")
-        return subprocess.CompletedProcess(cmd, 0, stdout="\n".join(apps) + "\n")
+def _nvidia_says(monkeypatch, free_mib: int):
     monkeypatch.setattr(llm.shutil, "which", lambda name: "nvidia-smi")
-    monkeypatch.setattr(llm.subprocess, "run", run)
+    monkeypatch.setattr(llm.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout=f"{free_mib}\n"))
 
 
-def test_names_the_program_holding_the_memory(tmp_path, monkeypatch):
-    inst = fake_install(tmp_path, tier="large", backend="cuda")
-    _nvidia_says(monkeypatch, 3687, [
-        r"C:\Users\x\AppData\Local\Programs\Ollama\lib\ollama\llama-server.exe",
-        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-    ])
+def test_says_how_much_memory_is_free_and_names_nothing(tmp_path, monkeypatch):
+    """Mindboard runs its own llama.cpp and depends on no other program, so the
+    warning is about memory and nothing else."""
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    _nvidia_says(monkeypatch, 3687)
     message = llm.memory_shortfall(inst)
-    assert message and "Ollama" in message and "3.6 GB" in message
-    assert "Brave" not in message, "a browser's sliver of memory is not the problem"
+    assert message and "3.6 GB" in message and "Mindboard's model needs" in message
+    assert "program" not in message.lower() and " is using" not in message
 
 
 def test_quiet_when_there_is_room(tmp_path, monkeypatch):
-    inst = fake_install(tmp_path, tier="large", backend="cuda")
-    _nvidia_says(monkeypatch, 15600, [])
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    _nvidia_says(monkeypatch, 15600)
     assert llm.memory_shortfall(inst) is None
 
 
@@ -303,13 +305,13 @@ def fake_install(tmp_path: Path, tier: str = "light", backend: str = "cpu") -> l
 
 
 def test_not_set_up_until_every_piece_is_there(tmp_path):
-    tier = llm.TIER_BY_KEY["medium"]
+    tier = llm.TIER_BY_KEY["compact"]
     assert llm.find_install(tmp_path) is None
     folder = llm.runtime_dir(tmp_path, llm.this_platform(), "cpu")
     folder.mkdir(parents=True)
     (folder / llm.SERVER_NAME).write_bytes(b"")
     (folder / ".complete").write_text(json.dumps({"bin": "."}))
-    (tmp_path / "installed.json").write_text(json.dumps({"backend": "cpu", "tier": "medium"}))
+    (tmp_path / "installed.json").write_text(json.dumps({"backend": "cpu", "tier": "compact"}))
     assert llm.find_install(tmp_path) is None, "no model yet"
     for pin in (tier.model, tier.vision):
         f = llm.model_path(tmp_path, tier, pin)
@@ -318,7 +320,7 @@ def test_not_set_up_until_every_piece_is_there(tmp_path):
             fh.truncate(pin.size)                 # sparse: the right size, no 10 GB written
         llm._verified_mark(f).write_text(pin.sha256)
     found = llm.find_install(tmp_path)
-    assert found is not None and found.server.exists() and found.tier.key == "medium"
+    assert found is not None and found.server.exists() and found.tier.key == "compact"
 
 
 # --------------------------------------------------------------- running --
@@ -473,3 +475,31 @@ def test_the_check_picture_has_the_word_in_it():
 
     im = Image.open(io.BytesIO(llm.test_picture()))
     assert im.size == (720, 360)
+
+
+@pytest.mark.parametrize("free_mib, expected", [(13078, True), (11000, False)])
+def test_the_vision_part_goes_on_the_gpu_when_it_fits(tmp_path, monkeypatch, free_mib, expected):
+    """On the GPU a picture-heavy board was read five times faster; when the
+    card is short, the vision part stays off it rather than push the model off."""
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    _nvidia_says(monkeypatch, free_mib)
+    assert llm.vision_fits(inst) is expected
+    assert llm.vision_fits(fake_install(tmp_path, tier="full", backend="cpu")) is False
+
+
+def test_the_start_decides_where_the_vision_part_runs(tmp_path, fake_server, monkeypatch):
+    seen = []
+    real = llm.server_args
+
+    def spy(inst, port, key, ctx, vision_on_gpu=False):
+        seen.append(vision_on_gpu)
+        return real(inst, port, key, ctx, vision_on_gpu)
+    spy.__wrapped__ = real.__wrapped__
+    monkeypatch.setattr(llm, "server_args", spy)
+    monkeypatch.setattr(llm, "vision_fits", lambda inst: True)
+    model = llm.LocalModel(fake_install(tmp_path), start_timeout=20)
+    try:
+        model.start()
+        assert seen == [True] and model.vision_placed == "GPU"
+    finally:
+        model.stop()

@@ -22,6 +22,7 @@ const KEYS: { keys: string[]; what: string }[] = [
   { keys: [MOD, 'C / V / D'], what: 'copy, paste, duplicate' },
   { keys: ['Del'], what: 'delete what is selected' },
   { keys: [MOD, 'Z'], what: 'undo' },
+  { keys: [MOD, 'J'], what: 'ask your board' },
   { keys: [MOD, 'K'], what: 'everything else' },
 ]
 

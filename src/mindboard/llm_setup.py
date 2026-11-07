@@ -109,7 +109,8 @@ def run_check(console: Console) -> bool:
     mark = "[green]✓[/green]" if r["read_the_picture"] else "[red]x[/red]"
     took = r["picture_prompt_seconds"]
     console.print(f"    {mark} reads pictures"
-                  + (f"  [{DIM}]{took:.1f} s for the test picture[/{DIM}]" if took else ""))
+                  + (f"  [{DIM}]{took:.1f} s for the test picture, vision on the {r['vision_on']}[/{DIM}]"
+                     if took else ""))
     console.print(f"      [{DIM}]\"{r['saw']}\"[/{DIM}]")
     ok = r["read_the_picture"] and bool(r["answer"])
     console.print()
@@ -151,9 +152,14 @@ def ask_in_terminal(console: Console, dd, board: str, cards: list[str], question
         b = _pick(list_boards(dd), board, "board")
         conn = conn_for(dd, b["id"])
         nodes = read_graph(conn, b["id"])["nodes"]
-        chosen = ([n["id"] for n in nodes if not n.get("parent")] if every
-                  else [_pick(nodes, c, "card")["id"] for c in cards])
-        ctx = build(dd, conn, b["id"], chosen)
+        # --all is the whole board, exactly as the panel asks it with nothing
+        # added - pictures within the whole-board budget - not every card by hand
+        chosen = [] if every else [_pick(nodes, c, "card")["id"] for c in cards]
+        emb = llm.EmbedModel(inst) if inst.embedder else None
+        ctx = build(dd, conn, b["id"], chosen, question, [], emb,
+                    inst.embedder.name if inst.embedder else "")
+        if emb is not None:
+            emb.stop()
     except (llm.SetupError, AskError) as exc:
         console.print(f"\n  [red]{exc}[/red]")
         return False

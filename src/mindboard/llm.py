@@ -90,8 +90,8 @@ class Tier:
     model that spills into system RAM reads those layers at RAM speed, several
     times slower, and a smaller model that fits beats a larger one that does not.
 
-    All four are the same family - one architecture, one chat template, all
-    able to read pictures - so everything built on top behaves the same on each.
+    All are the same family - one architecture, one chat template, all able
+    to read pictures - so everything built on top behaves the same on each.
     """
     key: str
     label: str
@@ -112,25 +112,22 @@ class Tier:
         return self.model.size / 2 ** 30 + 1.5
 
 
-_Q38_27B = ("unsloth/Qwen3.8-27B-GGUF", "4ca720788d1e01f1bff70c033e0d0028fd02e502")
 _Q35_9B = ("unsloth/Qwen3.5-9B-GGUF", "3885219b6810b007914f3a7950a8d1b469d598a5")
 _Q35_4B = ("unsloth/Qwen3.5-4B-GGUF", "e87f176479d0855a907a41277aca2f8ee7a09523")
 
 # Largest first. Thresholds sit just under each class of card as the driver
-# reports it - a "16 GB" card shows about 15.9 GiB, an "8 GB" laptop card 7.9.
+# reports it - a "12 GB" card shows about 11.9 GiB, an "8 GB" laptop card 7.9.
+#
+# Qwen3.5 9B is the model, by decision: a 27B (Qwen3.8) was tried first, and in
+# use it was far too slow to think with - minutes before a first word - so it
+# is not offered at all. Speed is what makes asking your board worth doing.
 TIERS: list[Tier] = [
-    Tier("large", "Qwen3.8 27B", 15.5, "needs a 16 GB graphics card", "qwen3.8-27b",
-         _hf(*_Q38_27B, "Qwen3.8-27B-UD-IQ4_XS.gguf", 14252845984,
-             "40fac4050e940397dbf13087afd50f4734a11805bf9d65ef8ddd7483470e6199"),
-         _hf(*_Q38_27B, "mmproj-F16.gguf", 927607488,
-             "cbb841a9ee0636b2ec172f5bb8df2ea8dfeb01e90fe7c6126581d662a0b4e43e")),
-    Tier("medium", "Qwen3.5 9B, full quality", 11.5, "needs a 12 GB graphics card",
-         "qwen3.5-9b",
+    Tier("full", "Qwen3.5 9B", 11.5, "needs a 12 GB graphics card", "qwen3.5-9b",
          _hf(*_Q35_9B, "Qwen3.5-9B-Q8_0.gguf", 9527502048,
              "809626574d0cb43d4becfa56169980da2bb448f2299270f7be443cb89d0a6ae4"),
          _hf(*_Q35_9B, "mmproj-F16.gguf", 918166080,
              "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f")),
-    Tier("small", "Qwen3.5 9B, compact", 7.5, "needs an 8 GB graphics card", "qwen3.5-9b",
+    Tier("compact", "Qwen3.5 9B, compact", 7.5, "needs an 8 GB graphics card", "qwen3.5-9b",
          _hf(*_Q35_9B, "Qwen3.5-9B-Q4_K_M.gguf", 5680522464,
              "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"),
          _hf(*_Q35_9B, "mmproj-F16.gguf", 918166080,
@@ -143,6 +140,15 @@ TIERS: list[Tier] = [
              "cd88edcf8d031894960bb0c9c5b9b7e1fea6ebee02b9f7ce925a00d12891f864")),
 ]
 TIER_BY_KEY = {t.key: t for t in TIERS}
+
+# Finding cards by meaning (retrieve.py): Qwen3-Embedding 0.6B, Qwen's own
+# GGUF, Apache-2.0. Small enough to sit beside any of the sizes above, and run
+# by the same llama.cpp as a second, separate server.
+_Q3_EMBED = ("Qwen/Qwen3-Embedding-0.6B-GGUF", "370f27d7550e0def9b39c1f16d3fbaa13aa67728")
+EMBEDDER = _hf(*_Q3_EMBED, "Qwen3-Embedding-0.6B-Q8_0.gguf", 639150592,
+               "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439")
+EMBEDDER_FOLDER = "qwen3-embedding"
+EMBEDDER_LABEL = "Qwen3-Embedding 0.6B"
 
 CHUNK = 1 << 20
 SPARE = 2 * 1024 ** 3        # never fill a disk to the last byte
@@ -468,6 +474,7 @@ class Install:
     bin_dir: Path
     model: Path
     vision: Path
+    embedder: Optional[Path] = None   # None: search by wording only
 
     @property
     def server(self) -> Path:
@@ -482,6 +489,10 @@ def model_path(home: Path, tier: Tier, pin: Pinned) -> Path:
     return home / "models" / tier.folder / pin.name
 
 
+def embedder_path(home: Path) -> Path:
+    return home / "models" / EMBEDDER_FOLDER / EMBEDDER.name
+
+
 def needed(home: Path, plat: str, backend: str, tier: Tier) -> list[Pinned]:
     """What would still have to be downloaded."""
     out: list[Pinned] = []
@@ -490,6 +501,8 @@ def needed(home: Path, plat: str, backend: str, tier: Tier) -> list[Pinned]:
     for pin in (tier.model, tier.vision):
         if not is_verified(model_path(home, tier, pin), pin):
             out.append(pin)
+    if not is_verified(embedder_path(home), EMBEDDER):
+        out.append(EMBEDDER)
     return out
 
 
@@ -551,7 +564,9 @@ def find_install(home: Optional[Path] = None) -> Optional[Install]:
     vision = model_path(home, tier, tier.vision)
     if not (is_verified(model, tier.model) and is_verified(vision, tier.vision)):
         return None
-    inst = Install(home, plat, backend, tier, folder / rel, model, vision)
+    embedder = embedder_path(home)
+    inst = Install(home, plat, backend, tier, folder / rel, model, vision,
+                   embedder if is_verified(embedder, EMBEDDER) else None)
     return inst if inst.server.exists() else None
 
 
@@ -589,6 +604,7 @@ def install(home: Optional[Path] = None, backend: str = "auto", tier: str = "aut
     install_runtime(p.home, p.platform, p.backend, progress)
     for pin in (p.tier.model, p.tier.vision):
         download(pin, model_path(p.home, p.tier, pin).parent, progress)
+    download(EMBEDDER, embedder_path(p.home).parent, progress)
     (p.home / "installed.json").write_text(json.dumps({
         "build": LLAMA_BUILD, "platform": p.platform, "backend": p.backend,
         "tier": p.tier.key, "model": p.tier.model.name, "model_sha256": p.tier.model.sha256,
@@ -603,12 +619,13 @@ def install(home: Optional[Path] = None, backend: str = "auto", tier: str = "aut
 
 
 def memory_shortfall(inst: Install) -> Optional[str]:
-    """Say so when another program holds the graphics memory this model needs.
+    """Say so when the graphics card has less free memory than this model needs.
 
     The model still loads - llama.cpp's --fit puts what does not fit on the
     processor - but it answers several times slower, and without this the
-    person would only see a slow Mindboard. Programs that run models of their
-    own are named; NVIDIA only, as its driver is the one that can say.
+    person would only see a slow Mindboard. It speaks of memory only: Mindboard
+    runs its own llama.cpp and depends on nothing else, so it names nothing
+    else. NVIDIA only, as its driver is the one that can say.
     """
     if inst.backend != "cuda":
         return None
@@ -618,28 +635,14 @@ def memory_shortfall(inst: Install) -> Optional[str]:
     try:
         free = int(subprocess.run([exe, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
                                   capture_output=True, text=True, timeout=10).stdout.split()[0])
-        apps = subprocess.run([exe, "--query-compute-apps=process_name", "--format=csv,noheader"],
-                              capture_output=True, text=True, timeout=10).stdout.splitlines()
     except Exception:
         return None
     free_gib = free / 1024
     if free_gib >= inst.tier.run_gib:
         return None
-    known = [("ollama", "Ollama"), ("lm studio", "LM Studio"), ("lmstudio", "LM Studio"),
-             ("koboldcpp", "KoboldCpp"), ("gpt4all", "GPT4All"), ("\\jan\\", "Jan")]
-    ours = str(inst.bin_dir).lower()
-    holders: list[str] = []
-    for path in apps:
-        low = path.strip().lower()
-        if not low or low.startswith(ours):
-            continue
-        for needle, name in known:
-            if needle in low and name not in holders:
-                holders.append(name)
-    who = (" and ".join(holders) + (" are" if len(holders) > 1 else " is") + " using the rest"
-           if holders else "other programs are using the rest")
-    return (f"only {free_gib:.1f} GB of graphics memory is free and this model wants "
-            f"{inst.tier.run_gib:.1f} GB - {who}. Answers will be slower until it is freed.")
+    return (f"Mindboard's model needs {inst.tier.run_gib:.1f} GB of graphics memory and only "
+            f"{free_gib:.1f} GB is free, so answers will be much slower. Free up the graphics "
+            f"card for full speed.")
 
 
 # ------------------------------------------------------------- running --
@@ -732,9 +735,8 @@ def server_args(inst: Install, port: int, key: str, ctx: int,
         str(inst.server),
         "--model", str(inst.model),
         "--mmproj", str(inst.vision),
-        # The vision part on the processor: on the GPU its ~0.9 GB pushes layers
-        # of the model itself off the card, which slows every answer; on the
-        # processor it slows only the reading of a picture.
+        # Where the vision part runs is decided by vision_fits(): on the GPU when
+        # there is room beside the model, the processor when there is not.
         "--mmproj-offload" if vision_on_gpu else "--no-mmproj-offload",
         "--host", "127.0.0.1", "--port", str(port),
         "--api-key", key,             # localhost is not a trust boundary
@@ -751,6 +753,24 @@ def server_args(inst: Install, port: int, key: str, ctx: int,
     ]
 
 
+def embed_server_args(inst: Install, port: int, key: str, ctx: int) -> list[str]:
+    """The embedding server: the same llama.cpp, the embedding model, nothing
+    else. Last-token pooling is how Qwen3-Embedding is meant to be read."""
+    return [
+        str(inst.server),
+        "--model", str(inst.embedder),
+        "--embedding", "--pooling", "last",
+        "--host", "127.0.0.1", "--port", str(port),
+        "--api-key", key,
+        "--no-webui", "--no-slots",
+        "--ctx-size", str(ctx),
+        # every text is embedded in one piece, so a batch must hold the longest
+        "--batch-size", "2048", "--ubatch-size", "2048",
+        "--fit", "on",
+        "--parallel", "1",
+    ]
+
+
 class ModelError(RuntimeError):
     """The local model could not start or answer - phrased for the person."""
 
@@ -759,15 +779,40 @@ class ModelBusy(ModelError):
     """Another question is being answered; the server runs one at a time."""
 
 
+def vision_fits(inst: Install) -> bool:
+    """Put the vision part on the GPU when it fits beside the model.
+
+    Measured on a whole board with eleven pictures: with the vision part on the
+    processor the board was read at 695 tokens a second; on the GPU, at 3,415 -
+    first words after 6 seconds instead of 30. It went on the processor only
+    while the model was a 27B that left the card no room; when the card is
+    short of memory, it still does, rather than push the model itself off it.
+    """
+    if inst.backend == "metal":
+        return True                   # one shared memory: nothing to push off
+    if inst.backend != "cuda":
+        return False
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return False
+    try:
+        free = int(subprocess.run([exe, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                                  capture_output=True, text=True, timeout=10).stdout.split()[0])
+    except Exception:
+        return False
+    return free / 1024 >= inst.tier.run_gib + inst.tier.vision.size / 2 ** 30 + 1.0
+
+
 class LocalModel:
     """One llama-server, started on first use, unloaded when idle, stopped with
     Mindboard. Thread-safe: the app's request threads share one instance."""
 
     def __init__(self, inst: Install, ctx: int = 32768, idle_minutes: float = 20.0,
-                 start_timeout: float = 600.0, vision_on_gpu: bool = False):
+                 start_timeout: float = 600.0, vision_on_gpu: Optional[bool] = None):
         self.inst = inst
         self.ctx = ctx
-        self.vision_on_gpu = vision_on_gpu
+        self.vision_on_gpu = vision_on_gpu   # None: decided at each start (vision_fits)
+        self.vision_placed = ""
         self.idle = idle_minutes * 60
         self.start_timeout = start_timeout
         self.proc: Optional[subprocess.Popen] = None
@@ -778,6 +823,7 @@ class LocalModel:
         self.load_seconds = 0.0
         self._lock = threading.RLock()
         self._asking = threading.Lock()     # one question at a time, like --parallel 1
+        self._cancel = threading.Event()
         self._watcher: Optional[threading.Thread] = None
         atexit.register(self.stop)
 
@@ -785,9 +831,17 @@ class LocalModel:
     def base(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
+    log_name = "llama-server.log"
+
     @property
     def log_path(self) -> Path:
-        return self.inst.home / "logs" / "llama-server.log"
+        return self.inst.home / "logs" / self.log_name
+
+    def _args(self) -> list[str]:
+        on_gpu = (self.vision_on_gpu if self.vision_on_gpu is not None
+                  else vision_fits(self.inst))
+        self.vision_placed = "GPU" if on_gpu else "processor"
+        return server_args(self.inst, self.port, self.key, self.ctx, on_gpu)
 
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
@@ -819,9 +873,7 @@ class LocalModel:
                 kw["preexec_fn"] = _linux_parent_death
             began = time.time()
             try:
-                self.proc = subprocess.Popen(
-                    server_args(self.inst, self.port, self.key, self.ctx, self.vision_on_gpu),
-                    **kw)
+                self.proc = subprocess.Popen(self._args(), **kw)
             finally:
                 log.close()
             _dies_with_us(self.proc)
@@ -911,6 +963,11 @@ class LocalModel:
         }
 
 
+    def cancel(self) -> None:
+        """Stop the answer being written, from any thread. The stream notices
+        before its next piece and hangs up on llama-server, which stops."""
+        self._cancel.set()
+
     def stream(self, messages: list[dict], *, max_tokens: int = 1024, think: bool = False,
                temperature: float = 0.7) -> Iterator[dict]:
         """The answer as it is written: {"type": "thinking"|"text", "text"} for
@@ -923,6 +980,7 @@ class LocalModel:
 
         if not self._asking.acquire(blocking=False):
             raise ModelBusy("still answering the last question")
+        self._cancel.clear()
         try:
             self.start()
             with self._lock:
@@ -936,6 +994,9 @@ class LocalModel:
                         "temperature": temperature, "top_p": 0.8, "top_k": 20,
                         "chat_template_kwargs": {"enable_thinking": think},
                         "timings_per_token": False,
+                        # reading a long context can take minutes on a card that
+                        # is shared; say how far it has got instead of nothing
+                        "return_progress": True,
                     },
                     timeout=httpx.Timeout(30.0, read=600.0),
                 ) as res:
@@ -945,6 +1006,8 @@ class LocalModel:
                                          f"({res.status_code}): {res.text[:300]}")
                     timings: dict = {}
                     for line in res.iter_lines():
+                        if self._cancel.is_set():
+                            break             # leaving the block hangs up on llama-server
                         if not line.startswith("data:"):
                             continue
                         data = line[5:].strip()
@@ -952,13 +1015,18 @@ class LocalModel:
                             break
                         chunk = json.loads(data)
                         timings = chunk.get("timings") or timings
+                        prog = chunk.get("prompt_progress")
+                        if prog:
+                            yield {"type": "progress", "total": prog.get("total"),
+                                   "cached": prog.get("cache"),
+                                   "done": prog.get("processed")}
                         for choice in chunk.get("choices") or []:
                             delta = choice.get("delta") or {}
                             if delta.get("reasoning_content"):
                                 yield {"type": "thinking", "text": delta["reasoning_content"]}
                             if delta.get("content"):
                                 yield {"type": "text", "text": delta["content"]}
-                    yield {"type": "done",
+                    yield {"type": "done", "stopped": self._cancel.is_set(),
                            "tokens": timings.get("predicted_n"),
                            "tokens_per_second": timings.get("predicted_per_second"),
                            "prompt_tokens": timings.get("prompt_n")}
@@ -971,6 +1039,53 @@ class LocalModel:
                     self.last_used = time.time()
         finally:
             self._asking.release()
+
+
+class EmbedModel(LocalModel):
+    """The embedding server: turns card text into vectors for finding cards by
+    meaning. Same lifecycle as the chat model - started on first use, a fresh
+    key each start, unloaded when idle, stopped with Mindboard - and a separate
+    process, so it can be asked while the chat model is busy writing."""
+
+    log_name = "llama-embed.log"
+
+    def __init__(self, inst: Install, **kw):
+        if inst.embedder is None:
+            raise ModelError("the embedding model is not installed - run: mindboard ai install")
+        super().__init__(inst, ctx=8192, **kw)
+
+    def _args(self) -> list[str]:
+        self.vision_placed = ""
+        return embed_server_args(self.inst, self.port, self.key, self.ctx)
+
+    def embed(self, texts: list[str], batch: int = 32) -> list[list[float]]:
+        """One unit-length vector per text, in order."""
+        import httpx
+
+        self.start()
+        with self._lock:
+            self.busy += 1
+        out: list[list[float]] = []
+        try:
+            for i in range(0, len(texts), batch):
+                res = httpx.post(self.base + "/v1/embeddings",
+                                 headers={"Authorization": f"Bearer {self.key}"},
+                                 json={"input": texts[i:i + batch]}, timeout=120)
+                if res.status_code != 200:
+                    raise ModelError(f"the embedding model refused ({res.status_code}): "
+                                     f"{res.text[:200]}")
+                rows = sorted(res.json()["data"], key=lambda r: r["index"])
+                for r in rows:
+                    v = r["embedding"]
+                    norm = sum(x * x for x in v) ** 0.5 or 1.0
+                    out.append([x / norm for x in v])
+        except httpx.HTTPError as exc:
+            raise ModelError(f"the embedding model did not answer ({exc.__class__.__name__})") from exc
+        finally:
+            with self._lock:
+                self.busy -= 1
+                self.last_used = time.time()
+        return out
 
 
 # --------------------------------------------------------------- check --
@@ -1018,9 +1133,9 @@ def test_picture() -> bytes:
     return buf.getvalue()
 
 
-def check(inst: Install, vision_on_gpu: bool = False) -> dict:
+def check(inst: Install, vision_on_gpu: Optional[bool] = None) -> dict:
     """Load the model, ask it something, show it a picture, and report how it
-    went. Stops the model afterwards: a check must not leave 15 GB behind."""
+    went. Stops the model afterwards: a check must not leave the card occupied."""
     import base64
 
     model = LocalModel(inst, vision_on_gpu=vision_on_gpu)
@@ -1041,6 +1156,7 @@ def check(inst: Install, vision_on_gpu: bool = False) -> dict:
         model.stop()
     return {
         "load_seconds": round(model.load_seconds, 1),
+        "vision_on": model.vision_placed,
         "layers": layers_on_gpu(log),
         "gpu_mib": (loaded - before) if (loaded is not None and before is not None) else None,
         "answer": text["text"].strip(),

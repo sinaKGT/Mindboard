@@ -414,7 +414,7 @@ def _console():
 def ai_install(
     yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before downloading."),
     model: str = typer.Option("auto", "--model",
-                              help="auto (sized for this computer), large, medium, small or light."),
+                              help="auto (sized for this computer), full, compact or light."),
     backend: str = typer.Option("auto", "--backend",
                                 help="auto, cuda, vulkan, metal or cpu."),
 ):

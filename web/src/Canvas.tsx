@@ -11,6 +11,8 @@ import {
   deleteEdges, deleteNodes, duplicateNodes, getClip, moveInto, pasteClip, setClip, unwrapMeta,
   wrapSelection,
 } from './actions'
+import { AskPanel } from './AskPanel'
+import { useAsk } from './askStore'
 import { edgeTypes } from './edges'
 import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
@@ -118,6 +120,11 @@ function CanvasInner() {
   const focusId = useUI((s) => s.focusId)
   const linking = useUI((s) => s.linking)
   const selectedIds = useUI((s) => s.selected)
+  const boardId = useStore((s) => s.boardId)
+  const askOpen = useAsk((s) => s.open)
+
+  // each board has its own context and conversation, kept in the tab
+  useEffect(() => { useAsk.getState().load(boardId) }, [boardId])
 
   const {
     screenToFlowPosition, flowToScreenPosition, fitView, zoomIn, zoomOut, getNodes,
@@ -146,22 +153,46 @@ function CanvasInner() {
   rfNodesRef.current = rfNodes
   useEffect(() => { setRfNodes(level.rfNodes) }, [level.rfNodes])
 
-  // entering or leaving a meta-node lands you looking at its contents
+  // entering or leaving a meta-node lands you looking at its contents - unless
+  // the move was to go to one card, which then gets the view to itself
   const firstFit = useRef(true)
   useEffect(() => {
     if (firstFit.current) { firstFit.current = false; return }
+    if (useUI.getState().focusId) return
     const t = setTimeout(() => fitView({ duration: 320, padding: 0.3, maxZoom: 1 }), 40)
     return () => clearTimeout(t)
   }, [parent, fitView])
 
+  /** Go to a card: centre it, zoomed so it reads, clear of the Ask panel, and
+   *  flash it so the eye lands on it.
+   *
+   *  This used fitView on the card, which did nothing for any card off screen:
+   *  the canvas renders only the cards in view (onlyRenderVisibleElements), and
+   *  xyflow can only fit a card it has measured. So the card's place comes from
+   *  the board itself, and its size from the canvas when known, else the card. */
   useEffect(() => {
     if (!focusId) return
     const t = setTimeout(() => {
-      fitView({ nodes: [{ id: focusId }], duration: 400, maxZoom: 1.1, padding: 0.35 })
       setUI('focusId', null)
-    }, 60)
+      const node = useStore.getState().nodes[focusId]
+      if (!node) return
+      const internal = getInternalNode(focusId)
+      const w = internal?.measured?.width ?? node.size[0] ?? 320
+      const h = internal?.measured?.height ?? node.size[1] ?? 160
+      const box = wrap.current?.getBoundingClientRect()
+      const panel = useAsk.getState().open ? 404 : 0       // the panel and its margins
+      const viewW = Math.max((box?.width ?? 1200) - panel, 200)
+      const viewH = box?.height ?? 800
+      const z = Math.max(0.3, Math.min(1.15, (viewW * 0.6) / w, (viewH * 0.6) / h))
+      setCenter(node.pos[0] + w / 2 + panel / 2 / z, node.pos[1] + h / 2,
+                { zoom: z, duration: 450 })
+      setUI('foundId', focusId)
+      setTimeout(() => {
+        if (useUI.getState().foundId === focusId) setUI('foundId', null)
+      }, 2400)
+    }, 80)
     return () => clearTimeout(t)
-  }, [focusId, fitView, setUI])
+  }, [focusId, getInternalNode, setCenter, setUI])
 
   // ------------------------------------------------------ image export --
   const runExport = useCallback(async (kind: ImageKind, scale: number) => {
@@ -543,6 +574,12 @@ function CanvasInner() {
       if (mod && e.key.toLowerCase() === 'l') { e.preventDefault(); autoLayout(parent); return }
       if (mod && e.key.toLowerCase() === 'e') { e.preventDefault(); void runExport('png', 2); return }
       if (mod && e.key === '0') { e.preventDefault(); fitView({ duration: 300 }); return }
+      if (mod && e.key.toLowerCase() === 'j') {
+        e.preventDefault()
+        const ask = useAsk.getState()
+        ask.setOpen(!ask.open)
+        return
+      }
       if (e.key === 'Escape') {
         if (useUI.getState().linking) { stopLinking(); return }
         if (useUI.getState().editingEdgeId) { setUI('editingEdgeId', null); return }
@@ -803,6 +840,10 @@ function CanvasInner() {
               <button onClick={() => void duplicateNodes(selectedIds)}>
                 <Icon name="copy" size={14} /> Duplicate
               </button>
+              <button title="Add these cards to the context and ask about them"
+                onClick={() => useAsk.getState().add(selectedIds)}>
+                <Icon name="askAdd" size={14} /> Ask
+              </button>
               <button className="danger" onClick={() => deleteNodes(selectedIds)}>
                 <Icon name="trash" size={14} />
               </button>
@@ -863,7 +904,13 @@ function CanvasInner() {
         <button className="icon-btn" title="Theme" onClick={() => setUI('themeOpen', !themeOpen)}>
           <Icon name="palette" size={14} />
         </button>
+        <button className={`icon-btn ${askOpen ? 'on' : ''}`} title="Ask your board  (Ctrl+J)"
+          onClick={() => useAsk.getState().setOpen(!askOpen)}>
+          <Icon name="ask" size={14} />
+        </button>
       </div>
+
+      <AskPanel />
 
       {themeOpen && <ThemeSheet />}
       {dragOver && <div className="drop-veil">drop to add</div>}

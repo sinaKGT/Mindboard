@@ -2,7 +2,9 @@
 so every /api route requires the per-install token (see DESIGN.md 6)."""
 
 import json
+import queue
 import re
+import threading
 import shutil
 import tempfile
 from pathlib import Path
@@ -280,8 +282,9 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     app.state.ask = held
 
     def stop_model() -> None:
-        if held.get("model") is not None:
-            held["model"].stop()
+        for key in ("model", "embed"):
+            if held.get(key) is not None:
+                held[key].stop()
 
     app.router.on_shutdown.append(stop_model)
 
@@ -299,8 +302,23 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             current = held["model"] = llm.LocalModel(inst)
         return current
 
+    def embed_model():
+        """The embedding server for searching big boards; None means search
+        by wording only."""
+        from . import llm
+
+        inst = llm.find_install()
+        if inst is None or inst.embedder is None:
+            return None
+        current = held.get("embed")
+        if current is None or current.inst.embedder != inst.embedder:
+            if current is not None:
+                current.stop()
+            current = held["embed"] = llm.EmbedModel(inst)
+        return current
+
     @app.post("/api/boards/{bid}/ask")
-    async def api_ask(bid: str, body: AskRequest):
+    async def api_ask(bid: str, body: AskRequest, request: Request):
         """Ask the local model about exactly these cards. Streams server-sent
         events: context, thinking, text..., then done with the checked answer.
         Reads the board only - nothing is written."""
@@ -319,43 +337,75 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             if model._asking.locked():
                 raise HTTPException(409, "still answering the last question")
             try:
-                ctx = build(dd, conn_for(dd, bid), bid, body.cards)
+                emb = embed_model()
+                ctx = build(dd, conn_for(dd, bid), bid, body.cards, body.question, history,
+                            emb, emb.inst.embedder.name if emb else "")
             except AskError as exc:
                 raise HTTPException(400, str(exc))
             try:
                 check_fits(ctx, body.question, history, body.think)
             except AskError as exc:
                 raise HTTPException(413, str(exc))
-            return model, ctx
+            from .llm import memory_shortfall
 
-        model, ctx = await run_in_threadpool(prepare)
-        gen = answer_events(model, ctx, body.question, history, body.think)
+            return model, ctx, memory_shortfall(model.inst)
 
-        def pull():
+        model, ctx, warning = await run_in_threadpool(prepare)
+        loading = not model.running()
+
+        # The answer is made on its own thread and handed over through a queue.
+        # It used to be pulled piece by piece by the response itself - and when
+        # a browser hung up, this server never heard: its send to the closed
+        # connection waited forever, nothing pulled the next piece, and the
+        # model sat mid-answer holding the one slot, so every later question
+        # was told "still answering". Now the response can stall without
+        # stalling the model, and Stop reaches the model directly (ask/stop).
+        pieces: "queue.Queue[Optional[dict]]" = queue.Queue()
+
+        def produce() -> None:
             try:
-                return next(gen)
-            except StopIteration:
-                return None
+                for item in answer_events(model, ctx, body.question, history, body.think):
+                    pieces.put(item)
             except Exception as exc:     # ModelError, ModelBusy: said, not thrown
-                return {"event": "error", "message": str(exc)}
+                pieces.put({"event": "error", "message": str(exc)})
+            finally:
+                pieces.put(None)
+
+        threading.Thread(target=produce, daemon=True, name="mindboard-ask").start()
 
         async def events():
             try:
                 while True:
-                    item = await run_in_threadpool(pull)
+                    # where the server does learn of a hang-up, stop at once
+                    if await request.is_disconnected():
+                        break
+                    item = await run_in_threadpool(pieces.get)
                     if item is None:
                         break
                     name = item.pop("event")
+                    if name == "context":
+                        # another program holding the card makes every answer
+                        # slow; say so before the person waits for one
+                        item["warning"] = warning
+                        item["loading"] = loading
                     yield f"event: {name}\ndata: {json.dumps(item)}\n\n"
                     if name == "error":
                         break
             finally:
-                # the person left: closing the generator closes the model's
-                # connection, and it stops writing an answer nobody will read
-                await run_in_threadpool(gen.close)
+                model.cancel()           # no-op if the answer already ended
 
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
+
+    @app.post("/api/boards/{bid}/ask/stop")
+    def api_ask_stop(bid: str):
+        """Stop the answer being written. The browser's Stop calls this as well
+        as hanging up, because a hang-up alone is not always heard."""
+        board_or_404(bid)
+        model = held.get("model")
+        if model is not None:
+            model.cancel()
+        return {"stopped": model is not None}
 
     # ------------------------------------------------------- import/export --
     @app.get("/api/boards/{bid}/export")

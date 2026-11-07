@@ -5,6 +5,7 @@ import {
   addConnected, deleteNodes, duplicateNodes, linkifyNode, moveOut, refreshLinkPreview, setBodyList, setStyle, unwrapMeta, updateNode,
 } from './actions'
 import { api } from './api'
+import { useAsk } from './askStore'
 import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
@@ -292,6 +293,7 @@ function Tools({ node }: { node: MNode }) {
             <span className="sep" />
           </>
         )}
+        <AskButton id={node.id} group={node.type === 'meta'} />
         <button className="icon-btn" title="Connect to another node — then click it  (c)"
           onClick={() => useUI.getState().set('linking', { sourceId: node.id })}>
           <Icon name="link" size={15} />
@@ -318,11 +320,26 @@ function Tools({ node }: { node: MNode }) {
   )
 }
 
+/** Put this card in what Ask your board reads - or take it out again. */
+function AskButton({ id, group }: { id: string; group: boolean }) {
+  const inside = useAsk((s) => s.context.includes(id))
+  return (
+    <button className={`icon-btn ${inside ? 'on' : ''}`}
+      title={inside ? 'In context — click to take it out'
+        : group ? 'Add to context — everything in this group' : 'Add to context'}
+      onClick={() => useAsk.getState().toggle(id)}>
+      <Icon name="askAdd" size={15} />
+    </button>
+  )
+}
+
 function Shell({ node, selected, resizable, children }: {
   node: MNode; selected?: boolean; resizable?: boolean; children: React.ReactNode
 }) {
   const sparked = useUI((s) => s.sparkIds.includes(node.id))
   const dropping = useUI((s) => s.dropTarget === node.id)
+  const inContext = useAsk((s) => s.context.includes(node.id))
+  const found = useUI((s) => s.foundId === node.id)
   return (
     <>
       {resizable && (
@@ -335,7 +352,7 @@ function Shell({ node, selected, resizable, children }: {
       <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''}`
         + ` tone-${node.style.tone ?? 'accent'}${node.style.color ? ' has-colour' : ''}`
         + `${sparked ? ' spark' : ''}${node.size[1] ? ' sized-h' : ''}`
-        + `${dropping ? ' dropping' : ''}`}
+        + `${dropping ? ' dropping' : ''}${inContext ? ' in-context' : ''}${found ? ' found' : ''}`}
         style={{
           ['--node-color' as string]: accentOf(node),
           width: node.size[0] ? '100%' : undefined,
@@ -345,6 +362,11 @@ function Shell({ node, selected, resizable, children }: {
           maxWidth: node.size[0] ? 'none' : undefined,
         }}>
         <div className="accent" style={{ background: accentOf(node) }} />
+        {inContext ? (
+          <span className="ctx-mark" title="In context for Ask your board">
+            <Icon name="ask" size={10} />
+          </span>
+        ) : null}
         {children}
       </div>
       <Ports nodeId={node.id} />

@@ -50,13 +50,22 @@ class Handler(BaseHTTPRequestHandler):
         client hangs up."""
         import re
 
-        parts = body["messages"][-1]["content"]
+        parts = []
+        for m in body["messages"]:
+            if m["role"] != "user":
+                continue
+            content = m["content"]
+            parts += content if isinstance(content, list) else [{"type": "text", "text": content}]
         texts = " ".join(p.get("text", "") for p in parts if isinstance(p, dict))
         images = sum(1 for p in parts if isinstance(p, dict) and p.get("type") == "image_url")
-        print(f"asked: images={images} messages={len(body['messages'])}", flush=True)
+        roles = ",".join(m["role"] for m in body["messages"])
+        print(f"asked: images={images} messages={len(body['messages'])} roles={roles}", flush=True)
         ids = re.findall(r"\[([0-9A-Za-z]{26})\]", texts)
         first = ids[0] if ids else "NONE"
         pieces = []
+        if body.get("return_progress"):
+            pieces += [("prompt_progress", {"total": 400, "cache": 0, "processed": 200}),
+                       ("prompt_progress", {"total": 400, "cache": 0, "processed": 400})]
         if (body.get("chat_template_kwargs") or {}).get("enable_thinking"):
             pieces.append(("reasoning_content", "Let me look at the cards."))
         pieces += [("content", "Your card says the corner mount is best "), ("content", f"[[{first}]]. "),
@@ -70,7 +79,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             for key, text in pieces:
-                chunk = {"choices": [{"delta": {key: text}}]}
+                chunk = ({"choices": [], "prompt_progress": text} if key == "prompt_progress"
+                         else {"choices": [{"delta": {key: text}}]})
                 self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
                 self.wfile.flush()
                 if slow:
@@ -90,6 +100,8 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("stream"):
             return self._stream(body)
         last = body["messages"][-1]["content"]
+        if not isinstance(last, list) and len(body["messages"]) > 1:
+            last = body["messages"][1]["content"]     # ask's order: the cards come second
         text = ("The word is MINDBOARD, beside a red circle." if isinstance(last, list)
                 else "A mind map lays out ideas and how they connect.")
         self._send(200, {

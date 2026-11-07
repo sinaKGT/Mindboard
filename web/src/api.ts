@@ -71,6 +71,48 @@ export const api = {
    *  in your PDF reader. The server hands over a read-only copy; see app.py. */
   openAsset: (boardId: string, sha: string) =>
     req<{ opened: string }>(`/boards/${boardId}/assets/${sha}/open`, { method: 'POST' }),
+  /** Ask the local model about exactly these cards. Calls `onEvent` for each
+   *  server-sent event (context, thinking, text, done, error) as it arrives;
+   *  aborting `signal` stops the model. Throws with the server's reason when
+   *  the question cannot be asked at all. */
+  ask: async (boardId: string, body: {
+    question: string; cards: string[]; history: { role: string; text: string }[]; think: boolean
+  }, onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['X-Mindboard-Token'] = token
+    const res = await fetch(`/api/boards/${boardId}/ask`, {
+      method: 'POST', headers, body: JSON.stringify(body), credentials: 'same-origin', signal,
+    })
+    if (!res.ok || !res.body) {
+      let detail = res.statusText
+      try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+      throw new Error(detail)
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let cut: number
+      while ((cut = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, cut)
+        buffer = buffer.slice(cut + 2)
+        let name = 'message'
+        let data = ''
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event: ')) name = line.slice(7)
+          else if (line.startsWith('data: ')) data += line.slice(6)
+        }
+        if (data) onEvent(name, JSON.parse(data))
+      }
+    }
+  },
+  /** Stop the answer being written. Said out loud rather than left to the
+   *  hang-up: the server does not always hear a connection close. */
+  askStop: (boardId: string) =>
+    req<{ stopped: boolean }>(`/boards/${boardId}/ask/stop`, { method: 'POST' }),
   /** Accepts a single .mindboard bundle or a whole backup zip. */
   importBundle: async (file: File, mode: 'skip' | 'replace' | 'copy' = 'skip') => {
     const fd = new FormData()
