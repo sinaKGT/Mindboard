@@ -155,11 +155,17 @@ def ask_in_terminal(console: Console, dd, board: str, cards: list[str], question
         # --all is the whole board, exactly as the panel asks it with nothing
         # added - pictures within the whole-board budget - not every card by hand
         chosen = [] if every else [_pick(nodes, c, "card")["id"] for c in cards]
+        # the search models are stopped before the chat model loads, so here
+        # they need leave it no room (llm.helper_on_gpu)
         emb = llm.EmbedModel(inst) if inst.embedder else None
-        ctx = build(dd, conn, b["id"], chosen, question, [], emb,
-                    inst.embedder.name if inst.embedder else "")
-        if emb is not None:
-            emb.stop()
+        rr = llm.RerankModel(inst) if inst.reranker else None
+        try:
+            ctx = build(dd, conn, b["id"], chosen, question, [], emb,
+                        inst.embedder.name if inst.embedder else "", rr)
+        finally:
+            for m in (emb, rr):
+                if m is not None:
+                    m.stop()
     except (llm.SetupError, AskError) as exc:
         console.print(f"\n  [red]{exc}[/red]")
         return False
@@ -193,6 +199,8 @@ def ask_in_terminal(console: Console, dd, board: str, cards: list[str], question
     if done.get("dropped"):
         console.print(f"  [yellow]![/yellow] removed {len(done['dropped'])} citation(s) of "
                       f"cards that were not in context")
+    if done.get("next"):
+        console.print(f"  Would you like to know: {done['next']}")
     if done.get("tokens_per_second"):
         console.print(f"  [{DIM}]{done['tokens_per_second']:.0f} tokens a second[/{DIM}]")
     return True

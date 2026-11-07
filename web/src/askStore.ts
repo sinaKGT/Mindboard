@@ -27,13 +27,16 @@ export interface Turn {
   whole?: boolean
   tokens?: number
   leftOut?: number
-  /** how the cards were chosen: by hand, the whole board, or a search of it */
-  mode?: 'chosen' | 'whole' | 'search'
+  /** how the cards were chosen: by hand, or a search of the whole board -
+   *  never the whole board sent entire */
+  mode?: 'chosen' | 'search'
   used?: number
   total?: number
   how?: string
   /** how far the model has read, while it reads */
   progress?: { done: number; total: number; cached: number }
+  /** the question the model offers to answer next */
+  next?: string
 }
 
 interface Ask {
@@ -154,7 +157,7 @@ export const useAsk = create<Ask>()((set, get) => ({
             patch({ text: last().text + data.text, status: 'writing' })
           } else if (name === 'done') {
             patch({ text: data.answer, board: data.board, beyond: data.beyond,
-                    cited: data.cited, dropped: data.dropped.length,
+                    cited: data.cited, dropped: data.dropped.length, next: data.next || undefined,
                     status: data.stopped ? 'stopped' : 'done' })
           } else if (name === 'error') {
             patch({ error: data.message, status: 'done' })

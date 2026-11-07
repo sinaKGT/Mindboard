@@ -21,6 +21,7 @@ import json
 import re
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -39,7 +40,6 @@ me my of on or our so that the their them then there these they this to was we w
 where which who why will with you your about into over than also any all more most know
 tell show give explain describe""".split())
 
-_locks: dict[str, threading.Lock] = {}
 _open: dict[str, "BoardIndex"] = {}
 _registry = threading.Lock()
 
@@ -99,7 +99,24 @@ def _schema() -> tantivy.Schema:
 
 
 class BoardIndex:
-    """Open with `BoardIndex.get(dd, board_id)`; call `sync` before searching."""
+    """Open with `BoardIndex.get(dd, board_id)`.
+
+    Two halves, kept up to date differently (DESIGN.md 33):
+
+    - the **text** index, rebuilt in full whenever the board's revision moves
+      on - 0.2 s at ten thousand cards - by `sync_text`, at every question;
+    - the **vectors**, one per card, made from the card's passage. Embedding is
+      the slow part - 92 s for ten thousand cards on a graphics card, far
+      longer on a processor - so it is done a batch at a time (`embed_some`),
+      in the background (indexer.py), and a search uses the vectors made so
+      far. A card whose passage changed keeps its old vector until the new one
+      is made; a card with none yet is still found by its words.
+
+    `sync` does both at once, for the terminal, the evaluator and tests.
+    Thread-safe: searches, the indexer and syncs share one instance.
+    """
+
+    SAVE_EVERY = 20.0          # seconds between writes of the vectors while embedding
 
     def __init__(self, folder: Path):
         self.folder = folder
@@ -107,11 +124,20 @@ class BoardIndex:
         self.vec_path = folder / "vectors.npz"
         self.text_dir = folder / "text"
         self.revision = -1
-        self.model = ""
-        self.ids: list[str] = []
-        self.matrix = np.zeros((0, 0), dtype=np.float32)
-        self.hashes: dict[str, str] = {}
+        self.model = ""                                   # the vectors' embedding model
         self.index: Optional[tantivy.Index] = None
+        self._vectors: dict[str, np.ndarray] = {}         # card -> its vector
+        self.hashes: dict[str, str] = {}                  # card -> passage its vector was made from
+        # the board as of the last sync_text: each card's passage, and its hash
+        self._passages: Optional[dict[str, str]] = None
+        self._wanted: dict[str, str] = {}
+        self._snapshot: Optional[tuple[list[str], np.ndarray]] = None
+        self._lock = threading.RLock()
+        self._dirty = False
+        self._saved_at = 0.0
+        # each card's size in tokens as it would be sent, kept by ask.board_index
+        self.costs: dict[str, int] = {}
+        self.costs_revision = -1
         self._load()
 
     @classmethod
@@ -120,7 +146,6 @@ class BoardIndex:
         with _registry:
             if key not in _open:
                 _open[key] = cls(Path(key))
-                _locks[key] = threading.Lock()
             return _open[key]
 
     @staticmethod
@@ -129,7 +154,6 @@ class BoardIndex:
         key = str(index_dir(dd, board_id))
         with _registry:
             _open.pop(key, None)
-            _locks.pop(key, None)
         import gc
 
         gc.collect()                        # let go of Tantivy's open files first
@@ -142,57 +166,127 @@ class BoardIndex:
             data = np.load(self.vec_path, allow_pickle=False)
             self.revision, self.model = meta["revision"], meta["model"]
             self.hashes = meta["hashes"]
-            self.ids = [str(i) for i in data["ids"]]
-            self.matrix = data["matrix"].astype(np.float32)
+            matrix = data["matrix"].astype(np.float32)
+            self._vectors = {str(i): matrix[row] for row, i in enumerate(data["ids"])}
             self.index = tantivy.Index(_schema(), path=str(self.text_dir), reuse=True)
         except (OSError, ValueError, KeyError):
             self.revision = -1
 
     def _save(self) -> None:
+        ids, matrix = self._matrix()
         self.folder.mkdir(parents=True, exist_ok=True)
         tmp = self.vec_path.with_suffix(".tmp.npz")
-        np.savez(tmp, ids=np.array(self.ids, dtype=str), matrix=self.matrix)
+        np.savez(tmp, ids=np.array(ids, dtype=str), matrix=matrix)
         tmp.replace(self.vec_path)
-        self.meta_path.write_text(json.dumps({"revision": self.revision, "model": self.model,
-                                              "hashes": self.hashes}), encoding="utf-8")
+        self.meta_path.write_text(json.dumps({
+            "revision": self.revision, "model": self.model,
+            "hashes": {i: self.hashes[i] for i in ids if i in self.hashes}}), encoding="utf-8")
+        self._dirty, self._saved_at = False, time.time()
+
+    def flush(self) -> None:
+        """Write the vectors made so far, if any are unsaved."""
+        with self._lock:
+            if self._dirty:
+                self._save()
+
+    def _matrix(self) -> tuple[list[str], np.ndarray]:
+        """The vectors as one matrix for searching - rebuilt only after a change."""
+        if self._snapshot is None:
+            ids = list(self._vectors)
+            matrix = (np.stack([self._vectors[i] for i in ids]) if ids
+                      else np.zeros((0, 0), dtype=np.float32))
+            self._snapshot = (ids, matrix)
+        return self._snapshot
+
+    @property
+    def ids(self) -> list[str]:
+        return self._matrix()[0]
+
+    @property
+    def matrix(self) -> np.ndarray:
+        return self._matrix()[1]
 
     # ------------------------------------------------------------- sync --
-    def sync(self, nodes: dict[str, dict], revision: int, embedder, model: str) -> None:
-        """Bring the index up to the board's revision. Text is re-indexed whole
-        - milliseconds at mind-map scale; vectors only for cards whose passage
-        changed, or all of them if the embedding model did."""
-        lock = _locks.get(str(self.folder)) or threading.Lock()
-        with lock:
-            if revision == self.revision and model == self.model and self.index is not None:
+    def sync_text(self, nodes: dict[str, dict], revision: int, model: Optional[str] = None) -> None:
+        """Bring the text index up to the board's revision and note which cards
+        need a vector. Fast enough for every question. `model` is the embedding
+        model in use: a different one makes every vector stale, as vectors from
+        two models cannot be compared; None leaves the vectors as they are."""
+        with self._lock:
+            if model is not None and model != self.model:
+                self._vectors, self.hashes, self.model = {}, {}, model
+                self._snapshot, self._dirty = None, True
+            if (revision == self.revision and self.index is not None
+                    and self._passages is not None):
                 return
             fields = {nid: card_fields(n, nodes) for nid, n in nodes.items()}
-
-            self.text_dir.mkdir(parents=True, exist_ok=True)
-            index = tantivy.Index(_schema(), path=str(self.text_dir), reuse=True)
-            writer = index.writer(heap_size=30_000_000, num_threads=1)
-            writer.delete_all_documents()
-            for nid, f in fields.items():
-                writer.add_document(tantivy.Document(id=nid, **f))
-            writer.commit()
-            writer.wait_merging_threads()
-            index.reload()
-            self.index = index
-
-            if embedder is not None:
-                passages = {nid: card_passage(f) for nid, f in fields.items()}
-                hashes = {nid: hashlib.sha1(p.encode("utf-8")).hexdigest()
-                          for nid, p in passages.items()}
-                old = {nid: i for i, nid in enumerate(self.ids)} if model == self.model else {}
-                todo = [nid for nid in passages if nid not in old or self.hashes.get(nid) != hashes[nid]]
-                fresh = dict(zip(todo, embedder.embed([passages[n] for n in todo]))) if todo else {}
-                ids = list(passages)
-                dim = len(next(iter(fresh.values()))) if fresh else self.matrix.shape[1]
-                matrix = np.zeros((len(ids), dim), dtype=np.float32)
-                for row, nid in enumerate(ids):
-                    matrix[row] = fresh[nid] if nid in fresh else self.matrix[old[nid]]
-                self.ids, self.matrix, self.hashes, self.model = ids, matrix, hashes, model
+            if revision != self.revision or self.index is None:
+                self.text_dir.mkdir(parents=True, exist_ok=True)
+                index = tantivy.Index(_schema(), path=str(self.text_dir), reuse=True)
+                writer = index.writer(heap_size=30_000_000, num_threads=1)
+                writer.delete_all_documents()
+                for nid, f in fields.items():
+                    writer.add_document(tantivy.Document(id=nid, **f))
+                writer.commit()
+                writer.wait_merging_threads()
+                index.reload()
+                self.index = index
+            self._passages = {nid: card_passage(f) for nid, f in fields.items()}
+            self._wanted = {nid: hashlib.sha1(p.encode("utf-8")).hexdigest()
+                            for nid, p in self._passages.items()}
+            gone = [nid for nid in self._vectors if nid not in self._passages]
+            for nid in gone:                       # cards no longer on the board
+                del self._vectors[nid]
+                self.hashes.pop(nid, None)
+            if gone:
+                self._snapshot = None
+            changed = revision != self.revision or bool(gone)
             self.revision = revision
-            self._save()
+            if changed or self._dirty:
+                self._save()
+
+    def pending(self) -> list[str]:
+        """Cards whose vector is missing or was made from an older passage."""
+        with self._lock:
+            return [nid for nid, h in self._wanted.items() if self.hashes.get(nid) != h]
+
+    def progress(self) -> tuple[int, int]:
+        """(cards with a current vector, cards on the board)."""
+        with self._lock:
+            done = sum(1 for nid, h in self._wanted.items() if self.hashes.get(nid) == h)
+            return done, len(self._wanted)
+
+    def embed_some(self, embedder, limit: int = 16, cards: Optional[list[str]] = None) -> int:
+        """Embed up to `limit` of the cards still waiting - or of `cards` - and
+        return how many still wait. The embedding runs outside the lock, so
+        searches go on meanwhile; a card that changed again while it was being
+        embedded keeps waiting."""
+        with self._lock:
+            todo = [n for n in (cards if cards is not None else self.pending())
+                    if self.hashes.get(n) != self._wanted.get(n, self.hashes.get(n))][:limit]
+            texts = [self._passages[n] for n in todo] if self._passages else []
+            made_from = [self._wanted[n] for n in todo]
+            model = self.model
+        if todo:
+            vectors = embedder.embed(texts)
+            with self._lock:
+                if model == self.model:
+                    for nid, h, v in zip(todo, made_from, vectors):
+                        if self._wanted.get(nid) == h:
+                            self._vectors[nid] = np.asarray(v, dtype=np.float32)
+                            self.hashes[nid] = h
+                    self._snapshot, self._dirty = None, True
+                    if time.time() - self._saved_at > self.SAVE_EVERY:
+                        self._save()
+        return len(self.pending())
+
+    def sync(self, nodes: dict[str, dict], revision: int, embedder, model: str) -> None:
+        """Text and every vector, now - for the terminal, the evaluator, tests."""
+        self.sync_text(nodes, revision, model if embedder is not None else None)
+        if embedder is not None:
+            while self.embed_some(embedder, 64):
+                pass
+        self.flush()
 
     # ----------------------------------------------------------- search --
     def _run(self, query, limit: int = LIMIT) -> list[tuple[str, float]]:
@@ -239,10 +333,12 @@ class BoardIndex:
         return [nid for nid, _ in self._run(query, limit)]
 
     def meaning(self, qvec: list[float], limit: int = LIMIT) -> tuple[list[str], dict[str, float]]:
-        """Exact cosine against every card - the vectors are unit length."""
-        if not self.ids or self.matrix.size == 0:
+        """Exact cosine against every card that has a vector so far - the
+        vectors are unit length."""
+        with self._lock:
+            ids, matrix = self._matrix()
+        if not ids or matrix.size == 0:
             return [], {}
-        sims = self.matrix @ np.asarray(qvec, dtype=np.float32)
+        sims = matrix @ np.asarray(qvec, dtype=np.float32)
         order = np.argsort(-sims)[:limit]
-        return ([self.ids[i] for i in order],
-                {self.ids[i]: float(sims[i]) for i in range(len(self.ids))})
+        return [ids[i] for i in order], {ids[i]: float(sims[i]) for i in range(len(ids))}

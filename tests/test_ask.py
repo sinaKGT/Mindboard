@@ -114,12 +114,27 @@ def test_pictures_go_in_as_pictures_shrunk_and_labelled(dd, board, cards):
     assert sum(p["type"] == "image_url" for p in parts) == 2
 
 
-def test_nothing_chosen_means_the_whole_board(dd, board, cards):
-    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [])
-    assert ctx.whole
-    assert set(ctx.cards) == set(cards.values()), "every card, groups' contents included"
-    assert ctx.text.startswith("CARDS (the whole board)")
-    assert "contradicts" in ctx.text, "and every relationship"
+def test_nothing_chosen_searches_the_whole_board(dd, board, cards):
+    """A board may hold ten thousand cards, so the whole board is searched,
+    never sent - however small it is today."""
+    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "where does the lidar go?")
+    assert ctx.whole and ctx.mode == "search"
+    assert cards["lidar"] in ctx.cards and set(ctx.cards) <= set(cards.values())
+    assert ctx.text.startswith("BOARD OUTLINE") and "Sensors" in ctx.text
+
+
+def test_the_whole_board_is_never_sent_entire(dd, board, cards, monkeypatch):
+    from mindboard import retrieve
+
+    monkeypatch.setattr(retrieve, "BUDGET", 40)
+    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "where does the lidar go?")
+    assert ctx.mode == "search" and cards["lidar"] in ctx.cards
+    assert len(ctx.cards) < ctx.total
+
+
+def test_asking_the_whole_board_needs_a_question(dd, board, cards):
+    with pytest.raises(ask.AskError, match="ask a question"):
+        ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "  ")
 
 
 def test_an_empty_board_says_so(dd):
@@ -127,14 +142,16 @@ def test_an_empty_board_says_so(dd):
 
     empty = create_board(dd, "Empty", "")
     with pytest.raises(ask.AskError, match="no cards yet"):
-        ask.build(dd, conn_for(dd, empty["id"]), empty["id"], [])
+        ask.build(dd, conn_for(dd, empty["id"]), empty["id"], [], "anything?")
 
 
-def test_the_whole_board_brings_pictures_only_while_they_fit(dd, board, cards, monkeypatch):
-    monkeypatch.setattr(ask, "WHOLE_BOARD_PICTURE_TOKENS", 100)
-    whole = ask.build(dd, conn_for(dd, board["id"]), board["id"], [])
-    assert len(whole.pictures) == 1 and whole.pictures_left_out == 1
-    assert "Drone pass" in whole.text, "a left-out picture's card still goes in"
+def test_a_search_brings_pictures_only_while_they_fit(dd, board, cards, monkeypatch):
+    monkeypatch.setattr(ask, "SEARCH_PICTURE_TOKENS", 100)
+    found = ask.build(dd, conn_for(dd, board["id"]), board["id"], [],
+                      "the site plan and the drone pass")
+    assert {cards["plan"], cards["video"]} <= set(found.cards)
+    assert len(found.pictures) == 1 and found.pictures_left_out == 1
+    assert "Drone pass" in found.text and "Site plan" in found.text,         "a left-out picture's card still goes in"
     chosen = ask.build(dd, conn_for(dd, board["id"]), board["id"],
                        [cards["plan"], cards["video"]])
     assert len(chosen.pictures) == 2, "cards chosen by hand always bring their pictures"
@@ -178,6 +195,29 @@ def test_invented_citations_are_removed_and_counted():
     assert out["dropped"] == [fake]
     assert fake not in out["answer"] and "And so." in out["answer"]
     assert out["board"].startswith("It says so") and out["beyond"] == "Read more."
+
+
+def test_a_dressed_up_beyond_line_leaves_nothing_stray():
+    for line in ("**Beyond your board:**", "### Beyond your board:", "__Beyond your board:__"):
+        out = ask.check_citations(f"From the cards.\n\n{line}\nFrom me.", set())
+        assert out["board"] == "From the cards." and out["beyond"] == "From me.", line
+        assert "*" not in out["answer"] and "#" not in out["answer"]
+
+
+def test_the_question_offered_next_comes_off_the_end():
+    card = "A" * 26
+    answer, nxt = ask.split_next(f"It says so [[{card}]].\n{ask.BEYOND}\nRead more.\n\n"
+                                 f"NEXT: How do I mount it on a pole [[{card}]]?\n")
+    assert nxt == "How do I mount it on a pole?", "no citation in a question"
+    assert answer.endswith("Read more.") and "NEXT" not in answer
+    assert ask.split_next("Fine.\n**NEXT:** “What about wind?”") == ("Fine.", "What about wind?")
+
+
+def test_only_a_last_line_is_an_offer():
+    text = "Steps:\nNEXT: check the soil\nThen water it."
+    assert ask.split_next(text) == (text, ""), "mid-answer, it is part of the answer"
+    assert ask.split_next("No offer here.") == ("No offer here.", "")
+    assert ask.split_next("Next: lowercase is just a word") == ("Next: lowercase is just a word", "")
 
 
 # ----------------------------------------------------------------- route --
@@ -233,6 +273,7 @@ def test_streams_an_answer_with_checked_citations(client, board, cards, model):
     assert done["cited"] == [cards["mount"]]
     assert done["dropped"] == ["Z" * 26], "the invented card is caught"
     assert done["beyond"] == "Consider wind load."
+    assert done["next"] == "Where else could it go?" and "NEXT" not in done["answer"]
     log = (model.home / "logs" / "llama-server.log").read_text()
     assert "asked: images=1" in log
 
@@ -373,4 +414,5 @@ def test_asking_with_nothing_chosen_asks_the_whole_board(client, board, cards):
                       json={"question": "what is on this board?", "cards": []})
     assert res.status_code == 200, res.text
     context = events(res)[0][1]
-    assert context["whole"] and set(context["cards"]) == set(cards.values())
+    assert context["whole"] and context["mode"] == "search"
+    assert set(context["cards"]) <= set(cards.values())

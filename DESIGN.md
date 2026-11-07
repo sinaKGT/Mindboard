@@ -1999,3 +1999,248 @@ vectors moved to the index — and stays, harmless, as migrations do. 133 tests,
 group paths, quoted phrases, typos, exact meaning order, incremental and
 re-modelled embedding, surviving a restart, dropping with the board, fusion,
 walk, budget, wording-only fallback, and the evaluator itself.
+
+## 31. A reranker that reads, and relevance that spreads (2026-11-07)
+
+Step 2 of the three in §30: a reranker, and ranking by the person's graph.
+Built as pieces, then measured against each other on the same twenty
+questions before any of it was wired in.
+
+### The pieces
+
+- **Qwen3-Reranker 0.6B** (ggml-org's own GGUF, Q8_0, 0.64 GB, Apache-2.0),
+  pinned like every other file and installed with the rest. A cross-encoder:
+  it reads the question and a card *together* and scores how well the card
+  answers it - far more precise than comparing two vectors made apart. It runs
+  as a third llama-server (`--rerank`, `/v1/rerank`), with the same lifecycle
+  as the other two: a fresh key each start, unloaded when idle, stopped with
+  Mindboard.
+- **A card is read with its links.** A card that is only a title means little
+  alone: for "which chunking methods keep context across chunk boundaries?"
+  the reranker scored *Sliding Window* 0.013. Read as "Sliding Window /
+  Linked: is an example of Context-Preserving Chunking", it scored 0.998.
+  `retrieve.relations` writes each card's relationships in words from its own
+  side - "measures Retrieval quality", "Ragas measures this".
+- **Personalized PageRank** over the person's graph (`retrieve.graph_rank`),
+  the idea HippoRAG uses: relevance starts on the best cards, in proportion to
+  their scores, and flows along every relationship (either way) and every
+  group membership, a quarter returning to the start each round. A card that
+  several good cards lead to - one link away or three - rises; one nothing
+  relevant connects to stays at zero. Here the graph is the person's own,
+  typed by them, not one a model extracted.
+
+### What the numbers said
+
+| | hit@5 | rec@10 | MRR | sent | multi-hop | ms/q |
+|---|---|---|---|---|---|---|
+| fused + walk (step 1, as sent) | 1.00 | 0.76 | 0.91 | 0.97 | 0.68 | 29 |
+| fused, then PageRank | 0.95 | 0.80 | 0.62 | 1.00 | 0.89 | 31 |
+| fused, reranked (30) | 1.00 | 0.84 | 0.90 | 0.87 | 0.64 | 421 |
+| fused + PageRank, reranked | 1.00 | 0.92 | 0.91 | 0.99 | 0.80 | 545 |
+| **reranked, then PageRank from the best read** | **1.00** | **0.94** | **0.94** | **1.00** | **0.89** | **504** |
+
+PageRank alone finds what the links reach (multi-hop 0.68 → 0.89) but ranks
+it badly (MRR 0.62): everything near a match rises, relevant or not. The
+reranker alone ranks well but can only read what the words found. Together, in
+this order, each covers the other:
+
+1. candidates from the fusion (§30) *and* from PageRank spread from the
+   fusion's best ten - so a card the words missed but the links reach is read;
+2. the reranker reads up to 30 of each, with their links;
+3. PageRank spreads again from the ten it read best, and the two orders - read
+   and spread - are fused by reciprocal rank.
+
+Linked text mattered on its own: reranking with plain cards scored rec@10
+0.82, with their links 0.84 - and with the graph's candidates added, 0.92.
+Restart 0.25 beat 0.15 and 0.40; reading 40 of each was no better than 30
+and took longer; 20 was a little worse. If the reranker is missing or fails,
+search falls back to step 1's walk, unchanged.
+
+### Three models on one graphics card
+
+Each search model took about 1.1 GB on the card at a 2,048-token context
+(1.9 GB at 8,192, where it started: neither ever reads more than a card and a
+question). Measured together on this laptop: the 9B with its vision part 10.0
+GB, the reranker 1.1, the embedder 1.05 - 12.1 GB, against 12.4 GB free beside
+the other programs on the card. Too close to rely on, and a card with 12 GB
+or less would have pushed part of the 9B onto the processor, where it answers
+several times slower.
+
+So the card goes to the models in the order they matter to an answer
+(`llm.helper_on_gpu`), and each search model takes it only if what is left
+still holds every model ahead of it that has not loaded yet:
+
+1. the **chat model** - it writes every answer;
+2. the **reranker** - it reads up to 60 cards every question: half a second on
+   the card; on the processor about 0.15 s a card, so there it reads 10 of
+   each list instead (about 3 s);
+3. the **embedder** - on the processor it embeds a question in 50 ms and a
+   changed card in 0.1 s, so it loses least.
+
+On this laptop that put the 9B, its vision part and the reranker on the card
+(11.2 GB) and the embedder on the processor. A computer with more room puts
+all three on the card; one with less keeps the 9B whole and the search models
+off it. Where free memory cannot be read, llama.cpp's own `--fit` decides.
+
+### What it changed, and what it did not
+
+The right cards now rank higher, but on *RAG Deep Knowledge* that changes
+little of what the model is sent: the board is about 5,100 tokens, just over
+the 4,000 at which a board is searched rather than sent whole, and the 5,000
+budget holds 131 of its 135 cards. Measured on the same questions, with the
+reranker a 2,000-token budget still sends every right card (sent 1.00, about
+55 cards), and the first words come 1.8 s sooner (7.2 s → 5.4 s); the walk
+could not have been cut that far, as its order was weaker (§30). The budget
+stays at 5,000 until that trade - less of the board for broad questions, a
+quicker start - is decided. Most of what remains before the first word is
+the pictures.
+
+`mindboard ai eval` now compares nine strategies, each stage on its own and
+together. 149 tests: PageRank reaching linked and grouped cards and nothing
+else, relationships in words, the reranker's order deciding, candidates from
+both lists, a long question and card cut to fit the reranker, the walk taking
+over when the reranker fails, ask passing it through; the reranking server's
+answer kept in card order, fewer cards on the processor, the placement order,
+and `--device none` for a model kept off the card.
+
+## 32. Ten thousand cards: the whole board is searched, never sent (2026-11-07)
+
+Asked for: a board may hold 10,000 cards, so sending the whole board to the
+model is never an option; a question offered after each answer; and no false
+warning about memory.
+
+### Always searched
+
+A question with nothing added used to send the whole board when it was under
+4,000 tokens and search it otherwise. Now it is always searched. The same
+question behaves the same way on a board of 90 cards and of 10,000, and the
+threshold - and the mode it switched between - is gone. Cards chosen by hand
+are still sent exactly as chosen.
+
+Measured on a 10,000-card board: the 135 cards of *RAG Deep Knowledge*, ids
+kept so its test set still applies, among 9,855 cards on fifteen other
+subjects, in 120 groups, with 14,730 links:
+
+| | time |
+|---|---|
+| read the board | 0.13 s |
+| index its text, first time | 0.18 s |
+| bring the index up to date after one edit | 0.25 s |
+| keywords + meaning, fused | 0.03 s |
+| PageRank over the whole board | 0.02 s |
+| read closely and spread | 0.48 s |
+| everything before the model reads | 0.72 s |
+| **embed every card, first time (graphics card)** | **92 s** |
+
+Recall@10 0.94 and MRR 0.94 - the same as on the 135 cards alone. Each card's
+size in tokens is now worked out once per change of the board and kept with
+the index, not for every card at every question.
+
+The one thing that does not scale yet is the first embedding of a big board:
+92 s on the graphics card, and on the processor - where the embedder goes
+when the card is short (§31) - about 0.1 s a card, some 17 minutes. It
+happens at the first question and holds it. Moving it to the background, so
+a question never waits for it, is the next piece of work.
+
+### The question offered next
+
+The model ends each answer with one line, `NEXT: <a question>` - one step
+further from what was just asked, answerable from the cards or its own
+knowledge. `ask.split_next` takes the line off when the answer is done, and
+only a last line counts, so a "NEXT:" in the middle of an answer stays part of
+it. The panel shows the question under the latest answer, after "Would you
+like to know", and asks it when clicked; while the answer is still being
+written the line is kept out of sight. It is one generation, not a second
+request: about twenty tokens more.
+
+### The warning that was the model itself
+
+"Mindboard's model needs 10.4 GB … only 2.3 GB is free" appeared on every
+question after the first. The check read the free memory on the card while
+the model was loaded - and the model's own 10 GB was what was missing.
+llama.cpp places the model by the free memory at the moment it loads, so the
+same check, made just before loading, says how it was actually placed;
+`LocalModel.memory_note` keeps that answer for as long as it stays loaded.
+The warning appears only when the model truly went on the card short.
+
+Seen on the 10,000-card board in the app: the model sometimes writes the line
+as **Beyond your board:** in bold, and splitting on the plain words left a
+stray `**` on either side. Bold, underlined or as a heading, it is now read
+as the plain line, on the server and while it streams.
+
+157 tests.
+
+## 33. Indexing in the background, and sharing the card by priority (2026-11-07)
+
+§32 found the one thing that did not scale: embedding every card of a big
+board - 92 s for ten thousand on the graphics card, about a quarter of an hour
+on the processor - happened at the board's first question, which waited for
+all of it.
+
+### A question never waits
+
+The index now has two halves, kept up to date differently
+(`search_index.BoardIndex`):
+
+- the **text** index is rebuilt whenever the board changes - 0.2 s at ten
+  thousand cards - at every question (`sync_text`);
+- the **vectors** are made a batch at a time (`embed_some`), outside the
+  index's lock so searches go on meanwhile, and saved every 20 s while it
+  works rather than after every batch (40 MB a write at ten thousand cards).
+  A search uses the vectors made so far. A card whose text changed keeps its
+  old vector until the new one is made; a card written while its vector was
+  being made keeps waiting for one made from its new text.
+
+`indexer.py` does the embedding: one thread for the app, one board at a time,
+sixteen cards per request so a question's own embedding never queues behind a
+long batch. A board is queued when it is opened and after every change, and
+indexed two seconds after the last one, so a burst of edits is indexed once.
+It stops between batches when the board changes again, and picks up from the
+new cards. It reads boards and writes only the search index.
+
+A question still embeds, on the spot, up to 32 cards just written - what one
+person writes between two questions - so they can be found by meaning at
+once; anything more is left to the indexer. While the indexer is still at
+it, the panel says so: "meaning (learned for 3,200 of 9,990 cards so far)".
+The terminal and the evaluator have no background, and embed everything first.
+
+### Taking the card while it is free
+
+§31 kept room on the graphics card for every more important model, loaded or
+not. That left the embedder on the processor for exactly the work the card
+speeds up most: a board's first indexing. Now a model takes the card while
+there is room on it, and a more important model takes it back when it needs
+it (`llm.make_room`): less important ones are stopped, least important first
+- the embedder, then the reranker, never the chat model - once their request
+in flight is done. Requests that come meanwhile wait, then start the model
+again wherever there is room by then (`LocalModel._enter`, `evict`). Models
+are placed and loaded one at a time (`_placing`), so none reads the free
+memory while another is still filling it; that lock is always taken before a
+model's own, never while holding it, so making room can never deadlock.
+
+The order is the same as before - chat model, reranker, embedder - but it is
+enforced when it matters instead of reserved ahead of time.
+
+### Measured, through the app, on the 10,000-card board with no index
+
+| | plenty of memory | tight (12.1 GB free) |
+|---|---|---|
+| first question, 8-10 s after opening: cards chosen in | 2.4 s | 2.3 s |
+| ... with meaning learned for | 512 of 9,990 | 720 of 9,990 |
+| the whole board indexed | 134 s, on the card | on the card until the second question, then the processor at 19 cards/s |
+| second question: cards chosen in | 0.9 s | 2.4 s (the reranker took the card back) |
+| memory warning | none | none |
+
+In the tight case the chat model, loading, stopped both search models; the
+embedder came back to the card beside it and went on indexing there at about
+95 cards a second, until the next question's reranker took the card back from
+it and it carried on, on the processor.
+
+### Themes
+
+Six more themes with a feeling, beside midnight, slate, ink and daylight:
+forest (calm), ember (warm), ocean (focused), dusk (dreamy), paper (warm
+daylight) and mist (airy). The picker shows each as a small preview - its
+canvas, a card and its accent - with its feeling in words.
+
+166 tests.

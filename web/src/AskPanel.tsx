@@ -14,6 +14,16 @@ import { useStore } from './store'
 const BEYOND = 'Beyond your board:'
 const STARTER = 'What am I missing here?'
 
+/** The model ends an answer with "NEXT: <a question>"; the server takes that
+ *  line off when the answer is done and sends the question on its own. While
+ *  the answer is still being written, the line - or the start of it - is kept
+ *  out of sight here. */
+const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
+const hideNext = (text: string) => text.replace(NEXT_LINE, '')
+/** **Beyond your board:**, or a heading of it, read as the plain line - as the
+ *  server does (ask.BEYOND_MARK) - so no stray ** is left either side */
+const BEYOND_MARK = /(^[ \t]*#{1,6}[ \t]*)?(\*\*|__)?[ \t]*Beyond your board:[ \t]*(\*\*|__)?/m
+
 /** A card named in an answer: its title, and a click that goes to it. */
 function Cite({ id }: { id: string }) {
   const node = useStore((s) => s.nodes[id])
@@ -57,8 +67,7 @@ function statusLine(t: Turn): string | null {
   if (t.status === 'thinking') return 'Thinking…'
   if (t.status !== 'reading') return null
   if (t.mode === undefined) return 'Looking through your cards…'   // before the cards are chosen
-  const what = t.mode === 'search' ? `the ${t.used} best-matching cards`
-    : t.whole ? 'the whole board' : 'your cards'
+  const what = t.mode === 'search' ? `the ${t.used} best-matching cards` : 'your cards'
   const p = t.progress
   if (p && p.total > 0) {
     const fresh = Math.max(p.total - p.cached, 1)
@@ -69,11 +78,13 @@ function statusLine(t: Turn): string | null {
   return `Reading ${what}${t.tokens ? ` — about ${fmt(t.tokens)} tokens` : ''}…`
 }
 
-function Answer({ turn }: { turn: Turn }) {
+function Answer({ turn, offer }: { turn: Turn; offer?: (question: string) => void }) {
   const [showThinking, setShowThinking] = useState(false)
-  const at = turn.text.indexOf(BEYOND)
-  const board = at >= 0 ? turn.text.slice(0, at) : turn.text
-  const beyond = at >= 0 ? turn.text.slice(at + BEYOND.length) : ''
+  const text = (turn.status === 'done' ? turn.text : hideNext(turn.text))
+    .replace(BEYOND_MARK, BEYOND)
+  const at = text.indexOf(BEYOND)
+  const board = at >= 0 ? text.slice(0, at) : text
+  const beyond = at >= 0 ? text.slice(at + BEYOND.length) : ''
   return (
     <div className="turn answer">
       {turn.warning ? <div className="ask-warn">{turn.warning}</div> : null}
@@ -101,19 +112,24 @@ function Answer({ turn }: { turn: Turn }) {
           {' '}{turn.total} that match best.
         </div>
       ) : null}
-      {turn.mode === 'whole' && turn.status === 'done' ? (
-        <div className="ask-note">Read the whole board ({turn.total} cards).</div>
-      ) : null}
       {turn.leftOut && turn.status === 'done' ? (
         <div className="ask-note">
-          {turn.leftOut} picture{turn.leftOut === 1 ? ' was' : 's were'} left out to keep the whole
-          board small enough — add a picture's card to the context to include it.
+          {turn.leftOut} picture{turn.leftOut === 1 ? ' was' : 's were'} left out to keep the
+          question small enough — add a picture's card to the context to include it.
         </div>
       ) : null}
       {turn.dropped ? (
         <div className="ask-note">
           Removed {turn.dropped} citation{turn.dropped === 1 ? '' : 's'} of cards that were not
           in context.
+        </div>
+      ) : null}
+      {offer && turn.next && turn.status === 'done' ? (
+        <div className="ask-next">
+          <span className="ask-next-lead">Would you like to know</span>
+          <button className="starter" title="Ask this" onClick={() => offer(turn.next!)}>
+            {turn.next}
+          </button>
         </div>
       ) : null}
     </div>
@@ -226,7 +242,10 @@ export function AskPanel() {
         ) : turns.map((t, i) => (
           t.role === 'user'
             ? <div key={i} className="turn question">{t.text}</div>
-            : <Answer key={i} turn={t} />
+            // only the latest answer offers its next question - older offers
+            // belong to a conversation that has moved on
+            : <Answer key={i} turn={t}
+                offer={i === turns.length - 1 && canSend ? send : undefined} />
         ))}
       </div>
 

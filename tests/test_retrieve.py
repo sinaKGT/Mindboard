@@ -244,14 +244,33 @@ def test_the_outline_shows_the_boards_groups(dd, board, rag):
 
 # ------------------------------------------------------- how ask uses it --
 
-def test_a_small_board_is_still_sent_whole(dd, board, rag):
+def test_even_a_small_board_is_searched(dd, board, rag):
     ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "recall?",
                     embedder=WordEmbedder(), embed_model="m")
-    assert ctx.mode == "whole" and len(ctx.cards) == ctx.total
+    assert ctx.mode == "search" and rag["retrieval"] in ctx.cards
+    BoardIndex.drop(dd, board["id"])
+
+
+def test_card_sizes_are_worked_out_once_per_change(dd, board, rag, monkeypatch):
+    c = conn_for(dd, board["id"])
+    nodes, _ = graph(dd, board)
+    index = ask.board_index(dd, c, board["id"], nodes, WordEmbedder(), "m")
+    assert set(index.costs) == set(nodes)
+    sized = []
+    real = ask.card_text
+    monkeypatch.setattr(ask, "card_text", lambda n, ns: sized.append(n["id"]) or real(n, ns))
+    ask.board_index(dd, c, board["id"], nodes, WordEmbedder(), "m")
+    assert not sized, "nothing changed, nothing sized again"
+    env = [{"opId": ulid(), "op": {"kind": "node.update", "id": rag["chain"],
+                                    "patch": {"title": "Prompt chains"}}}]
+    assert not apply_envelopes(c, board["id"], env)["rejected"]
+    nodes, _ = graph(dd, board)
+    ask.board_index(dd, c, board["id"], nodes, WordEmbedder(), "m")
+    assert len(sized) == len(nodes)
+    BoardIndex.drop(dd, board["id"])
 
 
 def test_a_big_board_is_searched(dd, board, rag, monkeypatch):
-    monkeypatch.setattr(retrieve, "WHOLE_UNDER", 100)
     monkeypatch.setattr(retrieve, "BUDGET", 150)
     ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "recall and precision?",
                     embedder=WordEmbedder(), embed_model="m")
@@ -262,7 +281,6 @@ def test_a_big_board_is_searched(dd, board, rag, monkeypatch):
 
 
 def test_a_follow_up_is_searched_with_what_led_up_to_it(dd, board, rag, monkeypatch):
-    monkeypatch.setattr(retrieve, "WHOLE_UNDER", 100)
     seen = []
     real = retrieve.search
     monkeypatch.setattr(retrieve, "search", lambda ix, q, *a, **k: seen.append(q) or real(ix, q, *a, **k))
@@ -275,11 +293,239 @@ def test_a_follow_up_is_searched_with_what_led_up_to_it(dd, board, rag, monkeypa
 
 
 def test_cards_chosen_by_hand_are_never_searched(dd, board, rag, monkeypatch):
-    monkeypatch.setattr(retrieve, "WHOLE_UNDER", 1)
     monkeypatch.setattr(retrieve, "search", lambda *a, **k: pytest.fail("searched chosen cards"))
     ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [rag["chain"]], "anything",
                     embedder=WordEmbedder(), embed_model="m")
     assert ctx.mode == "chosen" and ctx.cards == [rag["chain"]]
+
+
+# ------------------------------------------------------- reading, graph --
+
+class WordReranker:
+    """Scores a card by the share of the question's words it contains - its
+    links included. Records what it was given."""
+
+    def __init__(self, room=30):
+        self.room, self.queries, self.docs = room, [], []
+
+    def capacity(self):
+        return self.room
+
+    def rerank(self, query, documents):
+        self.queries.append(query)
+        self.docs.append(documents)
+        words = set(terms(query))
+        return [len(words & set(terms(d))) / max(len(words), 1) for d in documents]
+
+
+class BrokenReranker(WordReranker):
+    def rerank(self, query, documents):
+        raise RuntimeError("not answering")
+
+
+def test_relevance_spreads_along_links_and_groups(dd, board, rag):
+    """From one matching card, PageRank reaches what the person linked to it
+    and the group it is in, and through the group its sibling - and nothing
+    the graph does not connect."""
+    nodes, edges = graph(dd, board)
+    rank = retrieve.graph_rank({rag["retrieval"]: 1.0}, nodes, edges)
+    assert rank[rag["retrieval"]] == max(rank.values())
+    for reached in ("ragas", "eval", "generation"):
+        assert rank.get(rag[reached], 0) > 0, reached
+    assert rank[rag["eval"]] > rank[rag["generation"]], "one step beats two"
+    assert all(rank.get(rag[f"filler{i}"], 0) == 0 for i in range(30))
+
+
+def test_without_links_the_seeds_are_all_there_is(dd, board, rag):
+    nodes, _ = graph(dd, board)
+    lone = {k: v for k, v in nodes.items() if v.get("parent") is None}
+    assert retrieve.graph_rank({rag["chain"]: 1.0}, lone, []) == {rag["chain"]: 1.0}
+    assert retrieve.graph_rank({}, nodes, []) == {}
+
+
+def test_a_card_is_read_with_what_it_is_linked_to(dd, board, rag):
+    nodes, edges = graph(dd, board)
+    said = retrieve.relations(nodes, edges)
+    assert "measures Retrieval quality" in said[rag["ragas"]]
+    assert "Ragas measures this" in said[rag["retrieval"]]
+    assert "linked to Generation quality" in said[rag["judge"]], "an unnamed link still says so"
+    text = retrieve.linked_passage("Ragas", said[rag["ragas"]])
+    assert text == "Ragas\nLinked: measures Retrieval quality"
+    assert retrieve.linked_passage("Alone", []) == "Alone"
+
+
+def test_the_reranker_decides_the_order(dd, board, rag, index):
+    """Ragas shares no word with the question but its link does - "measures
+    Retrieval quality" - so read with its links, it comes near the top."""
+    nodes, edges = graph(dd, board)
+    rr = WordReranker()
+    found = retrieve.search(index, "what measures retrieval quality?", nodes, edges,
+                            costs(nodes), WordEmbedder(), reranker=rr)
+    assert found.ids[0] == rag["retrieval"]
+    assert rag["ragas"] in found.ids[:3]
+    assert "close reading" in found.how
+    assert any(d.startswith("Ragas") and "Linked: measures Retrieval quality" in d
+               for d in rr.docs[0])
+
+
+def test_the_reranker_reads_what_the_links_reach_too(dd, board, rag, index):
+    """Candidates come from the words and from the graph, so a card no search
+    found but a link reaches is read as well."""
+    nodes, edges = graph(dd, board)
+    rr = WordReranker(room=2)
+    retrieve.search(index, "recall precision retrieved chunks", nodes, edges, costs(nodes),
+                    WordEmbedder(), reranker=rr)
+    assert len(rr.docs[0]) <= 4, "as many as it can read, from each list"
+    assert any(d.startswith("Ragas") for d in rr.docs[0])
+
+
+def test_a_long_question_and_card_still_fit_the_reranker(dd, board, rag, index):
+    nodes, edges = graph(dd, board)
+    rr = WordReranker()
+    retrieve.search(index, "chaining " * 400 + "what measures retrieval quality?", nodes, edges,
+                    costs(nodes), WordEmbedder(), reranker=rr)
+    assert len(rr.queries[0]) <= retrieve.QUERY_CHARS
+    assert rr.queries[0].endswith("what measures retrieval quality?"), "the question itself is kept"
+    assert all(len(d) <= retrieve.DOC_CHARS for d in rr.docs[0])
+
+
+def test_when_the_reranker_fails_the_walk_still_answers(dd, board, rag, index):
+    nodes, edges = graph(dd, board)
+    q = "recall precision retrieved chunks"
+    walked = retrieve.search(index, q, nodes, edges, costs(nodes), WordEmbedder())
+    failed = retrieve.search(index, q, nodes, edges, costs(nodes), WordEmbedder(),
+                             reranker=BrokenReranker())
+    assert failed.ids == walked.ids and "close reading" not in failed.how
+
+
+def test_ask_passes_the_reranker_to_the_search(dd, board, rag, monkeypatch):
+    rr = WordReranker()
+    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [],
+                    "what measures retrieval quality?", [], WordEmbedder(), "m", rr)
+    assert ctx.mode == "search" and rr.docs and "close reading" in ctx.how
+    BoardIndex.drop(dd, board["id"])
+
+
+# ------------------------------------------------------ in the background --
+
+class NamedEmbedder(WordEmbedder):
+    """The word embedder, dressed as the app's embedding model."""
+
+    def __init__(self):
+        super().__init__()
+        from types import SimpleNamespace
+        self.inst = SimpleNamespace(embedder=SimpleNamespace(name="m"))
+
+
+def test_the_indexer_embeds_a_board_in_the_background(dd, board, rag):
+    from mindboard.indexer import Indexer
+
+    emb = NamedEmbedder()
+    indexer = Indexer(dd, lambda: emb, quiet=0.05, batch=8)
+    try:
+        before = revision(dd, board)
+        indexer.want(board["id"])
+        assert indexer.idle(20)
+        index = BoardIndex.get(dd, board["id"])
+        nodes, _ = graph(dd, board)
+        assert not index.pending() and index.progress() == (len(nodes), len(nodes))
+        assert len(emb.texts) >= len(nodes)
+        assert revision(dd, board) == before, "it never writes the board"
+    finally:
+        indexer.stop()
+        BoardIndex.drop(dd, board["id"])
+
+
+def test_a_burst_of_changes_is_indexed_once_after_it(dd, board, rag):
+    from mindboard.indexer import Indexer
+
+    rounds = []
+    emb = NamedEmbedder()
+    indexer = Indexer(dd, lambda: rounds.append(1) or emb, quiet=0.3)
+    try:
+        for _ in range(5):
+            indexer.want(board["id"])
+        assert indexer.idle(20)
+        assert len(rounds) == 1
+    finally:
+        indexer.stop()
+        BoardIndex.drop(dd, board["id"])
+
+
+def test_without_an_embedding_model_the_indexer_does_nothing(dd, board, rag):
+    from mindboard.indexer import Indexer
+
+    indexer = Indexer(dd, lambda: None, quiet=0.01)
+    try:
+        indexer.want(board["id"])
+        assert indexer.idle(10)
+        assert not index_dir(dd, board["id"]).exists()
+    finally:
+        indexer.stop()
+
+
+def test_a_question_never_waits_for_a_big_board_to_be_embedded(dd, board, rag, monkeypatch):
+    """Embedding every card is the indexer's job. A question finds cards by
+    their words and links meanwhile, and says how far meaning has got."""
+    monkeypatch.setattr(ask, "EMBED_NOW", 5)
+    emb = WordEmbedder()
+    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "faithfulness hallucination",
+                    [], emb, "m", background=True)
+    assert ctx.mode == "search" and rag["generation"] in ctx.cards
+    assert len(emb.texts) == 1, "only the question was embedded"
+    assert "learned for 0 of" in ctx.how
+    BoardIndex.drop(dd, board["id"])
+
+
+def test_a_question_embeds_the_few_cards_just_written(dd, board, rag):
+    c = conn_for(dd, board["id"])
+    nodes, _ = graph(dd, board)
+    BoardIndex.get(dd, board["id"]).sync(nodes, revision(dd, board), WordEmbedder(), "m")
+    env = [{"opId": ulid(), "op": {"kind": "node.create", "node": node(
+        title="Reciprocal rank fusion", content={"text": "merging ranked lists"})}}]
+    assert not apply_envelopes(c, board["id"], env)["rejected"]
+    emb = WordEmbedder()
+    ctx = ask.build(dd, c, board["id"], [], "how are ranked lists merged?", [], emb, "m",
+                    background=True)
+    assert any("Reciprocal rank fusion" in t for t in emb.texts), "the new card, embedded now"
+    assert "learned for" not in ctx.how
+    BoardIndex.drop(dd, board["id"])
+
+
+def test_a_card_written_while_it_was_embedded_waits_for_its_new_text(dd, board, rag):
+    nodes, _ = graph(dd, board)
+    index = BoardIndex.get(dd, board["id"])
+    index.sync_text(nodes, revision(dd, board), "m")
+    first = index.pending()[0]
+
+    class Racing(WordEmbedder):
+        def embed(self, texts):
+            changed = dict(nodes)
+            changed[first] = {**nodes[first], "title": "rewritten meanwhile"}
+            index.sync_text(changed, revision(dd, board) + 1, "m")
+            return super().embed(texts)
+
+    index.embed_some(Racing(), 4, cards=[first])
+    assert first in index.pending(), "its vector was made from the old text"
+    BoardIndex.drop(dd, board["id"])
+
+
+def test_opening_or_changing_a_board_starts_its_indexing(dd, board, rag):
+    from fastapi.testclient import TestClient
+
+    from mindboard.app import create_app
+
+    app = create_app(dd, "t")
+    with TestClient(app) as client:
+        app.state.indexer.quiet = 60          # hold it in the queue to look at it
+        h = {"X-Mindboard-Token": "t"}
+        assert client.get(f"/api/boards/{board['id']}/graph", headers=h).status_code == 200
+        assert board["id"] in app.state.indexer._wanted
+        app.state.indexer._wanted.clear()
+        env = [{"opId": ulid(), "op": {"kind": "node.create", "node": node(title="New")}}]
+        assert client.post(f"/api/boards/{board['id']}/ops", headers=h,
+                           json={"envelopes": env}).status_code == 200
+        assert board["id"] in app.state.indexer._wanted
 
 
 # ------------------------------------------------------------- evaluator --
@@ -292,6 +538,10 @@ def test_the_evaluator_scores_what_it_finds(dd, board, rag, tmp_path):
     path = tmp_path / "set.json"
     path.write_text(json.dumps(test_set))
     reports = evaluate.run(dd, evaluate.load_set(path), WordEmbedder(), "m")
+    assert not any("reranked" in r.strategy for r in reports), "no reranker, none of its rows"
+    reports = evaluate.run(dd, evaluate.load_set(path), WordEmbedder(), "m",
+                           reranker=WordReranker())
+    assert {r.strategy for r in reports} == set(evaluate.STRATEGIES)
     keyword = next(r for r in reports if r.strategy.startswith("keyword"))
     assert keyword.scores[0].mrr == 1.0 and keyword.scores[0].hit5 == 1.0
     assert keyword.scores[1].recall10 == 0.0

@@ -28,9 +28,12 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 # ------------------------------------------------------------------ pins --
 
+def model_pins():
+    return [p for t in llm.TIERS for p in (t.model, t.vision)] + [llm.EMBEDDER, llm.RERANKER]
+
+
 def all_pins():
-    return ([p for pins in llm.RUNTIMES.values() for p in pins]
-            + [p for t in llm.TIERS for p in (t.model, t.vision)])
+    return [p for pins in llm.RUNTIMES.values() for p in pins] + model_pins()
 
 
 def test_every_file_is_pinned_exactly():
@@ -47,10 +50,9 @@ def test_nothing_floats_to_latest():
         for pin in pins:
             assert pin.url.startswith(
                 f"https://github.com/ggml-org/llama.cpp/releases/download/{llm.LLAMA_BUILD}/")
-    for tier in llm.TIERS:
-        for pin in (tier.model, tier.vision):
-            assert re.search(r"/resolve/[0-9a-f]{40}/", pin.url), f"{pin.url}: a commit, not a branch"
-            assert "/main/" not in pin.url and "latest" not in pin.url
+    for pin in model_pins():
+        assert re.search(r"/resolve/[0-9a-f]{40}/", pin.url), f"{pin.url}: a commit, not a branch"
+        assert "/main/" not in pin.url and "latest" not in pin.url
 
 
 # ----------------------------------------------------------------- sizes --
@@ -501,5 +503,217 @@ def test_the_start_decides_where_the_vision_part_runs(tmp_path, fake_server, mon
     try:
         model.start()
         assert seen == [True] and model.vision_placed == "GPU"
+    finally:
+        model.stop()
+
+
+# --------------------------------------------------------- search models --
+
+def test_the_search_models_are_part_of_the_install(tmp_path):
+    names = {pin.name for pin in llm.needed(tmp_path, llm.this_platform(), "cpu",
+                                            llm.TIER_BY_KEY["light"])}
+    assert llm.EMBEDDER.name in names and llm.RERANKER.name in names
+
+
+class _Running:
+    """A model as make_room sees it: running, on the card, with a priority;
+    stopping it gives back `gib` of graphics memory."""
+
+    def __init__(self, card, priority, gib, log):
+        self.card, self.priority, self.gib, self.log = card, priority, gib, log
+        self.alive = True
+
+    def running(self):
+        return self.alive
+
+    def on_card(self):
+        return True
+
+    def evict(self):
+        self.alive = False
+        self.card["free"] += self.gib
+        self.log.append(self.priority)
+
+
+@pytest.fixture()
+def card(monkeypatch):
+    """A graphics card whose free memory the tests set, and the models on it."""
+    state = {"free": 0.0}
+    monkeypatch.setattr(llm, "free_gpu_gib", lambda inst: state["free"])
+    monkeypatch.setattr(llm, "_live", set())
+    return state
+
+
+def test_a_search_model_takes_the_card_while_there_is_room(tmp_path, card):
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    inst.embedder = tmp_path / "e.gguf"
+    card["free"] = llm.HELPER_GIB + 0.1
+    assert llm.helper_on_gpu(llm.EmbedModel(inst)) is True
+    card["free"] = llm.HELPER_GIB - 0.1
+    assert llm.helper_on_gpu(llm.EmbedModel(inst)) is False, "no room, none to make"
+    cpu = fake_install(tmp_path, backend="cpu")
+    cpu.embedder = inst.embedder
+    assert llm.helper_on_gpu(llm.EmbedModel(cpu)) is False
+
+
+def test_the_chat_model_takes_the_card_back_least_important_first(tmp_path, card):
+    """The 9B writes every answer: when it loads and the search models fill the
+    card, they give it back - the embedder first, the reranker only if that is
+    not enough."""
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    stopped = []
+    embedder, reranker = _Running(card, 2, 1.1, stopped), _Running(card, 1, 1.1, stopped)
+    llm._live.update({embedder, reranker})
+    card["free"] = llm.chat_gib(inst) - 0.5
+    assert llm.make_room(llm.LocalModel(inst), llm.chat_gib(inst)) is True
+    assert stopped == [2] and reranker.alive, "one was enough"
+    embedder.alive, card["free"] = True, llm.chat_gib(inst) - 1.5
+    stopped.clear()
+    assert llm.make_room(llm.LocalModel(inst), llm.chat_gib(inst)) is True
+    assert stopped == [2, 1]
+
+
+def test_a_model_never_takes_the_card_from_one_that_matters_more(tmp_path, card):
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    inst.reranker = tmp_path / "r.gguf"
+    stopped = []
+    chat, embedder = _Running(card, 0, 10.0, stopped), _Running(card, 2, 1.1, stopped)
+    llm._live.update({chat, embedder})
+    card["free"] = 0.5
+    assert llm.helper_on_gpu(llm.RerankModel(inst)) is True, "room made from the embedder"
+    assert stopped == [2] and chat.alive
+    card["free"] = 0.5
+    assert llm.helper_on_gpu(llm.RerankModel(inst)) is False, "the chat model stays"
+    assert chat.alive
+
+
+def test_where_free_memory_cannot_be_read_llama_decides(tmp_path, monkeypatch):
+    monkeypatch.setattr(llm.shutil, "which", lambda name: None)
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    inst.embedder = tmp_path / "e.gguf"
+    assert llm.helper_on_gpu(llm.EmbedModel(inst)) is True
+    assert llm.make_room(llm.LocalModel(inst), 99.0) is True
+
+
+@pytest.fixture()
+def fake_embed_server(monkeypatch):
+    def args(inst, port, key, ctx, on_gpu=True):
+        real = args.__wrapped__(inst, port, key, ctx, on_gpu)
+        return [sys.executable, str(FAKE), *real[1:]]
+    args.__wrapped__ = llm.embed_server_args
+    monkeypatch.setattr(llm, "embed_server_args", args)
+
+
+def test_taking_the_card_back_never_cuts_a_request_off(tmp_path, fake_embed_server, monkeypatch):
+    """Stopped to make room, a search model first finishes what it is doing;
+    a request that comes meanwhile waits, then starts it again - placed
+    afresh, here on the processor."""
+    import threading
+
+    inst = fake_install(tmp_path)
+    inst.embedder = tmp_path / "e.gguf"
+    places = iter([True, False])
+    monkeypatch.setattr(llm, "helper_on_gpu", lambda model: next(places))
+    model = llm.EmbedModel(inst, start_timeout=20)
+    try:
+        model.embed(["warm"])
+        assert model.on_gpu is True
+        first_proc = model.proc
+        got = {}
+        slow = threading.Thread(target=lambda: got.setdefault("slow", model.embed(["SLOWLY"])))
+        slow.start()
+        time.sleep(0.3)                                  # the slow request is in flight
+        evicting = threading.Thread(target=model.evict)
+        evicting.start()
+        time.sleep(0.1)
+        late = threading.Thread(target=lambda: got.setdefault("late", model.embed(["late"])))
+        late.start()
+        for t in (slow, evicting, late):
+            t.join(timeout=20)
+        assert len(got["slow"]) == 1, "the request in flight finished"
+        assert len(got["late"]) == 1, "the one that came meanwhile was answered"
+        assert model.proc is not first_proc and model.on_gpu is False, "restarted, placed afresh"
+    finally:
+        model.stop()
+
+
+def test_a_search_model_kept_off_the_card_runs_on_the_processor(tmp_path):
+    inst = fake_install(tmp_path)
+    for make in (llm.embed_server_args, llm.rerank_server_args):
+        assert "--device" not in make(inst, 1, "k", 2048)
+        off = make(inst, 1, "k", 2048, on_gpu=False)
+        assert off[off.index("--device") + 1] == "none"
+    assert "--rerank" in llm.rerank_server_args(inst, 1, "k", 2048)
+
+
+@pytest.fixture()
+def fake_rerank_server(monkeypatch):
+    def args(inst, port, key, ctx, on_gpu=True):
+        real = args.__wrapped__(inst, port, key, ctx, on_gpu)
+        return [sys.executable, str(FAKE), *real[1:]]
+    args.__wrapped__ = llm.rerank_server_args
+    monkeypatch.setattr(llm, "rerank_server_args", args)
+
+
+def test_reranks_in_the_order_it_was_given(tmp_path, fake_rerank_server, monkeypatch):
+    """llama-server answers best first; the scores come back in the order the
+    cards were sent, so each stays with its card."""
+    inst = fake_install(tmp_path)
+    inst.reranker = tmp_path / "rerank.gguf"
+    monkeypatch.setattr(llm, "helper_on_gpu", lambda model: True)
+    model = llm.RerankModel(inst, start_timeout=20)
+    try:
+        scores = model.rerank("chunking keeps context",
+                              ["weather notes", "chunking keeps context whole", "chunking"])
+        assert scores[0] == 0.0 and scores[1] == 1.0 and 0 < scores[2] < 1
+        assert model.rerank("q", []) == []
+        assert model.capacity() == llm.RerankModel.POOL_GPU
+    finally:
+        model.stop()
+
+
+def test_on_the_processor_the_reranker_reads_fewer(tmp_path, fake_rerank_server, monkeypatch):
+    inst = fake_install(tmp_path)
+    inst.reranker = tmp_path / "rerank.gguf"
+    monkeypatch.setattr(llm, "helper_on_gpu", lambda model: False)
+    model = llm.RerankModel(inst, start_timeout=20)
+    try:
+        assert model.capacity() == llm.RerankModel.POOL_CPU < llm.RerankModel.POOL_GPU
+    finally:
+        model.stop()
+
+
+def test_without_the_reranker_installed_it_says_how_to_get_it(tmp_path):
+    with pytest.raises(llm.ModelError, match="mindboard ai install"):
+        llm.RerankModel(fake_install(tmp_path))
+
+
+def test_a_loaded_model_does_not_warn_about_its_own_memory(tmp_path, fake_server, monkeypatch):
+    """Loaded, the model holds its 10 GB, and the card shows that much less
+    free. Read then, every question after the first warned of a shortage that
+    was the model itself. The warning is decided as it loads."""
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    monkeypatch.setattr(llm, "vision_fits", lambda inst: True)
+    model = llm.LocalModel(inst, start_timeout=20)
+    _nvidia_says(monkeypatch, 15600)
+    assert model.memory_note() is None, "before loading: room, so no warning"
+    try:
+        model.start()
+        _nvidia_says(monkeypatch, 2300)                 # the model's own share, now taken
+        assert model.memory_note() is None
+    finally:
+        model.stop()
+
+
+def test_a_model_that_loaded_short_of_memory_keeps_saying_so(tmp_path, fake_server, monkeypatch):
+    inst = fake_install(tmp_path, tier="full", backend="cuda")
+    monkeypatch.setattr(llm, "vision_fits", lambda inst: True)
+    model = llm.LocalModel(inst, start_timeout=20)
+    _nvidia_says(monkeypatch, 3000)
+    try:
+        model.start()
+        _nvidia_says(monkeypatch, 15600)
+        note = model.memory_note()
+        assert note and "2.9 GB is free" in note, "it answers slowly while it stays loaded"
     finally:
         model.stop()

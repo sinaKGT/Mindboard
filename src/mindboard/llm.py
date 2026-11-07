@@ -154,6 +154,14 @@ EMBEDDER = _hf(*_Q3_EMBED, "Qwen3-Embedding-0.6B-Q8_0.gguf", 639150592,
 EMBEDDER_FOLDER = "qwen3-embedding"
 EMBEDDER_LABEL = "Qwen3-Embedding 0.6B"
 
+# Re-ranking the candidates (retrieve.py): Qwen3-Reranker 0.6B, converted by
+# the llama.cpp team themselves, Apache-2.0. A cross-encoder - it reads the
+# question and a card together - so far more precise than comparing vectors.
+_Q3_RERANK = ("ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF", "a02f48bb4f057028298c21fa033da2b30d7742d5")
+RERANKER = _hf(*_Q3_RERANK, "qwen3-reranker-0.6b-q8_0.gguf", 639153184,
+               "22c9979ce4fbcdc5acdc310c6641c32797eff1aa980b8f7a2db8a8ea23429a48")
+RERANKER_FOLDER = "qwen3-reranker"
+
 CHUNK = 1 << 20
 SPARE = 2 * 1024 ** 3        # never fill a disk to the last byte
 
@@ -479,6 +487,7 @@ class Install:
     model: Path
     vision: Path
     embedder: Optional[Path] = None   # None: search by wording only
+    reranker: Optional[Path] = None   # None: candidates keep their fused order
 
     @property
     def server(self) -> Path:
@@ -497,6 +506,10 @@ def embedder_path(home: Path) -> Path:
     return home / "models" / EMBEDDER_FOLDER / EMBEDDER.name
 
 
+def reranker_path(home: Path) -> Path:
+    return home / "models" / RERANKER_FOLDER / RERANKER.name
+
+
 def needed(home: Path, plat: str, backend: str, tier: Tier) -> list[Pinned]:
     """What would still have to be downloaded."""
     out: list[Pinned] = []
@@ -507,6 +520,8 @@ def needed(home: Path, plat: str, backend: str, tier: Tier) -> list[Pinned]:
             out.append(pin)
     if not is_verified(embedder_path(home), EMBEDDER):
         out.append(EMBEDDER)
+    if not is_verified(reranker_path(home), RERANKER):
+        out.append(RERANKER)
     return out
 
 
@@ -569,8 +584,10 @@ def find_install(home: Optional[Path] = None) -> Optional[Install]:
     if not (is_verified(model, tier.model) and is_verified(vision, tier.vision)):
         return None
     embedder = embedder_path(home)
+    reranker = reranker_path(home)
     inst = Install(home, plat, backend, tier, folder / rel, model, vision,
-                   embedder if is_verified(embedder, EMBEDDER) else None)
+                   embedder if is_verified(embedder, EMBEDDER) else None,
+                   reranker if is_verified(reranker, RERANKER) else None)
     return inst if inst.server.exists() else None
 
 
@@ -609,6 +626,7 @@ def install(home: Optional[Path] = None, backend: str = "auto", tier: str = "aut
     for pin in (p.tier.model, p.tier.vision):
         download(pin, model_path(p.home, p.tier, pin).parent, progress)
     download(EMBEDDER, embedder_path(p.home).parent, progress)
+    download(RERANKER, reranker_path(p.home).parent, progress)
     (p.home / "installed.json").write_text(json.dumps({
         "build": LLAMA_BUILD, "platform": p.platform, "backend": p.backend,
         "tier": p.tier.key, "model": p.tier.model.name, "model_sha256": p.tier.model.sha256,
@@ -630,19 +648,14 @@ def memory_shortfall(inst: Install) -> Optional[str]:
     person would only see a slow Mindboard. It speaks of memory only: Mindboard
     runs its own llama.cpp and depends on nothing else, so it names nothing
     else. NVIDIA only, as its driver is the one that can say.
+
+    Only true before the model loads: once loaded, the free memory no longer
+    counts what the model itself holds, and every later question would warn
+    of a shortage that is the model's own 10 GB. LocalModel.memory_note keeps
+    the answer from the moment it loaded.
     """
-    if inst.backend != "cuda":
-        return None
-    exe = shutil.which("nvidia-smi")
-    if not exe:
-        return None
-    try:
-        free = int(subprocess.run([exe, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-                                  capture_output=True, text=True, timeout=10).stdout.split()[0])
-    except Exception:
-        return None
-    free_gib = free / 1024
-    if free_gib >= inst.tier.run_gib:
+    free_gib = free_gpu_gib(inst)
+    if free_gib is None or free_gib >= inst.tier.run_gib:
         return None
     return (f"Mindboard's model needs {inst.tier.run_gib:.1f} GB of graphics memory and only "
             f"{free_gib:.1f} GB is free, so answers will be much slower. Free up the graphics "
@@ -757,7 +770,8 @@ def server_args(inst: Install, port: int, key: str, ctx: int,
     ]
 
 
-def embed_server_args(inst: Install, port: int, key: str, ctx: int) -> list[str]:
+def embed_server_args(inst: Install, port: int, key: str, ctx: int,
+                      on_gpu: bool = True) -> list[str]:
     """The embedding server: the same llama.cpp, the embedding model, nothing
     else. Last-token pooling is how Qwen3-Embedding is meant to be read."""
     return [
@@ -772,7 +786,24 @@ def embed_server_args(inst: Install, port: int, key: str, ctx: int) -> list[str]
         "--batch-size", "2048", "--ubatch-size", "2048",
         "--fit", "on",
         "--parallel", "1",
-    ]
+    ] + ([] if on_gpu else ["--device", "none"])
+
+
+def rerank_server_args(inst: Install, port: int, key: str, ctx: int,
+                       on_gpu: bool = True) -> list[str]:
+    """The reranking server: the same llama.cpp, the reranker, scoring pairs."""
+    return [
+        str(inst.server),
+        "--model", str(inst.reranker),
+        "--rerank",
+        "--host", "127.0.0.1", "--port", str(port),
+        "--api-key", key,
+        "--no-webui", "--no-slots",
+        "--ctx-size", str(ctx),
+        "--batch-size", "2048", "--ubatch-size", "2048",
+        "--fit", "on",
+        "--parallel", "1",
+    ] + ([] if on_gpu else ["--device", "none"])
 
 
 class ModelError(RuntimeError):
@@ -794,18 +825,111 @@ def vision_fits(inst: Install) -> bool:
     """
     if inst.backend == "metal":
         return True                   # one shared memory: nothing to push off
-    if inst.backend != "cuda":
+    free = free_gpu_gib(inst)
+    if free is None:
         return False
+    # read now, after the search models took their share - which they only
+    # take when it leaves this much (helper_on_gpu)
+    return free >= chat_gib(inst)
+
+
+def free_gpu_gib(inst: Install) -> Optional[float]:
+    """Free graphics memory now, in GiB. NVIDIA only - its driver is the one
+    that can say; None elsewhere, or when it cannot."""
+    if inst.backend != "cuda":
+        return None
     exe = shutil.which("nvidia-smi")
     if not exe:
-        return False
+        return None
     try:
         free = int(subprocess.run([exe, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
                                   capture_output=True, text=True, timeout=10).stdout.split()[0])
     except Exception:
+        return None
+    return free / 1024
+
+
+def chat_gib(inst: Install) -> float:
+    """What the chat model takes with its vision part on the card, and a
+    margin. Measured: the full 9B with its vision part took 10.0 GB; this
+    says 10.8."""
+    return inst.tier.run_gib + inst.tier.vision.size / 2 ** 30 + 0.5
+
+
+# What each search model takes on the graphics card: 0.6 GB of weights, the
+# card's own working state for one more process, a 2,048-token context.
+# Measured on CUDA: 1.05 and 1.1 GB at that context, 1.9 GB at 8,192. The
+# margin is in chat_gib, once.
+HELPER_GIB = 1.15
+HELPER_CTX = 2048
+
+
+# ---------------------------------------------- sharing the graphics card --
+#
+# Three models share one card, in the order they matter to an answer
+# (`priority`, lower first):
+#
+# 0. the chat model writes every answer; pushed partly off the card it
+#    answers several times slower;
+# 1. the reranker reads up to 60 cards a question: under a second on the
+#    card, about 3 seconds for the fewer it reads on the processor;
+# 2. the embedder embeds each question (50 ms even on the processor) - and
+#    every card of a board, in the background, where the card makes it ten
+#    times faster: 92 s for ten thousand cards instead of a quarter of an hour.
+#
+# A model takes the card while there is room on it, and a more important model
+# takes it back when it needs it: the less important ones are stopped, least
+# important first, once their request in flight is done, and start again
+# wherever there is room then. So the embedder indexes on the card while
+# nothing else needs it, and a question's chat model still loads whole.
+# (The first rule kept room for the models ahead even while they were not
+# loaded - which left the embedder on the processor for the very work the card
+# speeds up most.) Measured on a 16 GB card with 12.4 GB free beside other
+# programs: the three need 12.1 GB, so with the chat model loaded, the embedder
+# ends on the processor.
+
+_placing = threading.Lock()          # one model placed and loading at a time
+_live: set = set()                   # models with a server running
+_live_lock = threading.Lock()
+
+
+def make_room(model: "LocalModel", need: float) -> bool:
+    """Free `need` GiB of graphics memory for `model` by stopping running
+    models that matter less, least important first. True when it is there -
+    or when free memory cannot be read, and llama.cpp's --fit decides."""
+    free = free_gpu_gib(model.inst)
+    if free is None:
+        return True
+    while free < need:
+        with _live_lock:
+            lower = [m for m in _live if m.priority > model.priority and m.running()
+                     and m.on_card()]
+        if not lower:
+            return False
+        max(lower, key=lambda m: m.priority).evict()
+        free = _freed(model.inst, free)
+    return True
+
+
+def _freed(inst: Install, before: float, timeout: float = 3.0) -> float:
+    """Free memory once a stopped server's share shows as free again."""
+    end = time.time() + timeout
+    free = free_gpu_gib(inst) or before
+    while free < before + 0.3 and time.time() < end:
+        time.sleep(0.1)
+        free = free_gpu_gib(inst) or before
+    return free
+
+
+def helper_on_gpu(model: "LocalModel") -> bool:
+    """Whether a search model goes on the graphics card: when there is room,
+    or room can be made from models that matter less."""
+    if model.inst.backend == "cpu":
         return False
-    # free memory is read now, after the embedding server took its share
-    return free / 1024 >= inst.tier.run_gib + inst.tier.vision.size / 2 ** 30 + 0.5
+    free = free_gpu_gib(model.inst)
+    if free is None:
+        return True
+    return free >= HELPER_GIB or make_room(model, HELPER_GIB)
 
 
 class LocalModel:
@@ -818,6 +942,7 @@ class LocalModel:
         self.ctx = ctx
         self.vision_on_gpu = vision_on_gpu   # None: decided at each start (vision_fits)
         self.vision_placed = ""
+        self.shortfall: Optional[str] = None  # set as it loads (memory_note)
         self.idle = idle_minutes * 60
         self.start_timeout = start_timeout
         self.proc: Optional[subprocess.Popen] = None
@@ -827,6 +952,8 @@ class LocalModel:
         self.busy = 0
         self.load_seconds = 0.0
         self._lock = threading.RLock()
+        self._requests = threading.Condition(self._lock)   # see _enter, evict
+        self._draining = False
         self._asking = threading.Lock()     # one question at a time, like --parallel 1
         self._cancel = threading.Event()
         self._watcher: Optional[threading.Thread] = None
@@ -842,14 +969,62 @@ class LocalModel:
     def log_path(self) -> Path:
         return self.inst.home / "logs" / self.log_name
 
+    priority = 0                     # the chat model comes first (make_room)
+
+    def on_card(self) -> bool:
+        return True
+
     def _args(self) -> list[str]:
+        # the search models give the card back if the chat model needs it
+        make_room(self, chat_gib(self.inst))
         on_gpu = (self.vision_on_gpu if self.vision_on_gpu is not None
                   else vision_fits(self.inst))
         self.vision_placed = "GPU" if on_gpu else "processor"
+        # read just before it loads, from the same free memory llama.cpp's
+        # --fit is about to place it by: whether it went on the card whole
+        self.shortfall = memory_shortfall(self.inst)
         return server_args(self.inst, self.port, self.key, self.ctx, on_gpu)
+
+    def memory_note(self) -> Optional[str]:
+        """Whether it answers slowly for want of graphics memory: as it loaded,
+        while it is loaded; as it would load, before."""
+        return self.shortfall if self.running() else memory_shortfall(self.inst)
 
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
+
+    def _enter(self) -> None:
+        """Start if need be, and count a request in. While the server is being
+        stopped to make room for a model that matters more (evict), a request
+        waits for that, then starts it again - placed afresh."""
+        while True:
+            self.start()
+            with self._requests:
+                if self._draining:
+                    self._requests.wait_for(lambda: not self._draining)
+                    continue
+                if not self.running():
+                    continue
+                self.busy += 1
+                return
+
+    def _leave(self) -> None:
+        with self._requests:
+            self.busy -= 1
+            self.last_used = time.time()
+            self._requests.notify_all()
+
+    def evict(self, timeout: float = 120.0) -> None:
+        """Stop, to give the graphics card to a model that matters more - once
+        the request in flight is done, so nothing is cut off."""
+        with self._requests:
+            self._draining = True
+            try:
+                self._requests.wait_for(lambda: self.busy == 0, timeout=timeout)
+                self.stop()
+            finally:
+                self._draining = False
+                self._requests.notify_all()
 
     def _log_tail(self, lines: int = 12) -> str:
         try:
@@ -861,7 +1036,13 @@ class LocalModel:
     def start(self) -> None:
         import httpx
 
-        with self._lock:
+        if self.running():
+            return
+        # Placed and loaded one at a time: a model deciding where it fits must
+        # not read the free memory while another is still filling it. Taken
+        # before this model's own lock, never while holding it (_enter), so a
+        # model making room can always stop the ones that matter less.
+        with _placing, self._lock:
             if self.running():
                 return
             self.port = _free_port()
@@ -900,6 +1081,8 @@ class LocalModel:
                 time.sleep(0.5)
             self.load_seconds = time.time() - began
             self.last_used = time.time()
+            with _live_lock:
+                _live.add(self)
             if self._watcher is None or not self._watcher.is_alive():
                 self._watcher = threading.Thread(target=self._watch, daemon=True,
                                                  name="mindboard-llm-idle")
@@ -908,6 +1091,8 @@ class LocalModel:
     def stop(self) -> None:
         with self._lock:
             proc, self.proc = self.proc, None
+        with _live_lock:
+            _live.discard(self)
         if proc is None or proc.poll() is not None:
             return
         proc.terminate()
@@ -1046,30 +1231,50 @@ class LocalModel:
             self._asking.release()
 
 
-class EmbedModel(LocalModel):
+class SearchModel(LocalModel):
+    """A small model that helps find cards - embedding or reranking. Placed at
+    each start: on the graphics card when there is room, or room can be made
+    from models that matter less; on the processor otherwise (helper_on_gpu).
+    A model that matters more can take the card back (evict)."""
+
+    def __init__(self, inst: Install, **kw):
+        super().__init__(inst, ctx=HELPER_CTX, **kw)
+        self.on_gpu = True
+
+    def on_card(self) -> bool:
+        return self.on_gpu
+
+    def _server_args(self, on_gpu: bool) -> list[str]:
+        raise NotImplementedError
+
+    def _args(self) -> list[str]:
+        self.vision_placed = ""
+        self.on_gpu = helper_on_gpu(self)
+        return self._server_args(self.on_gpu)
+
+
+class EmbedModel(SearchModel):
     """The embedding server: turns card text into vectors for finding cards by
     meaning. Same lifecycle as the chat model - started on first use, a fresh
     key each start, unloaded when idle, stopped with Mindboard - and a separate
     process, so it can be asked while the chat model is busy writing."""
 
     log_name = "llama-embed.log"
+    priority = 2                     # after the chat model and the reranker
 
     def __init__(self, inst: Install, **kw):
         if inst.embedder is None:
             raise ModelError("the embedding model is not installed - run: mindboard ai install")
-        super().__init__(inst, ctx=8192, **kw)
+        super().__init__(inst, **kw)
 
-    def _args(self) -> list[str]:
-        self.vision_placed = ""
-        return embed_server_args(self.inst, self.port, self.key, self.ctx)
+    def _server_args(self, on_gpu: bool) -> list[str]:
+        return embed_server_args(self.inst, self.port, self.key, self.ctx, on_gpu)
 
     def embed(self, texts: list[str], batch: int = 32) -> list[list[float]]:
         """One unit-length vector per text, in order."""
         import httpx
 
-        self.start()
-        with self._lock:
-            self.busy += 1
+        self._enter()
         out: list[list[float]] = []
         try:
             for i in range(0, len(texts), batch):
@@ -1087,10 +1292,60 @@ class EmbedModel(LocalModel):
         except httpx.HTTPError as exc:
             raise ModelError(f"the embedding model did not answer ({exc.__class__.__name__})") from exc
         finally:
-            with self._lock:
-                self.busy -= 1
-                self.last_used = time.time()
+            self._leave()
         return out
+
+
+class RerankModel(SearchModel):
+    """The reranking server: reads the question and each candidate card
+    together and scores how well the card answers it. Same lifecycle as the
+    other two; a separate process."""
+
+    log_name = "llama-rerank.log"
+
+    # How many candidates it reads per question, from each of the two lists
+    # (retrieve.rerank_and_spread). On a graphics card a pair takes under 10
+    # ms; on the processor about 150 ms, so it reads fewer there.
+    POOL_GPU = 30
+    POOL_CPU = 10
+    priority = 1                     # after the chat model, before the embedder
+
+    def __init__(self, inst: Install, **kw):
+        if inst.reranker is None:
+            raise ModelError("the reranking model is not installed - run: mindboard ai install")
+        super().__init__(inst, **kw)
+
+    def _server_args(self, on_gpu: bool) -> list[str]:
+        return rerank_server_args(self.inst, self.port, self.key, self.ctx, on_gpu)
+
+    def capacity(self) -> int:
+        """Candidates to read from each list - known once it is placed, so this
+        starts it."""
+        self.start()
+        return self.POOL_GPU if self.on_gpu else self.POOL_CPU
+
+    def rerank(self, query: str, documents: list[str]) -> list[float]:
+        """One relevance score per document, in the order given."""
+        import httpx
+
+        if not documents:
+            return []
+        self._enter()
+        try:
+            res = httpx.post(self.base + "/v1/rerank",
+                             headers={"Authorization": f"Bearer {self.key}"},
+                             json={"query": query, "documents": documents,
+                                   "top_n": len(documents)}, timeout=120)
+        except httpx.HTTPError as exc:
+            raise ModelError(f"the reranking model did not answer ({exc.__class__.__name__})") from exc
+        finally:
+            self._leave()
+        if res.status_code != 200:
+            raise ModelError(f"the reranking model refused ({res.status_code}): {res.text[:200]}")
+        scores = [0.0] * len(documents)
+        for r in res.json()["results"]:
+            scores[r["index"]] = float(r["relevance_score"])
+        return scores
 
 
 # --------------------------------------------------------------- check --

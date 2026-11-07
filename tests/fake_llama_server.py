@@ -70,7 +70,8 @@ class Handler(BaseHTTPRequestHandler):
             pieces.append(("reasoning_content", "Let me look at the cards."))
         pieces += [("content", "Your card says the corner mount is best "), ("content", f"[[{first}]]. "),
                    ("content", f"Also this [[{'Z' * 26}]].\n"),
-                   ("content", "Beyond your board:\nConsider wind load.")]
+                   ("content", "Beyond your board:\nConsider wind load."),
+                   ("content", "\nNEXT: Where else"), ("content", " could it go?")]
         slow = "SLOWLY" in texts
         if slow:
             pieces += [("content", " more")] * 400
@@ -97,6 +98,22 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         if self.headers.get("Authorization") != f"Bearer {args.api_key}":
             return self._send(401, {"error": {"code": 401, "message": "Invalid API Key"}})
+        if self.path == "/v1/embeddings":
+            # like llama-server --embedding; "SLOWLY" in a text makes it take a
+            # moment, so a test can catch a request in flight
+            texts = body["input"] if isinstance(body["input"], list) else [body["input"]]
+            if any("SLOWLY" in t for t in texts):
+                time.sleep(0.8)
+            return self._send(200, {"data": [{"index": i, "embedding": [1.0, float(len(t)), 0.0, 0.0]}
+                                             for i, t in enumerate(texts)]})
+        if self.path == "/v1/rerank":
+            # like llama-server --rerank: best first, each with its index in
+            # the request; "relevance" here is the share of the query's words
+            words = set(body["query"].lower().split())
+            results = [{"index": i, "relevance_score": len(words & set(d.lower().split())) / len(words)}
+                       for i, d in enumerate(body["documents"])]
+            results.sort(key=lambda r: -r["relevance_score"])
+            return self._send(200, {"results": results[:body.get("top_n", len(results))]})
         if body.get("stream"):
             return self._stream(body)
         last = body["messages"][-1]["content"]

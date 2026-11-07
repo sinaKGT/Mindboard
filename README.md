@@ -145,7 +145,8 @@ The panel on the right (`Ctrl+J`, or the bubble in the bottom-right corner)
 lists what is in context and holds the conversation. Answers stream in; every
 card an answer draws on is a chip you can click to go to it, even inside a
 group, and anything the model adds from its own knowledge sits apart under
-**Beyond your board**. **What am I missing here?** is one click away, **Think
+**Beyond your board**. Under each answer it offers one question to ask next —
+click it to ask. **What am I missing here?** is one click away, **Think
 deeper** lets the model think first, and **Stop** stops it. The conversation
 lasts while the board is open in that tab — save what matters as a card.
 
@@ -156,13 +157,26 @@ mindboard ai ask --board "Sensor siting" --card "Sensors" --card "Site sketch" "
 mindboard ai ask --board "Sensor siting" --all "What am I missing?"
 ```
 
-With nothing added, a small board is read whole. A bigger one is **searched**:
-Mindboard finds the cards your question is about — by meaning, and by keywords
+With nothing added, the board is **searched** — never sent whole, so asking
+works the same on a board of fifty cards or ten thousand. Mindboard finds the
+cards your question is about — by meaning, and by keywords
 with stemming (so *evaluating* finds *evaluation*), titles counting double and
-small typos forgiven; put words in "quotes" to require them exactly — follows
-your relationships from them, and sends the best ones with an outline of the
-board's groups. The panel says how many cards it used. A follow-up is searched
+small typos forgiven; put words in "quotes" to require them exactly. A second
+small model then reads the best of them closely, each together with what it is
+linked to, and relevance spreads from the best along your relationships and
+groups — so a card that is only a title, or only reachable through your links,
+is still found. The best ones go to the model with an outline of the board's
+groups. The panel says how many cards it used. A follow-up is searched
 together with the question before it.
+
+The two search models are small (0.6 GB each, downloaded with the rest). The
+main model always comes first on the graphics card: the search models use it
+while there is room, and give it back when the main model needs it.
+
+A board learns the meaning of its cards in the background — when you open it,
+and a moment after each change — so asking never waits for it, however big
+the board. Until it is done, cards are still found by their words and links,
+and the panel says how far it has got.
 
 To measure how well search finds the right cards, write a test set — questions
 about a board, each with the cards a good search returns — into

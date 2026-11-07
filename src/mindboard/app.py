@@ -101,15 +101,18 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     def api_graph(bid: str):
         meta = board_or_404(bid)
         graph = read_graph(conn_for(dd, bid), bid)
+        indexer.want(bid)              # opened: get its search index ready meanwhile
         return {"board": meta, "revision": meta["revision"], **graph}
 
     @app.post("/api/boards/{bid}/ops")
     def api_ops(bid: str, body: OpsRequest):
         board_or_404(bid)
         try:
-            return apply_envelopes(conn_for(dd, bid), bid, body.envelopes)
+            result = apply_envelopes(conn_for(dd, bid), bid, body.envelopes)
         except Exception as exc:
             raise HTTPException(400, str(exc))
+        indexer.want(bid)              # changed: its new cards get their vectors
+        return result
 
     @app.get("/api/boards/{bid}/search")
     def api_search(bid: str, q: str = "", limit: int = 30):
@@ -282,7 +285,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     app.state.ask = held
 
     def stop_model() -> None:
-        for key in ("model", "embed"):
+        indexer.stop()
+        for key in ("model", "embed", "rerank"):
             if held.get(key) is not None:
                 held[key].stop()
 
@@ -302,20 +306,32 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             current = held["model"] = llm.LocalModel(inst)
         return current
 
-    def embed_model():
-        """The embedding server for searching big boards; None means search
-        by wording only."""
+    def search_model(key: str):
+        """A search model - "embed" for finding cards by meaning, "rerank" for
+        reading candidates closely - made on first use. None when it is not
+        installed: search then goes without it. Where each runs is settled
+        between the models themselves (llm.make_room)."""
         from . import llm
 
         inst = llm.find_install()
-        if inst is None or inst.embedder is None:
+        path = None if inst is None else inst.embedder if key == "embed" else inst.reranker
+        if path is None:
             return None
-        current = held.get("embed")
-        if current is None or current.inst.embedder != inst.embedder:
+        current = held.get(key)
+        if current is None or (
+                (current.inst.embedder if key == "embed" else current.inst.reranker) != path):
             if current is not None:
                 current.stop()
-            current = held["embed"] = llm.EmbedModel(inst)
+            kind = llm.EmbedModel if key == "embed" else llm.RerankModel
+            current = held[key] = kind(inst)
         return current
+
+    # Cards are embedded in the background - when a board is opened and after
+    # each change - so a question never waits for it (indexer.py)
+    from .indexer import Indexer
+
+    indexer = Indexer(dd, lambda: search_model("embed"))
+    app.state.indexer = indexer
 
     @app.post("/api/boards/{bid}/ask")
     async def api_ask(bid: str, body: AskRequest, request: Request):
@@ -337,18 +353,19 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             if model._asking.locked():
                 raise HTTPException(409, "still answering the last question")
             try:
-                emb = embed_model()
+                emb = search_model("embed")
                 ctx = build(dd, conn_for(dd, bid), bid, body.cards, body.question, history,
-                            emb, emb.inst.embedder.name if emb else "")
+                            emb, emb.inst.embedder.name if emb else "", search_model("rerank"),
+                            background=True)
             except AskError as exc:
                 raise HTTPException(400, str(exc))
+            finally:
+                indexer.want(bid)      # whatever the question did not embed, the indexer will
             try:
                 check_fits(ctx, body.question, history, body.think)
             except AskError as exc:
                 raise HTTPException(413, str(exc))
-            from .llm import memory_shortfall
-
-            return model, ctx, memory_shortfall(model.inst)
+            return model, ctx, model.memory_note()
 
         model, ctx, warning = await run_in_threadpool(prepare)
         loading = not model.running()

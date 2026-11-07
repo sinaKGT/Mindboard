@@ -1,5 +1,5 @@
 import { useStore } from './store'
-import { CUSTOMISABLE, THEMES, contrast, readVar } from './theme'
+import { CUSTOMISABLE, THEMES, THEME_LOOK, contrast, readVar } from './theme'
 import { useUI } from './ui'
 
 export function ThemeSheet() {
@@ -19,12 +19,21 @@ export function ThemeSheet() {
     <div className="sheet" onMouseDown={(e) => e.stopPropagation()}>
       <h4>Theme</h4>
       <div className="theme-row">
-        {THEMES.map((t) => (
-          <button key={t} className="theme-chip" aria-pressed={(settings.theme || 'midnight') === t}
-            onClick={() => write({ theme: t })}>
-            {t}
-          </button>
-        ))}
+        {THEMES.map((t) => {
+          const look = THEME_LOOK[t]
+          return (
+            <button key={t} className="theme-chip" aria-pressed={(settings.theme || 'midnight') === t}
+              title={look.feel} onClick={() => write({ theme: t })}>
+              {/* a tiny preview: its canvas, a card on it, its accent */}
+              <span className="theme-swatch" style={{ background: look.bg }}>
+                <span style={{ background: look.card }} />
+                <span style={{ background: look.accent }} />
+              </span>
+              <span className="theme-name">{t}</span>
+              <span className="theme-feel">{look.feel}</span>
+            </button>
+          )
+        })}
       </div>
       {CUSTOMISABLE.map(({ key, label }) => (
         <div className="row" key={key}>

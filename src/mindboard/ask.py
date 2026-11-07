@@ -25,12 +25,19 @@ MAX_SIDE = 1024            # pictures are shrunk to this; larger costs time, not
 CONTEXT_TOKENS = 32768     # what the model is started with (llm.LocalModel)
 ANSWER_TOKENS = 3072
 THINKING_TOKENS = 8192
-# Asking about the whole board brings pictures only up to this many tokens: a
-# board of thirty screenshots would otherwise be too much to ask about at all.
-# Cards chosen by hand always bring their pictures.
-WHOLE_BOARD_PICTURE_TOKENS = 6000
+# A search brings the found cards' pictures only up to this many tokens: thirty
+# matching screenshots would otherwise be too much to ask about at all. Cards
+# chosen by hand always bring their pictures.
+SEARCH_PICTURE_TOKENS = 6000
 BEYOND = "Beyond your board:"
+# the model sometimes dresses the line up - **Beyond your board:**, a heading -
+# and the split then left the stray ** on both sides of it
+BEYOND_MARK = re.compile(r"(?:^[ \t]*#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*Beyond your board:[ \t]*"
+                         r"(?:\*\*|__)?", re.MULTILINE)
 CITE = re.compile(r"\[\[([0-9A-Za-z]{26})\]\]")
+# the question the model offers to answer next, on the answer's last line
+NEXT = "NEXT:"
+NEXT_LINE = re.compile(r"^[ \t*_>#-]*NEXT:[ \t*_]*(.*?)[ \t*_]*$", re.MULTILINE)
 
 KIND_WORDS = {
     "relates": "relates to", "causes": "causes", "supports": "supports",
@@ -53,7 +60,10 @@ How to answer:
    read next - put it after a line that reads exactly "{BEYOND}", and cite
    nothing there.
 3. If the cards do not answer the question, say so plainly first.
-4. Be direct and brief. Plain sentences and short lists; no tables."""
+4. Be direct and brief. Plain sentences and short lists; no tables.
+5. Finish with one last line that starts exactly "{NEXT}" and holds one
+   question the person could ask next: short, in their words, taking what they
+   just asked one step further, answerable from their cards or your knowledge."""
 
 
 class AskError(ValueError):
@@ -72,10 +82,10 @@ class Context:
     cards: list[str]                       # every card the model sees, groups expanded
     text: str
     pictures: list[Picture] = field(default_factory=list)
-    whole: bool = False                    # nothing chosen: the whole board
+    whole: bool = False                    # nothing chosen: asked about the whole board
     pictures_left_out: int = 0
-    # how the cards were chosen: "chosen" by hand, the "whole" board sent
-    # entire, or found by a "search" of a board too big to send (retrieve.py)
+    # how the cards were chosen: "chosen" by hand, or found by a "search" of
+    # the whole board (retrieve.py) - never the whole board sent entire
     mode: str = "chosen"
     total: int = 0                         # cards on the board
     how: str = ""                          # what a search went by
@@ -164,50 +174,77 @@ def _picture(dd: DataDir, conn: sqlite3.Connection, bid: str, sha: str) -> Optio
     return url, (w * h) // (32 * 32) + 16   # Qwen sees a picture in 32-pixel squares
 
 
+# cards a question embeds itself before searching - what one person writes
+# between two questions; more than that waits for the background indexer
+EMBED_NOW = 32
+
+
 def board_index(dd: DataDir, conn: sqlite3.Connection, bid: str, nodes: dict[str, dict],
-                embedder: Optional[retrieve.Embedder], embed_model: str) -> BoardIndex:
-    """The board's search index, brought up to the board's current revision."""
+                embedder: Optional[retrieve.Embedder], embed_model: str,
+                background: bool = False) -> BoardIndex:
+    """The board's search index, brought up to the board's current revision,
+    with what each card costs to send - worked out once per revision, not for
+    every card at every question.
+
+    With `background`, the app's way, a question never waits for embedding:
+    the text index is brought up to date (0.2 s at ten thousand cards), the
+    few cards just written are embedded on the spot so the question can find
+    them by meaning, and anything more is left to the background indexer -
+    the search uses the vectors made so far. Without it (the terminal, the
+    evaluator) every card is embedded first."""
     row = conn.execute("SELECT revision FROM board WHERE id=?", (bid,)).fetchone()
+    revision = row["revision"] if row else 0
     index = BoardIndex.get(dd, bid)
     try:
-        index.sync(nodes, row["revision"] if row else 0, embedder, embed_model)
+        if not background:
+            index.sync(nodes, revision, embedder, embed_model)
+        else:
+            index.sync_text(nodes, revision, embed_model if embedder is not None else None)
+            if embedder is not None and 0 < len(index.pending()) <= EMBED_NOW:
+                index.embed_some(embedder, EMBED_NOW)
     except Exception:
         # the embedder failed: keep the text index, search without meaning
-        index.sync(nodes, row["revision"] if row else 0, None, index.model)
+        index.sync_text(nodes, revision)
+    if index.costs_revision != revision or len(index.costs) != len(nodes):
+        index.costs = {i: estimate(card_text(n, nodes)) for i, n in nodes.items()}
+        index.costs_revision = revision
     return index
 
 
 def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
           question: str = "", history: Optional[list[dict]] = None,
-          embedder: Optional[retrieve.Embedder] = None, embed_model: str = "") -> Context:
-    """The context for a question. Nothing chosen means the whole board: asking
-    about everything is where a conversation starts, and adding cards narrows it."""
+          embedder: Optional[retrieve.Embedder] = None, embed_model: str = "",
+          reranker: Optional[retrieve.Reranker] = None, background: bool = False) -> Context:
+    """The context for a question. Nothing chosen means the whole board, and
+    the whole board is always searched (retrieve.py), never sent: a board may
+    hold ten thousand cards, and a small one asked the same way behaves the
+    same way as it grows. Cards chosen by hand are never searched: they are
+    exactly what was asked about."""
     graph = read_graph(conn, bid)
     nodes = {n["id"]: n for n in graph["nodes"]}
     whole = not chosen
-    ids = (expand(nodes, [n["id"] for n in graph["nodes"] if not n.get("parent")]) if whole
-           else expand(nodes, chosen))
-    if not ids:
-        raise AskError("this board has no cards yet" if whole
-                       else "none of those cards are on this board any more")
-    blocks = {i: card_text(nodes[i], nodes) for i in ids}
-    mode, how = ("whole" if whole else "chosen"), ""
-
-    # A board too big to send whole is searched instead (retrieve.py). Cards
-    # chosen by hand are never searched: they are exactly what was asked about.
-    if whole and question.strip() and sum(estimate(b) for b in blocks.values()) > retrieve.WHOLE_UNDER:
+    if whole:
+        if not nodes:
+            raise AskError("this board has no cards yet")
+        if not question.strip():
+            raise AskError("ask a question - the board is searched for the cards it is about")
         # a follow-up ("which of those...") is searched with what led up to it
         asked = [str(t.get("text", "")) for t in (history or []) if t.get("role") == "user"]
         query = " ".join(asked[-2:] + [question])
-        index = board_index(dd, conn, bid, nodes, embedder, embed_model)
-        found = retrieve.search(index, query, nodes, graph["edges"],
-                                {i: estimate(blocks[i]) for i in ids}, embedder)
+        index = board_index(dd, conn, bid, nodes, embedder, embed_model, background)
+        found = retrieve.search(index, query, nodes, graph["edges"], index.costs, embedder,
+                                reranker=reranker)
         ids, mode, how = found.ids, "search", found.how
+    else:
+        ids, mode, how = expand(nodes, chosen), "chosen", ""
+        if not ids:
+            raise AskError("none of those cards are on this board any more")
+    blocks = {i: card_text(nodes[i], nodes) for i in ids}
 
     inside = set(ids)
     pictures: list[Picture] = []
     left_out = 0
-    budget = WHOLE_BOARD_PICTURE_TOKENS
+    budget = SEARCH_PICTURE_TOKENS
     for i in ids:
         n = nodes[i]
         c = n.get("content") or {}
@@ -230,7 +267,7 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
         text = (f"BOARD OUTLINE (its groups)\n{retrieve.outline(nodes)}\n\n"
                 f"CARDS (the {len(ids)} of the board's {len(nodes)} that match the question)\n")
     else:
-        text = "CARDS (the whole board)\n" if whole else "CARDS\n"
+        text = "CARDS\n"
     text += "\n\n".join(blocks[i] for i in ids)
     if links:
         text += "\n\nRELATIONSHIPS\n" + "\n".join(links)
@@ -286,6 +323,19 @@ def check_fits(ctx: Context, question: str, history: list[dict], think: bool) ->
 
 # ------------------------------------------------------------ the answer --
 
+def split_next(answer: str) -> tuple[str, str]:
+    """The answer, and the question it offers next - taken off its last line.
+    Only a line that ends the answer counts, so a "NEXT:" the model happens to
+    write mid-answer stays where it is. No line, no offer."""
+    found = [m for m in NEXT_LINE.finditer(answer) if not answer[m.end():].strip()]
+    if not found:
+        return answer, ""
+    m = found[-1]
+    question = re.sub(r"[ \t]+([.,;:?!])", r"\1", CITE.sub("", m.group(1)))
+    question = question.strip().strip('"“”').strip()
+    return answer[:m.start()].rstrip(), question
+
+
 def check_citations(answer: str, allowed: set[str]) -> dict:
     """Keep citations of cards that were in context; remove the rest and count
     them - that count is how often the model invents a source."""
@@ -301,7 +351,7 @@ def check_citations(answer: str, allowed: set[str]) -> dict:
         dropped.append(cid)
         return ""
 
-    clean = CITE.sub(keep, answer)
+    clean = CITE.sub(keep, BEYOND_MARK.sub(BEYOND, answer))
     clean = re.sub(r"[ \t]+([.,;:])", r"\1", clean)
     board, _, beyond = clean.partition(BEYOND)
     return {"answer": clean.strip(), "board": board.strip(), "beyond": beyond.strip(),
@@ -331,6 +381,8 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
             yield {"event": "thinking", "text": ev["text"]}
         elif ev["type"] == "done":
             timings = ev
-    result = check_citations("".join(text), set(ctx.cards))
-    yield {"event": "done", **result, "stopped": bool(timings.get("stopped")),
+    answer, next_question = split_next("".join(text))
+    result = check_citations(answer, set(ctx.cards))
+    yield {"event": "done", **result, "next": next_question,
+           "stopped": bool(timings.get("stopped")),
            "tokens_per_second": timings.get("tokens_per_second")}

@@ -28,7 +28,7 @@ from .boards import conn_for, list_boards
 from .ops import read_graph
 from .paths import DataDir
 
-# A strategy: (index, question, nodes, edges, cost, embedder) ->
+# A strategy: (index, question, nodes, edges, cost, embedder, reranker) ->
 # (ranked ids, the ids that would be sent)
 Strategy = Callable[..., tuple[list[str], list[str]]]
 
@@ -88,33 +88,79 @@ def default_set_path(dd: DataDir, board_title: str) -> Path:
 
 
 # ------------------------------------------------------------ strategies --
-# Each one alone, then fused, then what is actually sent. The first baseline -
-# SQLite FTS5 and SQLite-stored vectors, before this index - is kept as
-# numbers in DESIGN.md 30, not as code.
+# Each search alone, then fused, then each later stage on its own, then what
+# is actually sent. Earlier baselines that are no longer code - SQLite FTS5
+# with SQLite-stored vectors - are kept as numbers in DESIGN.md 30.
 
-def _keyword(index, q, nodes, edges, cost, embedder):
+def _keyword(index, q, nodes, edges, cost, embedder, reranker):
     ranked = index.keyword(q)
     return ranked, ranked
 
 
-def _exact(index, q, nodes, edges, cost, embedder):
+def _exact(index, q, nodes, edges, cost, embedder, reranker):
     ranked = index.exact(q)
     return ranked, ranked
 
 
-def _meaning(index, q, nodes, edges, cost, embedder):
+def _meaning(index, q, nodes, edges, cost, embedder, reranker):
     ranked, _ = index.meaning(embedder.embed([f"{retrieve.QUERY_INSTRUCT}{q}"])[0])
     return ranked, ranked
 
 
-def _fused(index, q, nodes, edges, cost, embedder):
+def _fused(index, q, nodes, edges, cost, embedder, reranker):
     fused, _, _ = retrieve.candidates(index, q, embedder)
-    ranked = sorted(fused, key=fused.get, reverse=True)
+    ranked = retrieve.ranked(fused)
     return ranked, ranked
 
 
-def _sent(index, q, nodes, edges, cost, embedder):
+def _walk(index, q, nodes, edges, cost, embedder, reranker):
     found = retrieve.search(index, q, nodes, edges, cost, embedder)
+    return found.ids, found.ids
+
+
+def _graph(index, q, nodes, edges, cost, embedder, reranker):
+    fused, _, _ = retrieve.candidates(index, q, embedder)
+    fused = {k: v for k, v in fused.items() if k in nodes}
+    ranked = retrieve.ranked(retrieve.graph_rank(retrieve.top(fused, retrieve.SEEDS), nodes, edges))
+    return ranked, ranked
+
+
+def _read_only(index, q, nodes, edges, cost, embedder, reranker):
+    from .search_index import card_fields, card_passage
+
+    fused, _, _ = retrieve.candidates(index, q, embedder)
+    pool = [i for i in retrieve.ranked(fused) if i in nodes][:reranker.capacity()]
+    said = retrieve.relations(nodes, edges)
+    docs = [retrieve.linked_passage(card_passage(card_fields(nodes[i], nodes)),
+                                    said.get(i, []))[:retrieve.DOC_CHARS] for i in pool]
+    read = dict(zip(pool, reranker.rerank(q[-retrieve.QUERY_CHARS:], docs)))
+    ranked = retrieve.ranked(read)
+    return ranked, ranked
+
+
+class _Reads:
+    """The reranker held to a fixed number of candidates."""
+
+    def __init__(self, reranker, n: int):
+        self.reranker, self.n = reranker, n
+
+    def rerank(self, query, documents):
+        return self.reranker.rerank(query, documents)
+
+    def capacity(self):
+        return self.n
+
+
+def _sent_cpu(index, q, nodes, edges, cost, embedder, reranker):
+    from .llm import RerankModel
+
+    found = retrieve.search(index, q, nodes, edges, cost, embedder,
+                            reranker=_Reads(reranker, RerankModel.POOL_CPU))
+    return found.ids, found.ids
+
+
+def _sent(index, q, nodes, edges, cost, embedder, reranker):
+    found = retrieve.search(index, q, nodes, edges, cost, embedder, reranker=reranker)
     return found.ids, found.ids
 
 
@@ -123,13 +169,21 @@ STRATEGIES: dict[str, Strategy] = {
     "exact (quoted phrases only)": _exact,
     "meaning (exact cosine)": _meaning,
     "RRF of the three": _fused,
-    "RRF + walk (sent)": _sent,
+    "RRF + walk (no reranker)": _walk,
+    "RRF + PageRank": _graph,
+    "reranked RRF": _read_only,
+    "reranked + PageRank, 10 read": _sent_cpu,
+    "reranked + PageRank (sent)": _sent,
 }
+NEEDS_RERANKER = {"reranked RRF", "reranked + PageRank, 10 read", "reranked + PageRank (sent)"}
 
 
 def run(dd: DataDir, test_set: dict, embedder, model: str,
-        strategies: Optional[dict[str, Strategy]] = None) -> list[Report]:
-    strategies = strategies or STRATEGIES
+        strategies: Optional[dict[str, Strategy]] = None, reranker=None) -> list[Report]:
+    strategies = dict(strategies or STRATEGIES)
+    if reranker is None:
+        for name in NEEDS_RERANKER:
+            strategies.pop(name, None)
     board = next((b for b in list_boards(dd) if b["id"] == test_set["board"]), None)
     if board is None:
         raise ValueError("the test set's board is not in this data folder")
@@ -143,7 +197,8 @@ def run(dd: DataDir, test_set: dict, embedder, model: str,
         report = Report(name)
         for q in test_set["questions"]:
             began = time.time()
-            ranked, sent = strategy(index, q["question"], nodes, graph["edges"], cost, embedder)
+            ranked, sent = strategy(index, q["question"], nodes, graph["edges"], cost, embedder,
+                                    reranker)
             report.scores.append(Score(q["question"], q["kind"], q["gold"], ranked, sent,
                                        time.time() - began))
         reports.append(report)

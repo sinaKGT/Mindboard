@@ -61,6 +61,48 @@
   --mb-shadow-lg: 0 12px 40px -10px #0f172a30, 0 2px 8px #0f172a14;
 }
 
+/* themes with a feeling: dark ones for long sessions, light ones for daytime */
+[data-theme='forest'] {   /* calm, grounded */
+  --mb-bg: #0c120f; --mb-grid: #23302a; --mb-surface: #141c18; --mb-surface-2: #1b2520;
+  --mb-surface-3: #23302a; --mb-border: #24302a; --mb-border-strong: #36463d;
+  --mb-text: #e3ece6; --mb-text-dim: #8a9a90; --mb-text-faint: #5d6c63;
+  --mb-accent: #6fcf97; --mb-accent-soft: #6fcf9722; --mb-edge: #3e4f45;
+}
+[data-theme='ember'] {    /* warm, cosy, late evening */
+  --mb-bg: #130e0b; --mb-grid: #33261e; --mb-surface: #1c1511; --mb-surface-2: #251c16;
+  --mb-surface-3: #2f241c; --mb-border: #30251d; --mb-border-strong: #47372b;
+  --mb-text: #f1e7df; --mb-text-dim: #a8968a; --mb-text-faint: #73645a;
+  --mb-accent: #ff9e64; --mb-accent-soft: #ff9e6422; --mb-edge: #54443a;
+}
+[data-theme='ocean'] {    /* deep, focused */
+  --mb-bg: #07111a; --mb-grid: #1a2d3d; --mb-surface: #0e1a26; --mb-surface-2: #142231;
+  --mb-surface-3: #1b2c3d; --mb-border: #1a2b3b; --mb-border-strong: #2a4157;
+  --mb-text: #dfeaf3; --mb-text-dim: #84a0b5; --mb-text-faint: #56708a;
+  --mb-accent: #4fd1c5; --mb-accent-soft: #4fd1c522; --mb-edge: #34506a;
+}
+[data-theme='dusk'] {     /* dreamy, creative */
+  --mb-bg: #110d18; --mb-grid: #2c2340; --mb-surface: #191424; --mb-surface-2: #211a30;
+  --mb-surface-3: #2a223c; --mb-border: #2a2239; --mb-border-strong: #3f3456;
+  --mb-text: #ece6f5; --mb-text-dim: #9c90b0; --mb-text-faint: #6c6180;
+  --mb-accent: #f0a6ca; --mb-accent-soft: #f0a6ca22; --mb-edge: #4b3f63;
+}
+[data-theme='paper'] {    /* warm daylight, like reading notes */
+  --mb-bg: #f6f1e7; --mb-grid: #ddd3c0; --mb-surface: #fffcf5; --mb-surface-2: #f3ece0;
+  --mb-surface-3: #e9e0d0; --mb-border: #e2d8c6; --mb-border-strong: #cbbda5;
+  --mb-text: #2b2419; --mb-text-dim: #6e6251; --mb-text-faint: #9a8d79;
+  --mb-accent: #b45309; --mb-accent-soft: #b4530918; --mb-edge: #a89880;
+  --mb-shadow: 0 1px 2px #3b2f1a12, 0 8px 24px -14px #3b2f1a30;
+  --mb-shadow-lg: 0 12px 40px -10px #3b2f1a30, 0 2px 8px #3b2f1a14;
+}
+[data-theme='mist'] {     /* airy, quiet, clear */
+  --mb-bg: #eef2f5; --mb-grid: #cdd6df; --mb-surface: #fbfcfd; --mb-surface-2: #f0f4f7;
+  --mb-surface-3: #e3e9ef; --mb-border: #d9e0e7; --mb-border-strong: #bcc7d2;
+  --mb-text: #1b2530; --mb-text-dim: #5a6876; --mb-text-faint: #8a97a4;
+  --mb-accent: #0e9f8e; --mb-accent-soft: #0e9f8e18; --mb-edge: #97a5b3;
+  --mb-shadow: 0 1px 2px #0f1d2a12, 0 8px 24px -14px #0f1d2a30;
+  --mb-shadow-lg: 0 12px 40px -10px #0f1d2a30, 0 2px 8px #0f1d2a14;
+}
+
 /* ------------------------------------------------------------------ base -- */
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -463,11 +505,23 @@ a.btn { text-decoration: none; }
   width: 26px; height: 20px; padding: 0; border: 1px solid var(--mb-border);
   border-radius: 5px; background: none; cursor: pointer;
 }
-.theme-row { display: flex; gap: 6px; margin-bottom: 12px; }
+.theme-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
 .theme-chip {
-  flex: 1; height: 30px; border-radius: var(--mb-radius-sm); border: 1px solid var(--mb-border);
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px;
+  align-items: center; text-align: left; padding: 6px 8px;
+  border-radius: var(--mb-radius-sm); border: 1px solid var(--mb-border);
   font-size: 11.5px; color: var(--mb-text-dim);
 }
+.theme-chip:hover { border-color: var(--mb-border-strong); }
+/* a tiny preview of the theme: its canvas, a card on it, and its accent */
+.theme-swatch {
+  grid-row: span 2; position: relative; width: 30px; height: 24px; border-radius: 5px;
+  border: 1px solid var(--mb-border-strong); overflow: hidden;
+}
+.theme-swatch span:first-child { position: absolute; left: 5px; top: 5px; width: 14px; height: 9px; border-radius: 2px; }
+.theme-swatch span:last-child { position: absolute; right: 4px; bottom: 4px; width: 7px; height: 7px; border-radius: 50%; }
+.theme-name { color: var(--mb-text); text-transform: capitalize; line-height: 1.2; }
+.theme-feel { font-size: 10.5px; color: var(--mb-text-faint); line-height: 1.2; }
 .theme-chip[aria-pressed='true'] { border-color: var(--mb-accent); color: var(--mb-text); }
 
 .toast {
@@ -1024,6 +1078,10 @@ a.btn { text-decoration: none; }
   background: var(--mb-surface-2); border: 1px solid var(--mb-border); color: var(--mb-text-dim);
 }
 .starter:hover { color: var(--mb-text); border-color: var(--mb-accent); }
+/* the question an answer offers next: a quiet lead-in, then the question to click */
+.ask-next { margin-top: 9px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.ask-next-lead { color: var(--mb-text-faint); font-size: 11.5px; }
+.ask-next .starter { margin-bottom: 0; text-align: left; white-space: normal; line-height: 1.4; }
 .ask-input {
   display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 10px;
   border-radius: 10px; background: var(--mb-surface-2); border: 1px solid var(--mb-border);

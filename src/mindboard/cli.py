@@ -482,10 +482,13 @@ def ai_eval(
         typer.echo("  The embedding model is not installed - run: mindboard ai install")
         raise typer.Exit(1)
     embedder = llm.EmbedModel(inst)
+    reranker = llm.RerankModel(inst) if inst.reranker else None
     try:
-        reports = evaluate.run(dd, data, embedder, inst.embedder.name)
+        reports = evaluate.run(dd, data, embedder, inst.embedder.name, reranker=reranker)
     finally:
         embedder.stop()
+        if reranker is not None:
+            reranker.stop()
     kinds = list(dict.fromkeys(q["kind"] for q in data["questions"]))
     typer.echo(f"\n  {b['title']}: {len(data['questions'])} questions\n")
     typer.echo("\n".join("  " + line for line in evaluate.table(reports, kinds).splitlines()))
