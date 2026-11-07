@@ -434,6 +434,27 @@ def ai_check():
     raise typer.Exit(0 if run_check(_console()) else 1)
 
 
+@ai_app.command("ask")
+def ai_ask(
+    question: str = typer.Argument(..., help="What to ask."),
+    board: str = typer.Option(..., "--board", "-b", help="Board title (or part of it), or id."),
+    card: list[str] = typer.Option([], "--card", "-c",
+                                   help="A card in context, by title or id. Repeat for more; "
+                                        "a group brings everything inside it."),
+    every: bool = typer.Option(False, "--all", help="Every card on the board."),
+    think: bool = typer.Option(False, "--think", help="Let the model think first (slower)."),
+    data_dir: Optional[str] = DataDirOpt,
+):
+    """Ask the local model about chosen cards on a board, from the terminal."""
+    from .llm_setup import ask_in_terminal
+
+    if not card and not every:
+        typer.echo("  Name at least one card with --card, or use --all.")
+        raise typer.Exit(2)
+    ok = ask_in_terminal(_console(), _dd(data_dir), board, card, question, think, every)
+    raise typer.Exit(0 if ok else 1)
+
+
 @ai_app.command("status")
 def ai_status():
     """Say whether Ask your board is set up, and where."""

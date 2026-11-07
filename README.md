@@ -136,6 +136,19 @@ Apple silicon the Metal build, and a computer without a card the processor
 build. The model loads when first asked, unloads after 20 minutes without
 questions, and always stops with Mindboard.
 
+Asking happens on the canvas (coming next); until then, from a terminal:
+
+```
+mindboard ai ask --board "Sensor siting" --card "Sensors" --card "Site sketch" "Where should the lidar go?"
+mindboard ai ask --board "Sensor siting" --all "What am I missing?"
+```
+
+The model sees exactly the cards you name — a group brings everything inside
+it — with their pictures and the relationships between them. Whatever it takes
+from your cards it cites; whatever it adds from its own knowledge comes after
+**Beyond your board:**, uncited. Citations of cards that were not in context are
+removed. Add `--think` to let it think first (slower, deeper).
+
 **If answers are slow:** another program running a model (Ollama, LM Studio)
 may be holding the graphics card — the check says so by name. On a laptop, a
 quiet or battery-saving power mode can hold the card to a fraction of its speed.
@@ -181,6 +194,7 @@ mindboard where         # print the data directory
 
 mindboard ai install    # set up Ask your board (one-time download)
 mindboard ai check      # test the local model
+mindboard ai ask --board B --card C "question"   # ask about chosen cards
 mindboard ai status
 ```
 

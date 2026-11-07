@@ -1475,3 +1475,105 @@ of its speed, and that is the person's setting, not Mindboard's to change.
 Ollama when the profile changed, and a measurement beside it would have measured
 the competition); the Vulkan, Metal and processor builds; the `medium`,
 `small` and `light` sizes in use; sizing on AMD, Intel and Apple hardware.
+
+---
+
+## 24. Asking about exactly these cards (v2, 2026-11-07)
+
+The shape of Ask your board was set by the person who will use it: every card
+gets **Add to context**, questions are about exactly the cards added — text and
+pictures — and an answer can be saved back as a card, connected where they
+choose. An earlier plan let the scope follow the selection; it was dropped for
+this, which is deliberate and stays put while you click around. This step is
+the part under the canvas: `ask.py` and `POST /api/boards/{id}/ask`. The chat
+panel comes next.
+
+### What the model is shown
+
+**Exactly the cards in context** — not their neighbours: "exact context" was the
+request. A **group brings everything inside it**, at any depth (asked, and
+answered yes): asking about a group means asking about what it holds. Each card
+is written out with its id, its kind and the groups it sits in; links bring
+their address and excerpt, files their name, every card its note. **Pictures go
+in as pictures** — the image itself, shrunk to 1,024 px and labelled with its
+card — and a video by its cover frame. **Relationships between cards in
+context** go in verbatim, kind and label, because they are the person's own
+claims about how ideas connect.
+
+The context travels with the *newest* question, so it is always the cards in
+context now; earlier turns keep only what was said. History can only carry
+user and assistant turns — it cannot smuggle in a system message.
+
+### Two voices
+
+The rules the model answers by keep the person's map and the model's knowledge
+apart. What comes from a card is cited straight after, `[[card id]]`. Anything
+else — missing ideas, gaps, corrections, what to read — goes after a line that
+reads exactly **Beyond your board:**, uncited, because it can be wrong. If the
+cards do not answer the question, it says so first.
+
+Every citation is checked against the cards in context. One naming any other
+card is removed and **counted** — that count is the measure of how often the
+model invents a source.
+
+### The route
+
+`POST /api/boards/{id}/ask` with `{question, cards, history, think}` answers in
+server-sent events: `context` (what went in, and an estimate of its size),
+`thinking` when asked to think deeper, `text` as the words come, then `done`
+with the checked answer split into its two voices. Everything that can be known
+before the model starts is answered with a status, not a broken stream: no
+such board 404, no cards 400, too much to fit 413, still answering 409, not set
+up 503 with how to set it up.
+
+- **Too much is refused, not trimmed.** The model is started with 32k tokens;
+  if the cards, pictures and history would not leave room for an answer
+  (3k tokens, plus 8k when thinking), the person is told the size and asked to
+  take cards out — never handed an answer from a context silently cut short.
+- **One question at a time**, as the server runs one slot.
+- **Walking away stops the model.** Closing the answer closes the connection to
+  llama-server, which stops writing an answer nobody will read; the next
+  question is not told it is busy.
+- **It only reads.** Nothing here writes to the board. Saving an answer as a card
+  will be an op with `provenance: "ai"`, undoable like any other.
+
+`mindboard ai ask --board … --card … "question"` asks the same way from a
+terminal, finding boards and cards by title — the tool this step was verified
+with, and one a script (the n8n prototype of `docs/agent-n8n.md`) can use.
+
+### Two bugs the tests found
+
+- **A key that looked like a flag.** The per-start key came from
+  `token_urlsafe`, which can begin with `-`; `--api-key -abc…` is then read as a
+  flag. One start in 64 — it broke one test run in four once there were enough
+  starts. Keys are now hex. A test makes 200 keys and checks none could pass as
+  a flag.
+- **A stand-in that hung up too early.** The fake llama-server refused an
+  unkeyed request before reading its body; on Windows the client then saw
+  "connection aborted" now and again. llama-server reads first, and now so
+  does the stand-in.
+
+### Verified
+
+`tests/test_ask.py`, 15 cases against the stand-in: a group brings everything
+inside it, in order, once; only chosen cards and the relationships between them
+go in; every kind of card says what it holds and where it sits; pictures go in
+shrunk and labelled, a video by its cover; an empty context is refused; the
+context travels with the newest question and history cannot add a system
+message; too much is refused up front; invented citations are removed and
+counted; the route streams `context`, `text` and a checked `done`; thinking is
+shown; each refusal has its status; one question at a time; not set up says
+how; walking away stops the stand-in mid-answer and frees the model. The whole
+suite ran six times in a row clean.
+
+Against the real model (Qwen3.8 27B, with LM Studio holding 6 GB of the card,
+so slowly — 2–4 tokens a second, as the memory warning predicted): asked where
+the lidar should go, with *Sensors*, *Corner mount* and *Site sketch* in
+context, it cited the corner-mount card, the Lidar card from inside the group,
+and the sketch — and read *"LIDAR HERE 4.2 m"* above pole 3 from the picture
+itself. Asked what the plan is missing, it named three gaps grounded in cited
+cards (no lidar cost, an unknown number of junctions, nothing for installation)
+and put its own suggestions after *Beyond your board:*. No citation had to be
+removed in either answer. One soft spot: a cited point also carried general
+knowledge ("typically required") — the line between the voices holds, but not
+perfectly.

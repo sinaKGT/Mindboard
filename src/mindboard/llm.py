@@ -26,7 +26,7 @@ import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 from . import __version__
 
@@ -755,6 +755,10 @@ class ModelError(RuntimeError):
     """The local model could not start or answer - phrased for the person."""
 
 
+class ModelBusy(ModelError):
+    """Another question is being answered; the server runs one at a time."""
+
+
 class LocalModel:
     """One llama-server, started on first use, unloaded when idle, stopped with
     Mindboard. Thread-safe: the app's request threads share one instance."""
@@ -773,6 +777,7 @@ class LocalModel:
         self.busy = 0
         self.load_seconds = 0.0
         self._lock = threading.RLock()
+        self._asking = threading.Lock()     # one question at a time, like --parallel 1
         self._watcher: Optional[threading.Thread] = None
         atexit.register(self.stop)
 
@@ -801,7 +806,9 @@ class LocalModel:
             if self.running():
                 return
             self.port = _free_port()
-            self.key = secrets.token_urlsafe(24)
+            # hex, not urlsafe: a key that happens to start with "-" is read
+            # as another flag by the server's argument parser (1 start in 64)
+            self.key = secrets.token_hex(24)
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             log = self.log_path.open("wb")
             kw: dict = {"stdout": log, "stderr": subprocess.STDOUT,
@@ -902,6 +909,68 @@ class LocalModel:
             "tokens": timings.get("predicted_n"),
             "tokens_per_second": timings.get("predicted_per_second"),
         }
+
+
+    def stream(self, messages: list[dict], *, max_tokens: int = 1024, think: bool = False,
+               temperature: float = 0.7) -> Iterator[dict]:
+        """The answer as it is written: {"type": "thinking"|"text", "text"} for
+        each piece, then {"type": "done", ...timings}.
+
+        Closing the generator part-way closes the connection, and llama-server
+        stops generating for a question nobody is waiting on any more.
+        """
+        import httpx
+
+        if not self._asking.acquire(blocking=False):
+            raise ModelBusy("still answering the last question")
+        try:
+            self.start()
+            with self._lock:
+                self.busy += 1
+            try:
+                with httpx.stream(
+                    "POST", self.base + "/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {self.key}"},
+                    json={
+                        "messages": messages, "max_tokens": max_tokens, "stream": True,
+                        "temperature": temperature, "top_p": 0.8, "top_k": 20,
+                        "chat_template_kwargs": {"enable_thinking": think},
+                        "timings_per_token": False,
+                    },
+                    timeout=httpx.Timeout(30.0, read=600.0),
+                ) as res:
+                    if res.status_code != 200:
+                        res.read()
+                        raise ModelError(f"the local model refused the question "
+                                         f"({res.status_code}): {res.text[:300]}")
+                    timings: dict = {}
+                    for line in res.iter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        chunk = json.loads(data)
+                        timings = chunk.get("timings") or timings
+                        for choice in chunk.get("choices") or []:
+                            delta = choice.get("delta") or {}
+                            if delta.get("reasoning_content"):
+                                yield {"type": "thinking", "text": delta["reasoning_content"]}
+                            if delta.get("content"):
+                                yield {"type": "text", "text": delta["content"]}
+                    yield {"type": "done",
+                           "tokens": timings.get("predicted_n"),
+                           "tokens_per_second": timings.get("predicted_per_second"),
+                           "prompt_tokens": timings.get("prompt_n")}
+            except httpx.HTTPError as exc:
+                raise ModelError(
+                    f"the local model stopped answering ({exc.__class__.__name__})") from exc
+            finally:
+                with self._lock:
+                    self.busy -= 1
+                    self.last_used = time.time()
+        finally:
+            self._asking.release()
 
 
 # --------------------------------------------------------------- check --

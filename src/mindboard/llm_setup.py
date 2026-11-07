@@ -118,6 +118,80 @@ def run_check(console: Console) -> bool:
     return ok
 
 
+def _pick(things: list[dict], wanted: str, what: str, label=lambda t: t.get("title") or "") -> dict:
+    """By id, by exact title, or by a part of the title that names one thing."""
+    low = wanted.strip().lower()
+    for t in things:
+        if t["id"] == wanted.strip():
+            return t
+    exact = [t for t in things if label(t).strip().lower() == low]
+    if len(exact) == 1:
+        return exact[0]
+    part = [t for t in things if low in label(t).lower()]
+    if len(part) == 1:
+        return part[0]
+    if not part:
+        raise llm.SetupError(f"no {what} called {wanted!r}")
+    names = ", ".join(repr(label(t)) for t in part[:6])
+    raise llm.SetupError(f"{wanted!r} could be more than one {what}: {names}")
+
+
+def ask_in_terminal(console: Console, dd, board: str, cards: list[str], question: str,
+                    think: bool = False, every: bool = False) -> bool:
+    """Ask from the terminal - the same path as the app, without the app."""
+    from .ask import AskError, answer_events, build
+    from .boards import conn_for, list_boards
+    from .ops import read_graph
+
+    inst = llm.find_install()
+    if inst is None:
+        console.print("\n  Ask your board is not set up yet - run: mindboard ai install")
+        return False
+    try:
+        b = _pick(list_boards(dd), board, "board")
+        conn = conn_for(dd, b["id"])
+        nodes = read_graph(conn, b["id"])["nodes"]
+        chosen = ([n["id"] for n in nodes if not n.get("parent")] if every
+                  else [_pick(nodes, c, "card")["id"] for c in cards])
+        ctx = build(dd, conn, b["id"], chosen)
+    except (llm.SetupError, AskError) as exc:
+        console.print(f"\n  [red]{exc}[/red]")
+        return False
+
+    short = llm.memory_shortfall(inst)
+    if short:
+        console.print(f"\n  [yellow]![/yellow] {short[0].upper()}{short[1:]}")
+    titles = {n["id"]: n.get("title") or "Untitled" for n in nodes}
+    model = llm.LocalModel(inst)
+    console.print(f"\n  [{DIM}]Asking {inst.tier.label} about {len(ctx.cards)} card(s) on "
+                  f"{b['title']!r}, {len(ctx.pictures)} picture(s)...[/{DIM}]\n")
+    done: dict = {}
+    thinking = False
+    try:
+        for ev in answer_events(model, ctx, question, [], think):
+            if ev["event"] == "thinking" and not thinking:
+                thinking = True
+                console.print(f"  [{DIM}](thinking...)[/{DIM}]")
+            elif ev["event"] == "text":
+                console.out(ev["text"], end="", highlight=False)
+            elif ev["event"] == "done":
+                done = ev
+    except (AskError, llm.ModelError) as exc:
+        console.print(f"\n  [red]{exc}[/red]")
+        return False
+    finally:
+        model.stop()
+    console.print("\n")
+    for cid in done.get("cited", []):
+        console.print(f"  [{DIM}]cited  {titles.get(cid, cid)}  [{cid}][/{DIM}]")
+    if done.get("dropped"):
+        console.print(f"  [yellow]![/yellow] removed {len(done['dropped'])} citation(s) of "
+                      f"cards that were not in context")
+    if done.get("tokens_per_second"):
+        console.print(f"  [{DIM}]{done['tokens_per_second']:.0f} tokens a second[/{DIM}]")
+    return True
+
+
 def status(console: Console) -> None:
     inst = llm.find_install()
     home = llm.llm_home()

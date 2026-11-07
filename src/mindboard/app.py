@@ -24,7 +24,7 @@ from .bundle import (
     restore_backup,
 )
 from .ids import ulid
-from .models import BoardCreate, BoardPatch, OpsRequest
+from .models import AskRequest, BoardCreate, BoardPatch, OpsRequest
 from .ops import apply_envelopes, read_graph
 from .paths import DataDir
 
@@ -274,6 +274,88 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             raise HTTPException(404, "no thumbnail")
         return FileResponse(p, media_type="image/webp",
                             headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+    # ----------------------------------------------------------------- ask --
+    held: dict[str, Any] = {}
+    app.state.ask = held
+
+    def stop_model() -> None:
+        if held.get("model") is not None:
+            held["model"].stop()
+
+    app.router.on_shutdown.append(stop_model)
+
+    def local_model():
+        """One model for the whole app, made on first use. None until set up."""
+        from . import llm
+
+        inst = llm.find_install()
+        if inst is None:
+            return None
+        current = held.get("model")
+        if current is None or current.inst.model != inst.model:
+            if current is not None:
+                current.stop()
+            current = held["model"] = llm.LocalModel(inst)
+        return current
+
+    @app.post("/api/boards/{bid}/ask")
+    async def api_ask(bid: str, body: AskRequest):
+        """Ask the local model about exactly these cards. Streams server-sent
+        events: context, thinking, text..., then done with the checked answer.
+        Reads the board only - nothing is written."""
+        from starlette.concurrency import run_in_threadpool
+
+        from .ask import AskError, answer_events, build, check_fits
+
+        history = [t.model_dump() for t in body.history]
+
+        def prepare():
+            board_or_404(bid)
+            model = local_model()
+            if model is None:
+                raise HTTPException(503, "Ask your board is not set up yet - choose 8 in the "
+                                         "Mindboard menu, or run: mindboard ai install")
+            if model._asking.locked():
+                raise HTTPException(409, "still answering the last question")
+            try:
+                ctx = build(dd, conn_for(dd, bid), bid, body.cards)
+            except AskError as exc:
+                raise HTTPException(400, str(exc))
+            try:
+                check_fits(ctx, body.question, history, body.think)
+            except AskError as exc:
+                raise HTTPException(413, str(exc))
+            return model, ctx
+
+        model, ctx = await run_in_threadpool(prepare)
+        gen = answer_events(model, ctx, body.question, history, body.think)
+
+        def pull():
+            try:
+                return next(gen)
+            except StopIteration:
+                return None
+            except Exception as exc:     # ModelError, ModelBusy: said, not thrown
+                return {"event": "error", "message": str(exc)}
+
+        async def events():
+            try:
+                while True:
+                    item = await run_in_threadpool(pull)
+                    if item is None:
+                        break
+                    name = item.pop("event")
+                    yield f"event: {name}\ndata: {json.dumps(item)}\n\n"
+                    if name == "error":
+                        break
+            finally:
+                # the person left: closing the generator closes the model's
+                # connection, and it stops writing an answer nobody will read
+                await run_in_threadpool(gen.close)
+
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache"})
 
     # ------------------------------------------------------- import/export --
     @app.get("/api/boards/{bid}/export")

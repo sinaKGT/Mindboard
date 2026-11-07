@@ -63,3 +63,16 @@ class BoardPatch(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     settings: Optional[dict[str, Any]] = None
+
+
+class AskTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(max_length=20000)
+
+
+class AskRequest(BaseModel):
+    """A question about exactly these cards (groups bring what is inside them)."""
+    question: str = Field(min_length=1, max_length=4000)
+    cards: list[str] = Field(default_factory=list, max_length=500)
+    history: list[AskTurn] = Field(default_factory=list, max_length=40)
+    think: bool = False

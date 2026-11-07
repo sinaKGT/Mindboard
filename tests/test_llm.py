@@ -360,6 +360,23 @@ def test_serves_only_this_machine_and_only_with_its_key(tmp_path, fake_server):
     assert not model.running()
 
 
+def test_a_key_is_never_mistaken_for_a_flag(tmp_path, monkeypatch):
+    """A key starting with "-" would be read as the next flag; this broke one
+    test run in four before keys became hex."""
+    import secrets
+
+    keys = []
+    monkeypatch.setattr(llm.subprocess, "Popen",
+                        lambda args, **kw: keys.append(args[args.index("--api-key") + 1])
+                        or (_ for _ in ()).throw(OSError("stop here")))
+    model = llm.LocalModel(fake_install(tmp_path), start_timeout=1)
+    for _ in range(200):
+        with pytest.raises(OSError):
+            model.start()
+    assert keys and not any(k.startswith("-") for k in keys)
+    assert all(re.fullmatch(r"[0-9a-f]{48}", k) for k in keys)
+
+
 def test_a_new_key_every_start(tmp_path, fake_server):
     model = llm.LocalModel(fake_install(tmp_path), start_timeout=20)
     try:

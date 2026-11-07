@@ -44,10 +44,51 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"status": "ok"})
         self._send(404, {})
 
+    def _stream(self, body):
+        """Like llama-server with "stream": true. Cites the first card it was
+        shown, invents one, adds a beyond-the-board part - and notices when the
+        client hangs up."""
+        import re
+
+        parts = body["messages"][-1]["content"]
+        texts = " ".join(p.get("text", "") for p in parts if isinstance(p, dict))
+        images = sum(1 for p in parts if isinstance(p, dict) and p.get("type") == "image_url")
+        print(f"asked: images={images} messages={len(body['messages'])}", flush=True)
+        ids = re.findall(r"\[([0-9A-Za-z]{26})\]", texts)
+        first = ids[0] if ids else "NONE"
+        pieces = []
+        if (body.get("chat_template_kwargs") or {}).get("enable_thinking"):
+            pieces.append(("reasoning_content", "Let me look at the cards."))
+        pieces += [("content", "Your card says the corner mount is best "), ("content", f"[[{first}]]. "),
+                   ("content", f"Also this [[{'Z' * 26}]].\n"),
+                   ("content", "Beyond your board:\nConsider wind load.")]
+        slow = "SLOWLY" in texts
+        if slow:
+            pieces += [("content", " more")] * 400
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        try:
+            for key, text in pieces:
+                chunk = {"choices": [{"delta": {key: text}}]}
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+                self.wfile.flush()
+                if slow:
+                    time.sleep(0.02)
+            final = {"choices": [], "timings": {"predicted_n": 20, "predicted_per_second": 42.0}}
+            self.wfile.write(f"data: {json.dumps(final)}\n\ndata: [DONE]\n\n".encode())
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            print("client went away - stopped generating", flush=True)
+
     def do_POST(self):
+        # read the request before refusing it, as llama-server does - answering
+        # early and closing makes Windows abort the client mid-send
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         if self.headers.get("Authorization") != f"Bearer {args.api_key}":
             return self._send(401, {"error": {"code": 401, "message": "Invalid API Key"}})
-        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        if body.get("stream"):
+            return self._stream(body)
         last = body["messages"][-1]["content"]
         text = ("The word is MINDBOARD, beside a red circle." if isinstance(last, list)
                 else "A mind map lays out ideas and how they connect.")
