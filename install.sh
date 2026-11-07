@@ -8,15 +8,28 @@ VENV="${MINDBOARD_VENV:-.venv}"
 say()  { printf '  %s\n' "$1"; }
 fail() { printf '\n  \033[31m%s\033[0m\n' "$1"; exit 1; }
 
+# Only for a missing or broken environment: --clear says so, where newer uv
+# would otherwise ask, and answer "replace" by itself.
 new_environment() {
   if command -v uv >/dev/null 2>&1; then
     say "environment   uv -> $VENV"
-    uv venv "$VENV" >/dev/null
+    uv venv --clear "$VENV" >/dev/null
     uv pip install --quiet --python "$VENV/bin/python" -e .
   else
     say "environment   venv -> $VENV  (install uv for a faster setup)"
+    rm -rf "$VENV"
     "$PY" -m venv "$VENV"
     "$VENV/bin/python" -m pip install --quiet --upgrade pip
+    "$VENV/bin/python" -m pip install --quiet -e .
+  fi
+}
+
+# A working environment is updated, never replaced.
+update_environment() {
+  say "environment   updating $VENV"
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install --quiet --python "$VENV/bin/python" -e .
+  else
     "$VENV/bin/python" -m pip install --quiet -e .
   fi
 }
@@ -39,7 +52,7 @@ done
 [ -n "$PY" ] || fail "Python 3.10 or newer is required. Install it, then run this again."
 say "python        $($PY --version 2>&1)"
 
-new_environment
+if usable; then update_environment; else new_environment; fi
 if ! usable; then
   say "environment   did not come out usable - rebuilding it from scratch"
   rm -rf "$VENV"

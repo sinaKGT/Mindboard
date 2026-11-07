@@ -7,12 +7,18 @@ cd /d "%~dp0"
 
 set "MB=.venv\Scripts\mindboard.exe"
 
-if not exist "%MB%" (
+rem  Set up when Mindboard is missing - or present but unable to run, as a
+rem  half-finished update leaves it. Present is not the same as working.
+set "READY=0"
+if exist "%MB%" (
+  "%MB%" version >nul 2>&1 && set "READY=1"
+)
+if "%READY%"=="0" (
   echo.
-  echo   Setting Mindboard up for the first time. This takes a minute.
+  echo   Setting Mindboard up. This takes a minute.
   echo.
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
-  if not exist "%MB%" (
+  "%MB%" version >nul 2>&1 || (
     echo.
     echo   Setup did not finish - the messages above say why.
     echo.

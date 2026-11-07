@@ -379,14 +379,27 @@ def _reinstall(dd) -> None:
         console.print(f"  [red]Cannot find {script.name}[/red]")
         _pause()
         return
+    if sys.platform.startswith("win"):
+        # This menu runs from the environment the installer updates, and Windows
+        # will not replace a program that is running. Run inside it, the
+        # installer half-deleted .venv and stopped. So hand over: the installer
+        # gets its own window and waits for this one to close.
+        try:
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit",
+                 "-File", str(script)],
+                cwd=root, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        except Exception as exc:
+            console.print(f"  [red]Could not start the installer: {exc}[/red]")
+            _pause()
+            return
+        console.print("  The installer has opened in its own window.")
+        console.print(f"  [{DIM}]This window closes now so it can update Mindboard."
+                      f" Start Mindboard again when it says it is done.[/{DIM}]\n")
+        raise SystemExit(0)
     console.print(f"  Running [bold]{script.name}[/bold] ...\n")
     try:
-        if sys.platform.startswith("win"):
-            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                   "-File", str(script)]
-        else:
-            cmd = ["bash", str(script)]
-        subprocess.run(cmd, cwd=root, check=False)
+        subprocess.run(["bash", str(script)], cwd=root, check=False)
     except Exception as exc:
         console.print(f"\n  [red]Could not run the installer: {exc}[/red]")
     _pause()

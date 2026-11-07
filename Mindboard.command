@@ -6,12 +6,16 @@ cd "$(dirname "$0")"
 VENV="${MINDBOARD_VENV:-.venv}"
 MB="$VENV/bin/mindboard"
 
-if [ ! -x "$MB" ]; then
-  printf '\n  Setting Mindboard up for the first time. This takes a minute.\n\n'
+# set up when missing - or present but unable to run, as a half-finished
+# update leaves it
+ready() { [ -x "$MB" ] && "$MB" version >/dev/null 2>&1; }
+
+if ! ready; then
+  printf '\n  Setting Mindboard up. This takes a minute.\n\n'
   ./install.sh || true
 fi
 
-if [ ! -x "$MB" ]; then
+if ! ready; then
   printf '\n  Setup did not finish - the messages above say why.\n\n'
   read -r -p "  press Enter to close "
   exit 1
