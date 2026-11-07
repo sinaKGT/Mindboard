@@ -99,6 +99,47 @@ Beside them, an `opened` folder holds the read-only copies handed to your PDF
 reader. They are only copies: `mindboard gc` clears them, and nothing is lost if
 you delete the folder.
 
+## Ask your board — the local model
+
+Ask your board runs a language model **on this computer**, through llama.cpp,
+reading pictures as well as text. Setting it up is a one-time download; after
+that, asking a board never uses the internet.
+
+It picks the largest model that fits your graphics card whole — a model that
+fits answers several times faster than a bigger one that spills over:
+
+| Size | Model | Download | For |
+|---|---|---|---|
+| large | Qwen3.8 27B | 15.2 GB | a 16 GB graphics card, or a Mac with 24 GB or more |
+| medium | Qwen3.5 9B, full quality | 10.4 GB | a 12 GB card |
+| small | Qwen3.5 9B, compact | 6.6 GB | an 8 GB card, or a 16 GB Mac |
+| light | Qwen3.5 4B | 3.4 GB | any computer, graphics card or not |
+
+It tells you what it found and what it picked before downloading anything;
+`--model <size>` chooses another.
+
+Menu option **8**, or from a terminal:
+
+```
+mindboard ai install      # says what it found, what it will download, and asks first
+mindboard ai check        # loads the model, asks it something, shows it a picture
+mindboard ai status       # what is installed, and where
+```
+
+Every file is pinned — exact address, size and SHA-256 — and checked as it
+arrives; anything that does not match is deleted, never used. An interrupted
+download carries on where it stopped. It all lives in `.llm/` in this folder,
+not among your boards, so backups stay small.
+
+An NVIDIA card gets the CUDA build, other cards the Vulkan build, a Mac with
+Apple silicon the Metal build, and a computer without a card the processor
+build. The model loads when first asked, unloads after 20 minutes without
+questions, and always stops with Mindboard.
+
+**If answers are slow:** another program running a model (Ollama, LM Studio)
+may be holding the graphics card — the check says so by name. On a laptop, a
+quiet or battery-saving power mode can hold the card to a fraction of its speed.
+
 ## Backing up
 
 Menu options **2** and **3**, or from a terminal:
@@ -137,6 +178,10 @@ mindboard delete <board-id>
 mindboard doctor        # check the install
 mindboard gc            # drop media no node references
 mindboard where         # print the data directory
+
+mindboard ai install    # set up Ask your board (one-time download)
+mindboard ai check      # test the local model
+mindboard ai status
 ```
 
 ## Developing

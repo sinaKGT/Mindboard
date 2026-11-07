@@ -13,3 +13,5 @@ src/mindboard/web/*
 *.mindboard
 backups/
 mindboard-backup-*.zip
+# the local model and its runtime (mindboard ai install): ~15 GB, never committed
+.llm/

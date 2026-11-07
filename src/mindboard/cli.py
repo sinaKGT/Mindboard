@@ -395,6 +395,53 @@ def version():
     typer.echo(__version__)
 
 
+# --------------------------------------------------------------------------- #
+# ask your board: the local model
+# --------------------------------------------------------------------------- #
+
+ai_app = typer.Typer(no_args_is_help=True,
+                     help="Ask your board - the local model it runs on this computer.")
+app.add_typer(ai_app, name="ai")
+
+
+def _console():
+    from rich.console import Console
+
+    return Console(highlight=False)
+
+
+@ai_app.command("install")
+def ai_install(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before downloading."),
+    model: str = typer.Option("auto", "--model",
+                              help="auto (sized for this computer), large, medium, small or light."),
+    backend: str = typer.Option("auto", "--backend",
+                                help="auto, cuda, vulkan, metal or cpu."),
+):
+    """Download llama.cpp and a model sized for this computer, check every file, test it."""
+    from .llm_setup import setup
+
+    ok = setup(_console(), lambda q: yes or typer.confirm(f"  {q}", default=False),
+               backend, model)
+    raise typer.Exit(0 if ok else 1)
+
+
+@ai_app.command("check")
+def ai_check():
+    """Load the model, ask it a question and show it a picture."""
+    from .llm_setup import run_check
+
+    raise typer.Exit(0 if run_check(_console()) else 1)
+
+
+@ai_app.command("status")
+def ai_status():
+    """Say whether Ask your board is set up, and where."""
+    from .llm_setup import status
+
+    status(_console())
+
+
 def main() -> None:
     app()
 

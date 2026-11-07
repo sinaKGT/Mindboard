@@ -95,6 +95,7 @@ OPTIONS = [
     ("5", "Check the install", ""),
     ("6", "Open the data folder", ""),
     ("7", "Reinstall / update", ""),
+    ("8", "Ask your board", "set up the local model, or check it"),
     ("q", "Quit", ""),
 ]
 
@@ -397,7 +398,7 @@ def run_menu(data_dir: Optional[str] = None) -> None:
     dd = resolve_data_dir(data_dir)
     actions = {"1": _open_app, "2": _backup, "3": _restore,
                "4": _boards, "5": _check, "6": lambda d: _open_data(d),
-               "7": _reinstall}
+               "7": _reinstall, "8": _ask_your_board}
     while True:
         choice = _menu(dd)
         if choice in ("q", "quit", "exit"):
@@ -410,6 +411,18 @@ def run_menu(data_dir: Optional[str] = None) -> None:
             action(dd)
         except KeyboardInterrupt:
             continue
+
+
+def _ask_your_board(dd) -> None:
+    """Set the local model up the first time; check it every time after."""
+    from .llm import find_install
+    from .llm_setup import run_check, setup
+
+    if find_install() is None:
+        setup(console, lambda q: _yes(q, False))
+    else:
+        run_check(console)
+    _pause()
 
 
 def _open_data(dd) -> None:

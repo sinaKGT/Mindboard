@@ -1317,3 +1317,161 @@ handling became shared.
 **Not verified here:** an actual reader window. That needs the real opener on a
 real desktop — including whether Windows lets the reader come to the front, or
 opens it behind the browser.
+
+---
+
+## 23. A model on this computer (v2, 2026-11-04)
+
+Ask your board answers from the person's own cards — text and pictures both —
+and points out what their thinking is missing. It needs a language model, and
+the rule that nothing leaves the machine (§1) means that model runs here. This
+step installs it and proves it answers; nothing on the canvas uses it yet.
+
+### Which model: the largest that fits the computer it is on
+
+Asked for first: "Qwen3 9B". There is no Qwen3 9B (Qwen3 has an 8B; the 9B is
+Qwen3.5-9B), and by now Qwen has shipped Qwen3.6 and Qwen3.8. Then: the best
+quality possible. And then the correction that settled it — *anyone* will use
+this, not one laptop. A single model sized for a 16 GB card is right for very
+few computers and miserable on the rest.
+
+The rule that decides it: **a model held whole in graphics memory is fast; one
+that spills into system RAM reads its spilled layers at RAM speed**, several
+times slower. A smaller model that fits beats a larger one that does not. So
+Mindboard ships four pinned sizes and installs the largest that fits:
+
+| Size | Model | Download | For |
+|---|---|---|---|
+| large | Qwen3.8-27B, IQ4_XS | 15.2 GB | a 16 GB card; a Mac with 24 GB or more |
+| medium | Qwen3.5-9B, Q8_0 | 10.4 GB | a 12 GB card; an 18 GB Mac |
+| small | Qwen3.5-9B, Q4_K_M | 6.6 GB | an 8 GB card; a 16 GB Mac |
+| light | Qwen3.5-4B, Q4_K_M | 3.4 GB | everything else, graphics card or not |
+
+All four are one family — one architecture, one chat template, all of them
+read pictures — so everything built on top behaves the same on each; only
+depth and speed differ. All Apache-2.0. The 27B (August 2026) is three times
+the 9B and newer, and finding what a map is *missing* leans on what the model
+itself knows, which is where size pays. Thresholds sit just under each class of
+card as its driver reports it: a "16 GB" card shows about 15.9 GiB.
+
+**Sizing happens before anything downloads**, so the person sees the choice and
+why: NVIDIA cards through `nvidia-smi`; other cards on Windows through the
+registry's `qwMemorySize` (WMI's `AdapterRAM` cannot count past 4 GB); AMD on
+Linux through sysfs; a Mac as two thirds of its memory, which is what macOS lets
+its graphics use. Anything under 2 GB is a processor's built-in graphics
+borrowing system memory, and counts as no card. If the guess is off, llama.cpp's
+`--fit` still places what fits; the model only runs slower than it could.
+`--model <size>` overrides the choice.
+
+Turned down along the way: Q6_K of the 27B (22 GB — slightly better answers at
+about a quarter of the speed on a 16 GB card); Qwen3.8-Flash-Next (180B, not
+Apache, fits nothing ordinary); Qwen3.6-35B-A3B (fast, but older, with 3B
+parameters active per token). The files are unsloth's community GGUFs — Qwen
+publishes none for these — so each is pinned by commit and checksum rather than
+trusted by name.
+
+**Someone else may hold the card.** Ollama, LM Studio and games all use the same
+memory. The model still loads, slowly; so before loading, `memory_shortfall`
+compares free graphics memory with what this size needs and says so in words —
+*"only 3.6 GB of graphics memory is free and this model wants 14.8 GB — LM
+Studio and Ollama are using the rest"* — naming programs that run models, not a
+browser holding a sliver. That sentence is the real one, from the machine this
+was built on, while Ollama was busy.
+
+### Installing: pinned, verified, resumable, never automatic
+
+`llm.py` names every file: one llama.cpp build (`b12102`) per kind of computer,
+the model, and its vision part, each with exact URL, byte size and SHA-256. The
+model is fetched from a fixed commit of its repository, never `main`; llama.cpp
+from a fixed build, never `latest`. Updating either is a change to that file.
+
+- **Nothing downloads unless asked.** Only `mindboard ai install` or menu
+  option 8 does, and both list what will come down, from where, and ask first.
+  Opening a board never touches the network.
+- **Hashed as it arrives, renamed only once it checks out.** A file goes to
+  `<name>.part`; a mismatch is deleted, not kept. A cut-off download is kept
+  and resumed with an HTTP `Range` request; if a server ignores the range, the
+  file starts over rather than being stitched together wrong.
+- **Checked once, not every start.** A `.sha256` mark records that a file was
+  verified, so a 14 GB model is not re-hashed each time it loads.
+- **Its own folder, beside the install.** `.llm/` in a source checkout
+  (gitignored), the data folder for an installed package, `MINDBOARD_LLM_DIR`
+  over both. Not among the boards: backups never carry 15 GB of model.
+- **The right build for the hardware.** CUDA for an NVIDIA card — its runtime
+  ships in a second archive and is unpacked beside the server, so nothing is
+  installed system-wide — Metal on Apple silicon, Vulkan for any other card,
+  the processor otherwise. Only the CUDA path has run for real.
+
+### Running: a separate process, on a short lead
+
+llama-server is its own process, not a library inside Mindboard: a model that
+runs out of memory takes down that process, not the app and its boards.
+
+- **127.0.0.1, a free port, a fresh key every start.** Localhost is not a trust
+  boundary (§6), so the server demands a key no other process can know. Its
+  built-in chat page and its slot monitor are switched off.
+- **Loaded when first needed, unloaded after 20 idle minutes**, so the card's
+  memory is not held all day for a question asked at breakfast.
+- **It dies with Mindboard, however Mindboard dies.** This is the trap: kill
+  Mindboard outright — a crash, the launcher window closed with its ✕ — and a
+  child process holding 15 GB of graphics memory would run on, owned by
+  nobody. On Windows the server joins a job object marked kill-on-close; the
+  handle is held by Mindboard alone, so when Mindboard goes, for any reason,
+  Windows takes the server with it. On Linux the child asks for SIGTERM on its
+  parent's death. A test kills a process holding a server outright and checks
+  the server is gone; run with the job object switched off, the same test
+  leaves the server running — so it tests the fix, not just itself.
+- **Layers are left to `--fit`.** llama.cpp places as many layers on the card as
+  fit beside the chosen context (32k tokens, KV cache in q8_0) and only adjusts
+  what is not set by hand — so `--n-gpu-layers` is deliberately not passed.
+- **The vision part runs on the processor.** On the card its ~0.9 GB would push
+  layers of the model itself off it, which slows every answer; on the
+  processor it slows only the reading of a picture.
+
+A trap in the tests, recorded because it nearly gave a false pass: on Windows a
+venv's `python.exe` is a launcher that starts the real interpreter as a second
+process. Killing "the process" in a test then kills the launcher, and a test
+about orphaned children measures the wrong child. The crash test runs on the
+base interpreter so that each piece is one process, as llama-server is.
+
+### Verified
+
+`tests/test_llm.py`, 37 cases, none of which downloads anything or loads a
+model — downloads run through a fake transport, and llama-server is played by
+`tests/fake_llama_server.py`, which takes the same flags and answers the same
+endpoints. Pinned files are exact and never float; sizes run largest first and
+each fits the card it is for; folders never hold two different files of one
+name; the size chosen for nine typical computers (16, 24, 12, 8 and 6 GB cards,
+none, and 32, 16 and 8 GB Macs); the biggest of several NVIDIA cards is read;
+built-in graphics do not count; a fresh download is checked and marked; a
+partial one resumes with `Range`; a server that ignores the range starts the
+file over; a wrong file is deleted; an archive cannot write outside its folder;
+a full disk is refused before anything starts; the CUDA runtime lands beside the
+server; the server listens on 127.0.0.1 only, demands its key, has a new key
+each start, explains a failed load, unloads when idle, and dies when the process
+holding it is killed outright; the memory warning names Ollama and not a
+browser; the setup screen draws for every size, with and without a card.
+
+That last test exists because the screen crashed the first time it was drawn
+for real: a closing markup tag written without its `f` prefix, on exactly the
+path a first-time person takes. Nothing had drawn that screen with downloads
+still to do.
+
+On the machine this was built on (RTX 5080 Laptop, 16 GB): `large` chosen; 15.8
+GB downloaded in 383 s with every checksum matching and the archives removed
+afterwards; the model loads in 12 s, answers, and reads the test picture — *"The
+word "MINDBOARD" is written next to a red circle"* — in 1.6 s.
+
+**A lesson about laptops, recorded because it looks like a Mindboard problem.**
+The first check measured 11–13 tokens a second, a fifth of what the card
+should manage. llama.cpp's own benchmark with every layer forced onto the card
+gave the same 11.3, so nothing had been placed on the processor. Sampling the
+card while it worked showed why: 55 W, the cores at 320–390 MHz of a possible
+3,090, the driver reporting a software power cap. The laptop was in its maker's
+*Silent* profile. A laptop's power mode can hold its graphics card to a fraction
+of its speed, and that is the person's setting, not Mindboard's to change.
+
+**Not verified:** speed at full power on that machine (the card was busy with
+Ollama when the profile changed, and a measurement beside it would have measured
+the competition); the Vulkan, Metal and processor builds; the `medium`,
+`small` and `light` sizes in use; sizing on AMD, Intel and Apple hardware.
