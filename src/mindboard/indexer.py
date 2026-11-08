@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from .boards import conn_for
 from .ops import read_graph
 from .paths import DataDir
-from .search_index import BoardIndex
+from .search_index import BoardIndex, PictureNotes, picture_of
 
 log = logging.getLogger("mindboard.indexer")
 
@@ -37,9 +37,12 @@ class Indexer:
     when it is not installed - then there is nothing to do."""
 
     def __init__(self, dd: DataDir, embedder: Callable[[], Optional[object]],
-                 quiet: float = QUIET, batch: int = BATCH):
+                 quiet: float = QUIET, batch: int = BATCH,
+                 describer: Optional[Callable[[], Optional[object]]] = None):
         self.dd = dd
         self.embedder = embedder
+        # the chat model, to describe pictures - only while it is loaded anyway
+        self.describer = describer
         self.quiet = quiet
         self.batch = batch
         self._wanted: dict[str, float] = {}       # board -> when it was last asked for
@@ -123,11 +126,41 @@ class Indexer:
             return                                  # the board is gone
         nodes = {n["id"]: n for n in read_graph(conn, bid)["nodes"]}
         index = BoardIndex.get(self.dd, bid)
-        index.sync_text(nodes, row["revision"], model.inst.embedder.name)
+        notes = PictureNotes.get(self.dd)
+        index.sync_text(nodes, row["revision"], model.inst.embedder.name, notes.notes)
         try:
             # stop between batches if the board changed again: it is back in
             # the queue, and its next round starts from the new cards
             while index.pending() and not self._changed_again(bid):
                 index.embed_some(model, self.batch)
+            if self._describe(bid, conn, nodes, notes):
+                index.sync_text(nodes, row["revision"], model.inst.embedder.name, notes.notes)
+                while index.pending() and not self._changed_again(bid):
+                    index.embed_some(model, self.batch)
         finally:
             index.flush()
+
+    def _describe(self, bid: str, conn, nodes: dict, notes: PictureNotes) -> bool:
+        """Describe the board's pictures not yet described (DESIGN.md 38) -
+        only while the chat model is loaded anyway, so opening a board never
+        loads it, and never while it answers a question: then it stops, and
+        the next round carries on. True if any were described."""
+        from .ask import describe_picture
+
+        chat = self.describer() if self.describer else None
+        if chat is None or not chat.running():
+            return False
+        todo = list(dict.fromkeys(s for n in nodes.values()
+                                  if (s := picture_of(n)) and s not in notes.notes))
+        done = False
+        for sha in todo:
+            if self._changed_again(bid) or not chat._asking.acquire(blocking=False):
+                break
+            try:
+                text = describe_picture(chat, self.dd, conn, bid, sha)
+            finally:
+                chat._asking.release()
+            if text:
+                notes.put(sha, text)
+                done = True
+        return done

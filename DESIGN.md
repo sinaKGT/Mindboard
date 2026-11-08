@@ -2358,3 +2358,30 @@ It never judged a question "broad". So the planner is not used, and its code
 was removed; search was split into `score` and `fit` on the way, which stays.
 Worth trying again only with a test set where multi-part questions matter
 more, or a planner that leaves simple questions alone.
+
+## 38. Pictures found by what they show (2026-11-08)
+
+A picture card was found only by its title and caption, though the 9B reads
+pictures. Now each picture is described once - what it shows, the words and
+numbers written in it, what kind of picture it is - and the description joins
+the card's searchable text: its keywords, its meaning vector and what the
+reranker reads.
+
+- **Derived, not written to the board.** Descriptions are kept by picture
+  hash in `<data>/search/pictures.json` (`search_index.PictureNotes`), beside
+  the indexes - like the vectors, regenerated if deleted, never exported,
+  never an op. Your cards are unchanged.
+- **Made by the background indexer, with the chat model - only while it is
+  loaded anyway** and not answering: opening a board never loads a 10 GB
+  model, and a question never waits behind a description. After each answer
+  the board is queued again, so its pictures are described in the moments
+  the model is idle. A new description re-indexes the text and gives its card
+  a new vector.
+
+Measured on *RAG Deep Knowledge*: 43 pictures described in 83 s (1.9 s each).
+The descriptions read the text inside screenshots ("a comparison table titled
+'Bi-Encoder vs. Cross-Encoder: The Core Difference'"). "Where basic RAG
+breaks: symptoms and likely causes" now finds *Common RAG Problems and
+Provided Solution* first - a card whose content is only its picture, and was
+not in the top three before; "RRF score formula" moves *What is RRF* to first.
+176 tests.

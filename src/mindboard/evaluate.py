@@ -131,7 +131,7 @@ def _read_only(index, q, nodes, edges, cost, embedder, reranker):
     fused, _, _ = retrieve.candidates(index, q, embedder)
     pool = [i for i in retrieve.ranked(fused) if i in nodes][:reranker.capacity()]
     said = retrieve.relations(nodes, edges)
-    docs = [retrieve.linked_passage(card_passage(card_fields(nodes[i], nodes)),
+    docs = [retrieve.linked_passage(card_passage(card_fields(nodes[i], nodes, index.notes)),
                                     said.get(i, []))[:retrieve.DOC_CHARS] for i in pool]
     read = dict(zip(pool, reranker.rerank(q[-retrieve.QUERY_CHARS:], docs)))
     ranked = retrieve.ranked(read)

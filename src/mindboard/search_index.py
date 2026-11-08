@@ -73,13 +73,58 @@ def phrases(question: str) -> list[list[str]]:
     return unique
 
 
-def card_fields(node: dict, nodes: dict[str, dict]) -> dict[str, str]:
+def picture_of(node: dict) -> Optional[str]:
+    """The picture a card shows - an image, or a video's cover - by its hash."""
+    c = node.get("content") or {}
+    return c.get("sha256") if node.get("type") == "image" else (
+        c.get("poster") if node.get("type") == "video" else None)
+
+
+class PictureNotes:
+    """What each picture shows, in words, by the picture's hash (DESIGN.md 38):
+    written once by the local model (indexer.py), so a picture is found by what
+    is in it, not only by its title. Derived like the vectors - kept beside the
+    search indexes in `<data>/search/pictures.json`, never in a board, and
+    regenerated if deleted."""
+
+    _all: dict[str, "PictureNotes"] = {}
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._lock = threading.Lock()
+        try:
+            self.notes: dict[str, str] = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.notes = {}
+
+    @classmethod
+    def get(cls, dd: DataDir) -> "PictureNotes":
+        key = str(dd.root / "search" / "pictures.json")
+        with _registry:
+            if key not in cls._all:
+                cls._all[key] = cls(Path(key))
+            return cls._all[key]
+
+    def put(self, sha: str, text: str) -> None:
+        with self._lock:
+            self.notes = {**self.notes, sha: text}
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.notes), encoding="utf-8")
+            tmp.replace(self.path)
+
+
+def card_fields(node: dict, nodes: dict[str, dict],
+                notes: Optional[dict[str, str]] = None) -> dict[str, str]:
     c = node.get("content") or {}
     trail, cur = [], nodes.get(node.get("parent") or "")
     while cur:
         trail.insert(0, cur.get("title") or "")
         cur = nodes.get(cur.get("parent") or "")
     body = [str(c.get(k) or "") for k in ("text", "summary", "excerpt", "alt", "filename", "url")]
+    seen = (notes or {}).get(picture_of(node) or "")
+    if seen:
+        body.append(f"Picture shows: {seen}")
     return {"title": node.get("title") or "", "body": "\n".join(b for b in body if b),
             "path": " / ".join(t for t in trail if t)}
 
@@ -132,6 +177,8 @@ class BoardIndex:
         self._passages: Optional[dict[str, str]] = None
         self._wanted: dict[str, str] = {}
         self._snapshot: Optional[tuple[list[str], np.ndarray]] = None
+        self.notes: dict[str, str] = {}          # pictures' descriptions (PictureNotes)
+        self._notes_key = ""
         self._lock = threading.RLock()
         self._dirty = False
         self._saved_at = 0.0
@@ -207,20 +254,30 @@ class BoardIndex:
         return self._matrix()[1]
 
     # ------------------------------------------------------------- sync --
-    def sync_text(self, nodes: dict[str, dict], revision: int, model: Optional[str] = None) -> None:
+    def sync_text(self, nodes: dict[str, dict], revision: int, model: Optional[str] = None,
+                  notes: Optional[dict[str, str]] = None) -> None:
         """Bring the text index up to the board's revision and note which cards
         need a vector. Fast enough for every question. `model` is the embedding
         model in use: a different one makes every vector stale, as vectors from
-        two models cannot be compared; None leaves the vectors as they are."""
+        two models cannot be compared; None leaves the vectors as they are.
+        `notes` are the pictures' descriptions (PictureNotes): a new one
+        re-indexes the text, and its card gets a new vector."""
         with self._lock:
             if model is not None and model != self.model:
                 self._vectors, self.hashes, self.model = {}, {}, model
                 self._snapshot, self._dirty = None, True
+            if notes is not None:
+                self.notes = notes
+            shown = sorted((s, self.notes[s]) for n in nodes.values()
+                           if (s := picture_of(n)) and s in self.notes)
+            notes_key = hashlib.sha1(json.dumps(shown).encode("utf-8")).hexdigest()
             if (revision == self.revision and self.index is not None
-                    and self._passages is not None):
+                    and self._passages is not None and notes_key == self._notes_key):
                 return
-            fields = {nid: card_fields(n, nodes) for nid, n in nodes.items()}
-            if revision != self.revision or self.index is None:
+            fields = {nid: card_fields(n, nodes, self.notes) for nid, n in nodes.items()}
+            if (revision != self.revision or self.index is None
+                    or notes_key != self._notes_key):
+                self._notes_key = notes_key
                 self.text_dir.mkdir(parents=True, exist_ok=True)
                 index = tantivy.Index(_schema(), path=str(self.text_dir), reuse=True)
                 writer = index.writer(heap_size=30_000_000, num_threads=1)
@@ -280,9 +337,10 @@ class BoardIndex:
                         self._save()
         return len(self.pending())
 
-    def sync(self, nodes: dict[str, dict], revision: int, embedder, model: str) -> None:
+    def sync(self, nodes: dict[str, dict], revision: int, embedder, model: str,
+             notes: Optional[dict[str, str]] = None) -> None:
         """Text and every vector, now - for the terminal, the evaluator, tests."""
-        self.sync_text(nodes, revision, model if embedder is not None else None)
+        self.sync_text(nodes, revision, model if embedder is not None else None, notes)
         if embedder is not None:
             while self.embed_some(embedder, 64):
                 pass

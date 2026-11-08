@@ -18,7 +18,7 @@ from typing import Any, Iterator, Optional
 
 from . import retrieve
 from .assets import resolve
-from .search_index import BoardIndex
+from .search_index import BoardIndex, PictureNotes
 from .ops import read_graph
 from .paths import DataDir
 
@@ -205,11 +205,12 @@ def board_index(dd: DataDir, conn: sqlite3.Connection, bid: str, nodes: dict[str
     row = conn.execute("SELECT revision FROM board WHERE id=?", (bid,)).fetchone()
     revision = row["revision"] if row else 0
     index = BoardIndex.get(dd, bid)
+    notes = PictureNotes.get(dd).notes
     try:
         if not background:
-            index.sync(nodes, revision, embedder, embed_model)
+            index.sync(nodes, revision, embedder, embed_model, notes)
         else:
-            index.sync_text(nodes, revision, embed_model if embedder is not None else None)
+            index.sync_text(nodes, revision, embed_model if embedder is not None else None, notes)
             if embedder is not None and 0 < len(index.pending()) <= EMBED_NOW:
                 index.embed_some(embedder, EMBED_NOW)
     except Exception:
@@ -463,3 +464,23 @@ def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
     return {"title": title, "text": text,
             "link_to": link if link in cards else (cards[0] if cards else ""),
             "kind": kind if kind in DRAFT_KINDS else "relates"}
+
+
+# ------------------------------------------------------------ pictures --
+
+DESCRIBE = ("Describe this picture for a search index, in 1-3 plain sentences: what it "
+            "shows, any words or numbers written in it, and what kind of picture it is "
+            "(photo, diagram, screenshot, chart). No preamble.")
+
+
+def describe_picture(model, dd: DataDir, conn: sqlite3.Connection, bid: str, sha: str) -> str:
+    """What a picture shows, in words, for search (DESIGN.md 38). "" when the
+    picture cannot be read."""
+    got = _picture(dd, conn, bid, sha)
+    if got is None:
+        return ""
+    reply = model.chat([{"role": "user", "content": [
+        {"type": "text", "text": DESCRIBE},
+        {"type": "image_url", "image_url": {"url": got[0]}}]}],
+        max_tokens=160, think=False, temperature=0.2)
+    return " ".join(str(reply.get("text") or "").split())[:600]

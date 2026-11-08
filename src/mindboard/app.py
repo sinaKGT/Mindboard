@@ -330,7 +330,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     # each change - so a question never waits for it (indexer.py)
     from .indexer import Indexer
 
-    indexer = Indexer(dd, lambda: search_model("embed"))
+    # it describes pictures with the chat model, but only while that is loaded
+    indexer = Indexer(dd, lambda: search_model("embed"), describer=lambda: held.get("model"))
     app.state.indexer = indexer
 
     @app.post("/api/boards/{bid}/ask/draft")
@@ -406,6 +407,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 pieces.put({"event": "error", "message": str(exc)})
             finally:
                 pieces.put(None)
+                # the model is loaded and free now: a moment to describe pictures
+                indexer.want(bid)
 
         threading.Thread(target=produce, daemon=True, name="mindboard-ask").start()
 

@@ -502,3 +502,72 @@ def test_drafting_writes_nothing_to_the_board(client, board, cards, model):
     assert set(res.json()) == {"title", "text", "link_to", "kind"}
     after = client.get(f"/api/boards/{board['id']}/graph", headers={"X-Mindboard-Token": TOKEN}).json()
     assert after["revision"] == before["revision"]
+
+
+# --------------------------------------------------------------- pictures --
+
+class Seeing:
+    """The chat model as the indexer sees it: loaded, one question at a time,
+    and a picture described as whatever it was told to say."""
+
+    def __init__(self, said="A site plan showing junction 4 and a red pole.", running=True):
+        import threading as th
+        self.said, self._running, self.asked = said, running, 0
+        self._asking = th.Lock()
+
+    def running(self):
+        return self._running
+
+    def chat(self, messages, **kw):
+        self.asked += 1
+        assert any(p.get("type") == "image_url" for p in messages[-1]["content"]), "it is shown the picture"
+        return {"text": self.said}
+
+
+class Embeds:
+    def __init__(self):
+        from types import SimpleNamespace
+        self.inst = SimpleNamespace(embedder=SimpleNamespace(name="m"))
+
+    def embed(self, texts):
+        return [[1.0, float(len(t) % 7), 0.0] for t in texts]
+
+
+def test_a_picture_is_found_by_what_it_shows(dd, board, cards):
+    from mindboard.search_index import BoardIndex, PictureNotes, picture_of
+
+    nodes = nodes_of(dd, board)
+    sha = picture_of(nodes[cards["plan"]])
+    PictureNotes.get(dd).put(sha, "a red pole beside junction 4")
+    index = BoardIndex.get(dd, board["id"])
+    index.sync(nodes, 1, None, "", PictureNotes.get(dd).notes)
+    assert cards["plan"] in index.keyword("red pole")
+    BoardIndex.drop(dd, board["id"])
+    assert PictureNotes(PictureNotes.get(dd).path).notes[sha] == "a red pole beside junction 4", "kept"
+
+
+def test_pictures_are_described_only_while_the_model_is_loaded_and_free(dd, board, cards):
+    from mindboard.indexer import Indexer
+    from mindboard.search_index import BoardIndex, PictureNotes
+
+    asleep = Seeing(running=False)
+    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: asleep)
+    try:
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert asleep.asked == 0, "opening a board never loads the chat model"
+        busy = Seeing()
+        busy._asking.acquire()                      # answering a question
+        indexer.describer = lambda: busy
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert busy.asked == 0, "a question is never kept waiting"
+        free = Seeing()
+        indexer.describer = lambda: free
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert free.asked == 2, "the site plan and the video's cover, once each"
+        assert len(PictureNotes.get(dd).notes) == 2
+        assert cards["plan"] in BoardIndex.get(dd, board["id"]).keyword("red pole")
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert free.asked == 2, "never described twice"
+    finally:
+        indexer.stop()
+        BoardIndex.drop(dd, board["id"])

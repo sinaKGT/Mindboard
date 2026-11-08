@@ -181,7 +181,9 @@ while there is room, and give it back when the main model needs it.
 A board learns the meaning of its cards in the background — when you open it,
 and a moment after each change — so asking never waits for it, however big
 the board. Until it is done, cards are still found by their words and links,
-and the panel says how far it has got.
+and the panel says how far it has got. Pictures are described in words once,
+while the model is loaded anyway, so a screenshot is found by what is written
+in it — the descriptions are kept with the search index, not in your cards.
 
 To measure how well search finds the right cards, write a test set — questions
 about a board, each with the cards a good search returns — into

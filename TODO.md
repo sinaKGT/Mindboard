@@ -19,11 +19,11 @@ Planning before searching made search worse on the test set (MRR 0.94 ->
 a test set rich in multi-part questions, or a planner that leaves simple
 questions alone.
 
-## 3. Pictures that can be searched
+## 3. Pictures that can be searched - done (DESIGN.md §38)
 
-Describe each picture once (the 9B reads pictures) and keep the description
-with the card, so a picture's content can be found by search — today only its
-title and caption are searchable.
+Each picture is described once by the 9B while it is loaded anyway; the
+description is searchable. Not done: giving the descriptions to the answering
+model for pictures left out of a question (it sees the pictures it is sent).
 
 ## 4. A fast canvas for big levels - mostly done (DESIGN.md §35-36)
 

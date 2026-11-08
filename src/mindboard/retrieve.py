@@ -173,7 +173,8 @@ def linked_passage(base: str, said: list[str], limit: int = 8) -> str:
 
 
 def rerank_and_spread(question: str, fused: dict[str, float], nodes: dict[str, dict],
-                      edges: list[dict], reranker: Reranker) -> dict[str, float]:
+                      edges: list[dict], reranker: Reranker,
+                      notes: Optional[dict[str, str]] = None) -> dict[str, float]:
     """Stages 2 and 3: read the candidates, spread from the best read.
 
     Measured against the alternatives on a test set (DESIGN.md 31): reranking
@@ -184,7 +185,7 @@ def rerank_and_spread(question: str, fused: dict[str, float], nodes: dict[str, d
     spread = graph_rank(top(fused, SEEDS), nodes, edges)
     pool = list(dict.fromkeys(ranked(fused)[:n] + ranked(spread)[:n]))
     said = relations(nodes, edges)
-    docs = [linked_passage(card_passage(card_fields(nodes[i], nodes)), said.get(i, []))[:DOC_CHARS]
+    docs = [linked_passage(card_passage(card_fields(nodes[i], nodes, notes)), said.get(i, []))[:DOC_CHARS]
             for i in pool]
     read = dict(zip(pool, reranker.rerank(question.strip()[-QUERY_CHARS:], docs)))
     return fuse(ranked(read), ranked(graph_rank(top(read, SEEDS), nodes, edges)))
@@ -239,7 +240,7 @@ def score(index: BoardIndex, question: str, nodes: dict[str, dict], edges: list[
     scored: Optional[dict[str, float]] = None
     if reranker is not None:
         try:
-            scored = rerank_and_spread(question, fused, nodes, edges, reranker)
+            scored = rerank_and_spread(question, fused, nodes, edges, reranker, index.notes)
             used.append("a close reading along your links")
         except Exception:              # the reranker failed: the walk still answers
             scored = None
