@@ -12,7 +12,7 @@ import {
   wrapSelection,
 } from './actions'
 import { AskPanel } from './AskPanel'
-import { useAsk } from './askStore'
+import { revealCard, useAsk } from './askStore'
 import { edgeTypes } from './edges'
 import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
@@ -124,6 +124,11 @@ function CanvasInner() {
 
   // each board has its own context and conversation, kept in the tab
   useEffect(() => { useAsk.getState().load(boardId) }, [boardId])
+  // arriving from an expert's citation: go to that card once the board is here
+  useEffect(() => {
+    const want = sessionStorage.getItem('mb_focus')
+    if (want && nodes[want]) { sessionStorage.removeItem('mb_focus'); revealCard(want) }
+  }, [boardId, nodes])
 
   const {
     screenToFlowPosition, flowToScreenPosition, fitView, zoomIn, zoomOut, getNodes,

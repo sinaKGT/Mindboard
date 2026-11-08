@@ -264,6 +264,10 @@ def create_backup(dd: DataDir, out_path: Path) -> dict[str, Any]:
                     "created_at": b["created_at"], "updated_at": b["updated_at"],
                     "file": member,
                 })
+            # experts span boards, so they travel with the library (DESIGN.md 40)
+            from .experts import load as load_experts
+            if load_experts(dd):
+                z.writestr("experts.json", json.dumps(load_experts(dd), indent=2, ensure_ascii=False))
             z.writestr("manifest.json", json.dumps({
                 "format": BACKUP_FORMAT,
                 "app_version": __version__,
@@ -336,6 +340,12 @@ def restore_backup(dd: DataDir, zip_path: Path, mode: str = "skip") -> dict[str,
                     failed.append({"title": entry.get("title", "?"), "error": str(exc)})
                 finally:
                     staged.unlink(missing_ok=True)
+
+        # experts come back too - not in "copy" mode, where every board gets a
+        # new id and their links would point nowhere
+        if "experts.json" in names and mode != "copy":
+            from .experts import restore as restore_experts
+            restore_experts(dd, json.loads(z.read("experts.json").decode("utf-8")), replace=mode == "replace")
 
     return {"restored": restored, "skipped": skipped, "failed": failed,
             "backup_created_at": manifest.get("created_at")}

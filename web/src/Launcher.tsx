@@ -97,6 +97,12 @@ export function Launcher({ onImport }: { onImport: () => void }) {
             onClick={() => { setTitle(''); setDescription(''); setModal({ mode: 'new' }) }}>
             <Icon name="plus" size={14} /> New board
           </button>
+          {!!boards?.length && (
+            <button className="btn experts-btn" onClick={() => { location.hash = '#/experts' }}
+              title="Talk to experts made of your boards">
+              <Icon name="ask" size={14} /> Experts
+            </button>
+          )}
           <button className="btn" onClick={onImport}
             title="Open a .mindboard bundle, or a backup zip to restore every board">
             <Icon name="upload" size={14} /> Import

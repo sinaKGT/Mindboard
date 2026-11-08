@@ -1,0 +1,113 @@
+/* The Experts page (DESIGN.md 40): gold on a night desert. */
+.xp { --gold: #e8b864; --xp-text: #f1e7d6; --xp-dim: #a8977c; --xp-faint: #6e624f; --xp-surface: #120e0a; --xp-border: #3a2e20;
+  position: fixed; inset: 0; background: #030304; color: var(--xp-text); overflow: clip; z-index: 1; }
+/* clip, not hidden: a hidden overflow can still be scrolled - focusing the box once scrolled the whole page up */
+.xp canvas { display: block; }
+.xp-top { position: absolute; top: 16px; left: 18px; display: flex; gap: 10px; color: var(--xp-dim); z-index: 5; letter-spacing: .04em; }
+.xp-top b { color: var(--gold); font-weight: 600; }
+.xp-crumb { color: var(--xp-dim); }
+.xp-crumb:hover { color: var(--gold); }
+.xp-name { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; cursor: pointer; z-index: 3;
+  color: var(--xp-dim); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; transition: opacity .5s, color .3s; }
+.xp-name:hover { color: var(--gold); }
+.xp-name.on { color: var(--gold); font-size: 14px; text-shadow: 0 0 12px #e8b86488; }
+.xp-new { position: absolute; z-index: 5; color: var(--xp-dim); border: 1px solid var(--xp-border);
+  padding: 6px 14px; border-radius: 999px; letter-spacing: .05em; background: #0b0805aa; }
+.xp-new { top: 12px; right: 18px; }
+.xp-new:hover { color: var(--gold); border-color: var(--gold); }
+.xp-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; border: 1px solid var(--xp-border);
+  color: var(--xp-dim); width: 40px; height: 40px; border-radius: 50%; font-size: 18px; background: #0b0805aa; }
+.xp-nav:hover { color: var(--gold); border-color: var(--gold); }
+.xp-empty { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 5; text-align: center;
+  color: var(--xp-dim); display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.xp-empty-title { color: var(--gold); font-size: 22px; letter-spacing: .2em; text-transform: uppercase; font-weight: 300; }
+
+/* inside an expert */
+.xp-page { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center;
+  pointer-events: none; animation: xpIn 1.2s ease .4s both; }
+.xp-page > * { pointer-events: auto; }
+@keyframes xpIn { from { opacity: 0; } }
+.xp-back { position: absolute; top: 52px; left: 18px; color: var(--xp-dim); border: 1px solid var(--xp-border);
+  padding: 6px 14px; border-radius: 999px; background: #0b0805aa; }
+.xp-back:hover { color: var(--gold); border-color: var(--gold); }
+.xp-who { margin-top: 12vh; color: var(--gold); font-size: 28px; font-weight: 300; letter-spacing: .35em;
+  text-transform: uppercase; text-shadow: 0 0 24px #e8b86488; text-align: center; }
+.xp-cartouches { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; justify-content: center; }
+.xp-cartouche { padding: 3px 14px; border-radius: 999px; border: 1px solid #e8b86499; outline: 1px solid #e8b86433;
+  outline-offset: 3px; background: #0b0805cc; color: var(--gold); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; }
+.xp-turns { width: min(680px, 92vw); flex: 1; margin: 22px 0 96px; overflow-y: auto; display: flex; flex-direction: column;
+  gap: 12px; padding: 4px 2px; mask-image: linear-gradient(transparent, #000 40px); }
+.xp-q { align-self: flex-end; max-width: 80%; padding: 8px 14px; border-radius: 14px; background: #e8b8641c;
+  border: 1px solid #e8b86440; font-size: 14px; }
+.xp-a { padding: 12px 16px; border-radius: 14px; background: #0d0a07d9; border: 1px solid var(--xp-border);
+  font-size: 14px; line-height: 1.65; backdrop-filter: blur(6px); }
+.xp-said strong { color: var(--gold); font-weight: 600; }
+.xp-cite { display: inline; padding: 0 8px; margin: 0 2px; border-radius: 6px; background: #e8b86422; color: var(--gold); font-size: 12px; }
+.xp-cite:hover { background: #e8b86444; }
+.xp-beyond { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--xp-border); color: #d9ccb6; }
+.xp-beyond-head { color: var(--xp-faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 2px; }
+.xp-note { color: var(--xp-faint); font-size: 12.5px; }
+.xp-error { color: #f0907a; font-size: 12.5px; }
+.xp-next { margin-top: 10px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12px; color: var(--xp-faint); }
+.xp-next button, .xp-go { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--gold); color: var(--gold); text-align: left; }
+.xp-next button:hover, .xp-go:hover { background: #e8b86422; }
+
+/* the guide's answer, in the overview */
+.xp-guide { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); width: min(640px, 90vw); z-index: 5;
+  padding: 14px 18px; border-radius: 14px; background: #0d0a07e6; border: 1px solid var(--xp-border); font-size: 14px;
+  line-height: 1.6; display: flex; flex-direction: column; gap: 10px; animation: xpIn .5s ease both; }
+.xp-guide > div:last-child { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* the bar, with the light along its edge */
+@property --xpa { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.xp-bar { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); width: min(640px, 90vw); height: 52px; z-index: 6;
+  display: flex; align-items: center; gap: 10px; padding: 6px 7px 6px 20px; border-radius: 26px; border: 1px solid transparent;
+  background: linear-gradient(var(--xp-surface), var(--xp-surface)) padding-box,
+    conic-gradient(from var(--xpa), var(--xp-border) 0deg, var(--gold) 60deg, var(--xp-border) 120deg, var(--xp-border)) border-box;
+  animation: xpLight 6s linear infinite; }
+.xp-bar:focus-within, .xp-bar.busy { animation-play-state: paused; }
+@keyframes xpLight { to { --xpa: 360deg; } }
+@media (prefers-reduced-motion: reduce) { .xp-bar { animation: none; } }
+.xp-bar input { flex: 1; background: none; border: 0; outline: 0; color: var(--xp-text); font-size: 14px; }
+.xp-send { width: 38px; height: 38px; border-radius: 50%; background: var(--gold); color: #1a1206; font-size: 15px; }
+
+/* making and editing an expert */
+.xp-modal { position: absolute; inset: 0; z-index: 10; background: #000a; display: grid; place-items: center; }
+.xp-editor { width: min(460px, 92vw); max-height: 86vh; overflow: auto; padding: 18px 20px; border-radius: 14px;
+  background: #110d09; border: 1px solid var(--xp-border); display: flex; flex-direction: column; gap: 10px; }
+.xp-editor h3 { margin: 0 0 4px; color: var(--gold); font-weight: 400; letter-spacing: .15em; text-transform: uppercase; font-size: 14px; }
+.xp-editor input:not([type]), .xp-editor textarea { background: #0a0806; border: 1px solid var(--xp-border); border-radius: 8px;
+  padding: 8px 10px; color: var(--xp-text); font-size: 13px; resize: vertical; }
+.xp-field { color: var(--xp-faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
+.xp-boards { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow: auto; }
+.xp-boards label { display: flex; gap: 8px; align-items: center; font-size: 13px; cursor: pointer; }
+.xp-boards input { accent-color: var(--gold); }
+.xp-count { margin-left: auto; color: var(--xp-faint); font-size: 11.5px; }
+.xp-shapes { display: flex; gap: 6px; flex-wrap: wrap; }
+.xp-shapes button { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--xp-border); color: var(--xp-dim); font-size: 12px; }
+.xp-shapes button.on { border-color: var(--gold); color: var(--gold); }
+.xp-colours { display: flex; gap: 8px; }
+.xp-colours button { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; }
+.xp-colours button.on { border-color: #fff; }
+.xp-actions { display: flex; justify-content: space-between; margin-top: 6px; }
+.xp-actions button { padding: 6px 14px; border-radius: 999px; color: var(--xp-dim); margin-left: 6px; }
+.xp-primary { background: var(--gold) !important; color: #1a1206 !important; padding: 6px 16px; border-radius: 999px; }
+.xp-danger { color: #f0907a !important; }
+.experts-btn { border-color: #e8b86466 !important; }
+
+.xp-shapes button.locked { opacity: .45; cursor: not-allowed; }
+.xp-progress { margin-left: 6px; font-size: 10.5px; color: var(--xp-faint); }
+/* a monument unlocked: announced once, gold on the night */
+.xp-unlock { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%); z-index: 8; text-align: center;
+  padding: 22px 30px; border-radius: 16px; background: #0b0805ee; border: 1px solid var(--gold); color: var(--xp-dim);
+  box-shadow: 0 0 60px #e8b86433; cursor: pointer; animation: xpUnlock 1.2s cubic-bezier(.22,.61,.36,1) both; }
+.xp-unlock-head { font-size: 11px; letter-spacing: .3em; text-transform: uppercase; color: var(--xp-faint); }
+.xp-unlock-name { margin: 6px 0 8px; font-size: 26px; font-weight: 300; letter-spacing: .3em; text-transform: uppercase;
+  color: var(--gold); text-shadow: 0 0 20px #e8b86499; }
+@keyframes xpUnlock { from { opacity: 0; transform: translate(-50%, -40%) scale(.9); filter: blur(6px); } }
+.xp-name .xp-pen { opacity: 0; transition: opacity .3s; margin-left: 8px; padding: 0 6px; border-radius: 6px; color: var(--xp-faint); font-size: 12px; }
+.xp-name .xp-pen:hover { color: var(--gold); background: #e8b86422; }
+.xp-name:hover .xp-pen { opacity: 1; }
+/* the conversation scrolls without a visible bar */
+.xp-turns { scrollbar-width: none; }
+.xp-turns::-webkit-scrollbar { display: none; }

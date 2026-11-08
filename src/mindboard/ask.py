@@ -99,6 +99,9 @@ class Context:
     mode: str = "chosen"
     total: int = 0                         # cards on the board
     how: str = ""                          # what a search went by
+    persona: str = ""                      # an expert's name and brief (experts.py)
+    # for an expert: each card's board and title, so a citation can open it
+    where: dict = field(default_factory=dict)
 
     @property
     def tokens(self) -> int:
@@ -326,7 +329,9 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     for p in ctx.pictures:
         parts.append({"type": "text", "text": f"PICTURE on card [{p.card}]:"})
         parts.append({"type": "image_url", "image_url": {"url": p.data_url}})
-    msgs: list[dict] = [{"role": "system", "content": SYSTEM},
+    system = SYSTEM + (f"\n\nWHO YOU ARE\n{ctx.persona}\nAnswer as this expert, in their voice, "
+                       "from these cards first." if ctx.persona else "")
+    msgs: list[dict] = [{"role": "system", "content": system},
                         {"role": "user", "content": parts},
                         {"role": "assistant", "content": READY}]
     for turn in history:
@@ -401,7 +406,7 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     used = check_fits(ctx, question, history, think)
     yield {"event": "context", "cards": ctx.cards, "pictures": len(ctx.pictures), "tokens": used,
            "whole": ctx.whole, "pictures_left_out": ctx.pictures_left_out,
-           "mode": ctx.mode, "total": ctx.total, "how": ctx.how}
+           "mode": ctx.mode, "total": ctx.total, "how": ctx.how, "where": ctx.where}
     text: list[str] = []
     timings: dict = {}
     for ev in model.stream(messages(ctx, question, history),

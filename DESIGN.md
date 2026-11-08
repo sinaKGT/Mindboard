@@ -2401,3 +2401,61 @@ not in the top three before; "RRF score formula" moves *What is RRF* to first.
   canvas instead of as elements would be needed. Boards kept in groups - each
   level small - are not affected.
 177 tests.
+
+## 40. Experts (2026-11-08)
+
+A separate page, `#/experts`, from the **Experts** button on the start page:
+talk to experts made of your boards.
+
+- **An expert** is a name, a brief and the boards it draws on - the same
+  local 9B, so no extra memory. Experts span boards, so they live in the
+  library, `<data>/experts.json`, written atomically and carried in backups
+  (restored in skip and replace modes; not in copy mode, where every board
+  gets a new id). Nothing a conversation says is remembered - each visit starts
+  fresh, as asked.
+- **Asking an expert** searches each of its boards with the board search
+  (`retrieve.score`), merges them by reciprocal rank so every board's best
+  cards come near the top, and fits one budget (`retrieve.fit`). The model
+  reads its name and brief with its system prompt and answers in that voice;
+  every card it cites says which board it is on, and a click opens that
+  board at the card. The streaming is shared with a board's answers
+  (`stream_answer`).
+- **The guide**: "Not sure who to ask?" in the overview. It searches every
+  expert's boards, lets the reranker judge how well each one's best four
+  cards answer the question, keeps the leaders (within 60% of the best, at
+  most two), and has the model say in a sentence or two who can help and why.
+  Tried on the scratch library: for "How does re-ranking improve retrieval?"
+  it chose the Retrieval Engineer and the Generalist, and said why.
+
+### The page
+
+A night desert in three.js - bundled, never fetched, and loaded only when the
+page opens (the board interface stays 452 kB; the Experts page is its own
+511 kB part). Each expert stands as a **monument of glowing sand**: grains
+blow off its edges on a wind that wanders and gusts; its **crown** floats
+apart, glows and blinks, and under the pointer sends grains of light slowly
+upward; resting the pointer on its body gathers its **sign** inside, in 3D;
+thinking whips the sand into a storm; speaking sends waves up it. Going in,
+it comes apart and the camera flies into its sand, where you talk to it.
+
+| Monument | Crown | Sign inside | Unlocks with |
+|---|---|---|---|
+| Ankh | its loop | feather of Maat | - |
+| Obelisk | pyramidion | sun disc of Ra | 2 boards of 20+ cards |
+| Pyramid | capstone | Eye of Horus | 3 boards of 50+ cards |
+| Step pyramid | top block | djed pillar | 5 boards of 100+ cards |
+| Temple gate | winged sun disc | winged scarab | 8 boards of 150+ cards |
+
+Monuments are **earned, not chosen freely**: each opens as the library grows,
+which makes growing your boards a little like a game. Locked ones show what
+they need and your progress; a newly opened one is announced. An expert keeps
+its shape if the rule changes. A monument's **size is how much it knows** -
+the cards on its boards, on a log scale - and all share one scale, the camera
+looking down across the desert so sizes compare. Only the one in front turns.
+Names only under them; a pen beside the name, on hover, edits.
+
+Fixed on the way: the page could be scrolled by focusing its box (now
+`overflow: clip`); a narrow window steps the camera back.
+
+Not yet: the voice - Kokoro, local, with the sand following the audio - is
+part 2. 184 tests.

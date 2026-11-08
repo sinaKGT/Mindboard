@@ -203,6 +203,19 @@ removed. Add `--think` to let it think first (slower, deeper).
 memory than the model needs — free up the card for full speed. On a laptop, a
 quiet or battery-saving power mode can hold the card to a fraction of its speed.
 
+## Experts
+
+**Experts** on the start page opens a night desert where your experts stand as
+monuments of glowing sand. An expert is a name, a sentence about what it knows,
+and the boards it draws on: it answers from those boards, in its own voice, and
+every card it cites opens on its board. Not sure who to ask? Type the question
+in the overview and the guide says who can help, and why. Pick an expert —
+click its monument or its name — and you go inside to talk to it.
+
+A monument's size is how much its boards hold. New shapes unlock as your
+library grows: the ankh from the start, then the obelisk, the pyramid, the step
+pyramid and the temple gate.
+
 ## Backing up
 
 Menu options **2** and **3**, or from a terminal:

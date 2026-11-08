@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from './api'
 import { Canvas } from './Canvas'
+// the Experts page brings three.js: loaded only when it is opened
+// (after an update, a tab still open asks for the old build's file: reload once to get the new one)
+const ExpertsPage = lazy(() => import('./experts/ExpertsPage').then((m) => ({ default: m.ExpertsPage }))
+  .catch((err) => {
+    if (!sessionStorage.getItem('mb_reloaded')) { sessionStorage.setItem('mb_reloaded', '1'); location.reload() }
+    throw err
+  }))
 import { Launcher } from './Launcher'
 import { Palette } from './Palette'
 import { useStore } from './store'
@@ -16,6 +23,8 @@ export default function App() {
   const open = useStore((s) => s.open)
   const setUI = useUI((s) => s.set)
   const fileRef = useRef<HTMLInputElement>(null)
+  // the Experts page lives at #/experts (DESIGN.md 40)
+  const [experts, setExperts] = useState(location.hash === '#/experts')
 
   useEffect(() => { applyTheme(settings) }, [settings])
 
@@ -23,6 +32,7 @@ export default function App() {
   // browser's back button walks out of a board the way you'd expect.
   useEffect(() => {
     const fromHash = () => {
+      setExperts(location.hash === '#/experts')
       const id = location.hash.match(/^#\/b\/([0-9A-Za-z]{26})/)?.[1] ?? null
       const current = useStore.getState().boardId
       if (id && id !== current) void useStore.getState().open(id)
@@ -34,7 +44,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const want = boardId ? `#/b/${boardId}` : ''
+    const want = boardId ? `#/b/${boardId}` : (location.hash === '#/experts' ? '#/experts' : '')
     if (location.hash !== want) history.replaceState({}, '', location.pathname + want)
   }, [boardId])
 
@@ -73,7 +83,7 @@ export default function App() {
 
   return (
     <>
-      {boardId ? <Canvas /> : <Launcher onImport={pickBundle} />}
+      {boardId ? <Canvas /> : experts ? <Suspense fallback={null}><ExpertsPage /></Suspense> : <Launcher onImport={pickBundle} />}
       <Palette onImport={pickBundle} />
       <input ref={fileRef} type="file" accept=".mindboard,.zip" hidden
         onChange={(e) => {

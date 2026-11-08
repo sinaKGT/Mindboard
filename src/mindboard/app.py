@@ -26,7 +26,8 @@ from .bundle import (
     restore_backup,
 )
 from .ids import ulid
-from .models import AskRequest, BoardCreate, BoardPatch, DraftRequest, OpsRequest
+from .models import (AskRequest, BoardCreate, BoardPatch, DraftRequest, ExpertBody,
+                     GuideRequest, OpsRequest)
 from .ops import apply_envelopes, read_graph
 from .paths import DataDir
 
@@ -388,27 +389,37 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             return model, ctx, model.memory_note()
 
         model, ctx, warning = await run_in_threadpool(prepare)
-        loading = not model.running()
+        return stream_answer(model, ctx, body.question, history, body.think, warning, request,
+                             after=lambda: indexer.want(bid))
 
-        # The answer is made on its own thread and handed over through a queue.
-        # It used to be pulled piece by piece by the response itself - and when
-        # a browser hung up, this server never heard: its send to the closed
-        # connection waited forever, nothing pulled the next piece, and the
-        # model sat mid-answer holding the one slot, so every later question
-        # was told "still answering". Now the response can stall without
-        # stalling the model, and Stop reaches the model directly (ask/stop).
+    def stream_answer(model, ctx, question: str, history: list, think: bool, warning,
+                      request: Request, after=None) -> StreamingResponse:
+        """An answer as server-sent events - for a board and for an expert alike.
+
+        The answer is made on its own thread and handed over through a queue.
+        It used to be pulled piece by piece by the response itself - and when a
+        browser hung up, this server never heard: its send to the closed
+        connection waited forever, nothing pulled the next piece, and the model
+        sat mid-answer holding the one slot, so every later question was told
+        "still answering". Now the response can stall without stalling the
+        model, and Stop reaches the model directly (ask/stop)."""
+        from starlette.concurrency import run_in_threadpool
+
+        from .ask import answer_events
+
+        loading = not model.running()
         pieces: "queue.Queue[Optional[dict]]" = queue.Queue()
 
         def produce() -> None:
             try:
-                for item in answer_events(model, ctx, body.question, history, body.think):
+                for item in answer_events(model, ctx, question, history, think):
                     pieces.put(item)
             except Exception as exc:     # ModelError, ModelBusy: said, not thrown
                 pieces.put({"event": "error", "message": str(exc)})
             finally:
                 pieces.put(None)
-                # the model is loaded and free now: a moment to describe pictures
-                indexer.want(bid)
+                if after is not None:
+                    after()              # e.g. a moment to describe pictures, the model free
 
         threading.Thread(target=produce, daemon=True, name="mindboard-ask").start()
 
@@ -423,8 +434,6 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                         break
                     name = item.pop("event")
                     if name == "context":
-                        # another program holding the card makes every answer
-                        # slow; say so before the person waits for one
                         item["warning"] = warning
                         item["loading"] = loading
                     yield f"event: {name}\ndata: {json.dumps(item)}\n\n"
@@ -435,6 +444,87 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
 
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
+
+    # ------------------------------------------------------------- experts --
+    # DESIGN.md 40: experts span boards, so they live in the library
+    from . import experts as experts_mod
+
+    def expert_or_404(eid: str) -> dict:
+        try:
+            return experts_mod.get(dd, eid)
+        except experts_mod.ExpertError:
+            raise HTTPException(404, "no such expert")
+
+    @app.get("/api/experts")
+    def api_experts():
+        return {"experts": experts_mod.listing(dd), "shapes": experts_mod.shapes(dd)}
+
+    @app.post("/api/experts")
+    def api_expert_create(body: ExpertBody):
+        try:
+            return experts_mod.create(dd, body.model_dump(exclude_none=True))
+        except experts_mod.ExpertError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.patch("/api/experts/{eid}")
+    def api_expert_update(eid: str, body: ExpertBody):
+        expert_or_404(eid)
+        try:
+            return experts_mod.update(dd, eid, body.model_dump(exclude_none=True))
+        except experts_mod.ExpertError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.delete("/api/experts/{eid}")
+    def api_expert_delete(eid: str):
+        return {"deleted": experts_mod.delete(dd, eid)}
+
+    @app.post("/api/experts/guide")
+    def api_experts_guide(body: GuideRequest):
+        """Who can help with this question - the experts whose boards answer
+        it best, and why. Reads only."""
+        model = local_model()
+        if model is not None and not model._asking.acquire(blocking=False):
+            raise HTTPException(409, "still answering the last question")
+        try:
+            emb = search_model("embed")
+            return experts_mod.guide(dd, body.question, model, emb,
+                                     emb.inst.embedder.name if emb else "", search_model("rerank"))
+        finally:
+            if model is not None:
+                model._asking.release()
+
+    @app.post("/api/experts/{eid}/ask")
+    async def api_expert_ask(eid: str, body: AskRequest, request: Request):
+        """Ask one expert: its boards searched together, answered in its voice.
+        Streams like a board's answer. Reads only."""
+        from starlette.concurrency import run_in_threadpool
+
+        from .ask import AskError, check_fits
+
+        expert = expert_or_404(eid)
+        history = [t.model_dump() for t in body.history]
+
+        def prepare():
+            model = local_model()
+            if model is None:
+                raise HTTPException(503, "Ask your board is not set up yet - choose 8 in the "
+                                         "Mindboard menu, or run: mindboard ai install")
+            if model._asking.locked():
+                raise HTTPException(409, "still answering the last question")
+            try:
+                emb = search_model("embed")
+                ctx, lib = experts_mod.context(dd, expert, body.question, history, emb,
+                                               emb.inst.embedder.name if emb else "",
+                                               search_model("rerank"))
+                check_fits(ctx, body.question, history, body.think)
+            except (experts_mod.ExpertError, AskError) as exc:
+                raise HTTPException(400, str(exc))
+            for bid in lib.indexes:
+                indexer.want(bid)
+            return model, ctx, model.memory_note()
+
+        model, ctx, warning = await run_in_threadpool(prepare)
+        return stream_answer(model, ctx, body.question, history, body.think, warning, request)
 
     @app.post("/api/boards/{bid}/ask/stop")
     def api_ask_stop(bid: str):

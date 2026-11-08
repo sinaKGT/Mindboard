@@ -32,7 +32,7 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.status === 204 ? (undefined as T) : res.json()
 }
 
-export const api = {
+const apiCore = {
   token: () => token,
   listBoards: () => req<{ boards: BoardMeta[] }>('/boards').then((r) => r.boards),
   createBoard: (title: string, description = '') =>
@@ -75,13 +75,41 @@ export const api = {
    *  server-sent event (context, thinking, text, done, error) as it arrives;
    *  aborting `signal` stops the model. Throws with the server's reason when
    *  the question cannot be asked at all. */
-  ask: async (boardId: string, body: {
+  ask: (boardId: string, body: {
     question: string; cards: string[]; history: { role: string; text: string }[]; think: boolean
     keep: string[]; explain: boolean
-  }, onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> => {
+  }, onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> =>
+    streamEvents(`/boards/${boardId}/ask`, body, onEvent, signal),
+  /** Ask one expert: its boards searched together, answered in its voice. */
+  askExpert: (expertId: string, body: { question: string; history: { role: string; text: string }[] },
+              onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> =>
+    streamEvents(`/experts/${expertId}/ask`, { ...body, cards: [], think: false }, onEvent, signal),
+  experts: () => req<{ experts: Expert[]; shapes: ShapeState[] }>('/experts'),
+  createExpert: (body: Partial<ExpertDraft>) =>
+    req<Expert>('/experts', { method: 'POST', body: JSON.stringify(body) }),
+  updateExpert: (id: string, body: Partial<ExpertDraft>) =>
+    req<Expert>(`/experts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteExpert: (id: string) => req<{ deleted: boolean }>(`/experts/${id}`, { method: 'DELETE' }),
+  /** Who can help with this question: the experts whose boards answer it best */
+  guide: (question: string) =>
+    req<{ picked: { id: string; name: string; score: number; cards: string[] }[]; why: string }>(
+      '/experts/guide', { method: 'POST', body: JSON.stringify({ question }) }),
+}
+
+/** a monument, and whether the library is big enough for it yet */
+export interface ShapeState { shape: string; unlocked: boolean; need: string; have: number; of: number }
+export interface ExpertDraft { name: string; brief: string; boards: string[]; colour: string; shape: string }
+export interface Expert extends Omit<ExpertDraft, 'boards'> {
+  id: string; cards: number; boards: { id: string; title: string; cards: number }[]
+}
+
+/** Server-sent events from a POST: each event as it arrives. Aborting `signal`
+ *  stops the model. Throws with the server's reason when it refuses. */
+async function streamEvents(path: string, body: unknown, onEvent: (name: string, data: any) => void,
+                            signal: AbortSignal): Promise<void> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) headers['X-Mindboard-Token'] = token
-    const res = await fetch(`/api/boards/${boardId}/ask`, {
+    const res = await fetch(`/api${path}`, {
       method: 'POST', headers, body: JSON.stringify(body), credentials: 'same-origin', signal,
     })
     if (!res.ok || !res.body) {
@@ -109,9 +137,9 @@ export const api = {
         if (data) onEvent(name, JSON.parse(data))
       }
     }
-  },
-  /** Stop the answer being written. Said out loud rather than left to the
-   *  hang-up: the server does not always hear a connection close. */
+}
+
+const apiMore = {
   /** A card drafted from an answer, to check before adding (nothing is written) */
   askDraft: (boardId: string, body: { question: string; answer: string; cited: string[] }) =>
     req<{ title: string; text: string; link_to: string; kind: string }>(
@@ -132,3 +160,6 @@ export const api = {
     `/api/boards/${boardId}/export${token ? `?t=${encodeURIComponent(token)}` : ''}`,
   backupUrl: () => `/api/backup${token ? `?t=${encodeURIComponent(token)}` : ''}`,
 }
+
+/** Everything the interface asks the server, in one place. */
+export const api = { ...apiCore, ...apiMore }

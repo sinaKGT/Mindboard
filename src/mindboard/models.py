@@ -88,3 +88,17 @@ class DraftRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     answer: str = Field(min_length=1, max_length=20000)
     cited: list[str] = Field(default_factory=list, max_length=100)
+
+
+class GuideRequest(BaseModel):
+    """A question for the guide: which expert can answer it?"""
+    question: str = Field(min_length=1, max_length=4000)
+
+
+class ExpertBody(BaseModel):
+    """An expert's name, brief, boards and colour; on an edit, what changes."""
+    name: Optional[str] = Field(default=None, max_length=60)
+    brief: Optional[str] = Field(default=None, max_length=600)
+    boards: Optional[list[str]] = Field(default=None, max_length=100)
+    colour: Optional[str] = Field(default=None, max_length=20)
+    shape: Optional[str] = Field(default=None, max_length=20)
