@@ -27,7 +27,7 @@ from .bundle import (
 )
 from .ids import ulid
 from .models import (AskRequest, BoardCreate, BoardPatch, DraftRequest, ExpertBody,
-                     GuideRequest, OpsRequest)
+                     GuideRequest, OpsRequest, SpeakRequest)
 from .ops import apply_envelopes, read_graph
 from .paths import DataDir
 
@@ -525,6 +525,24 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
 
         model, ctx, warning = await run_in_threadpool(prepare)
         return stream_answer(model, ctx, body.question, history, body.think, warning, request)
+
+    # --------------------------------------------------------------- voice --
+    @app.get("/api/voice")
+    def api_voice():
+        from . import voice
+        return {"installed": voice.installed(), "cast": voice.CAST}
+
+    @app.post("/api/voice/speak")
+    def api_voice_speak(body: SpeakRequest):
+        """One sentence spoken by Kokoro, on this computer (DESIGN.md 41)."""
+        from fastapi.responses import Response
+
+        from . import voice
+        try:
+            return Response(voice.speak(body.text, body.voice), media_type="audio/wav",
+                            headers={"Cache-Control": "no-store"})
+        except voice.VoiceError as exc:
+            raise HTTPException(400, str(exc))
 
     @app.post("/api/boards/{bid}/ask/stop")
     def api_ask_stop(bid: str):

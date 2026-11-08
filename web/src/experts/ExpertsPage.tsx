@@ -13,6 +13,7 @@ import type { BoardMeta } from '../types'
 import { ExpertScene } from './scene'
 import './experts.css'
 import { SHAPES, SHAPE_WORDS } from './shapes'
+import { Voice } from './voice'
 
 const BEYOND = 'Beyond your board:'
 const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
@@ -134,13 +135,20 @@ export function ExpertsPage() {
   const [inside, setInside] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
   const [guideSaid, setGuideSaid] = useState<{ why: string; picked: { id: string; name: string }[] } | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusyState] = useState(false)
+  const busyRef = useRef(false)
+  const setBusy = (b: boolean) => { busyRef.current = b; setBusyState(b) }
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState<Expert | null | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
   const [shapes, setShapes] = useState<ShapeState[]>([])
   const [unlocked, setUnlocked] = useState<string | null>(null)
   const controller = useRef<AbortController | null>(null)
+  // the voice: on unless turned off, if it is set up (mindboard ai voice)
+  const voice = useRef(new Voice())
+  const [voiceReady, setVoiceReady] = useState(false)
+  const [cast, setCast] = useState<string[]>([])
+  const [voiceOn, setVoiceOn] = useState(localStorage.getItem('mb_xp_voice') !== '0')
   const scroller = useRef<HTMLDivElement>(null)
 
   const load = async () => {
@@ -159,7 +167,17 @@ export function ExpertsPage() {
     if (!host.current) return
     scene.current = new ExpertScene(host.current, (i) => enter(i), (i) => setEditing(expertsRef.current[i]))
     void load()
-    return () => { scene.current?.dispose(); controller.current?.abort() }
+    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast) }).catch(() => {})
+    // the sand moves with the voice: its loudness, read every frame
+    let raf = 0
+    const listen = () => {
+      raf = requestAnimationFrame(listen)
+      const s = scene.current, v = voice.current
+      if (s && v.playing) { s.speaking = true; s.amp = 0.25 + 0.75 * v.level() }
+      else if (s && s.speaking && !busyRef.current) s.speaking = false
+    }
+    listen()
+    return () => { cancelAnimationFrame(raf); voice.current.stop(); scene.current?.dispose(); controller.current?.abort() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => { if (scene.current) scene.current.current = current }, [current])
@@ -173,6 +191,7 @@ export function ExpertsPage() {
   }
   const leave = () => {
     controller.current?.abort()
+    voice.current.stop()
     if (scene.current) { scene.current.inside = false; scene.current.thinking = false; scene.current.speaking = false }
     setInside(false); setTurns([])
   }
@@ -216,6 +235,7 @@ export function ExpertsPage() {
     const patch = (p: Partial<Turn>) => setTurns((ts) => { const c = ts.slice(); c[c.length - 1] = { ...c[c.length - 1], ...p }; return c })
     const ctl = new AbortController(); controller.current = ctl
     setBusy(true); s.thinking = true
+    voice.current.stop()
     let text = ''
     try {
       await api.askExpert(e.id, { question, history }, (name, data) => {
@@ -225,7 +245,14 @@ export function ExpertsPage() {
           s.thinking = false; s.speaking = true
           s.amp = 0.55 + 0.45 * Math.random()          // the sand moves as it writes; a voice will drive this
           patch({ text, status: 'writing' })
-        } else if (name === 'done') patch({ text: data.answer, next: data.next || undefined, status: 'done' })
+        } else if (name === 'done') {
+          patch({ text: data.answer, next: data.next || undefined, status: 'done' })
+          // and it says it, in its own voice
+          if (voiceReady && voiceOn && data.answer) {
+            const i = expertsRef.current.findIndex((x) => x.id === e.id)
+            void voice.current.say(data.answer, e.voice || cast[Math.max(i, 0) % Math.max(cast.length, 1)] || 'af_heart')
+          }
+        }
         else if (name === 'error') patch({ error: data.message, status: 'done' })
       }, ctl.signal)
     } catch (err: any) {
@@ -299,6 +326,11 @@ export function ExpertsPage() {
           <input value={draft} onChange={(ev) => setDraft(ev.target.value)}
             onKeyDown={(ev) => { if (ev.key === 'Enter') send(draft) }}
             placeholder={inside && e ? `Ask ${e.name}…` : 'Not sure who to ask? Ask here…'} />
+          {inside && voiceReady ? (
+            <button className={`xp-voice ${voiceOn ? 'on' : ''}`} title={voiceOn ? 'Voice on' : 'Voice off'}
+              onClick={() => { const on = !voiceOn; setVoiceOn(on); localStorage.setItem('mb_xp_voice', on ? '1' : '0')
+                if (!on) voice.current.stop() }}>{voiceOn ? '🔊' : '🔈'}</button>
+          ) : null}
           {busy ? <button className="xp-send" onClick={() => controller.current?.abort()} aria-label="Stop">&#9632;</button>
             : <button className="xp-send" onClick={() => send(draft)} aria-label="Ask">&#8593;</button>}
         </div>

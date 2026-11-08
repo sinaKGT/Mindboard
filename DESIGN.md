@@ -2459,3 +2459,31 @@ Fixed on the way: the page could be scrolled by focusing its box (now
 
 Not yet: the voice - Kokoro, local, with the sand following the audio - is
 part 2. 184 tests.
+
+## 41. A voice for the experts (2026-11-08)
+
+Asked for: realistic and human, not the Windows voices, and no heavy
+infrastructure. **Kokoro-82M** (Apache-2.0) through **kokoro-onnx 0.6.1**
+(MIT), checked current before pinning: one 325.5 MB model and a 28.2 MB voices
+file, each pinned by address, size and SHA-256 like every model here. It runs
+on the processor with onnxruntime, so it never takes graphics memory from the
+9B: after a one-time 3.4 s load, a sentence takes about 0.55 s to make for
+3.2 s of speech - six times faster than real time.
+
+Its pronunciation step uses espeak-ng and phonemizer, which are **GPL-3.0**.
+Fine to run on your own computer; not something an MIT program should ship.
+So the voice is an optional extra (`pip install -e .[voice]`, or
+`mindboard ai voice`, which also fetches the pinned files), never a core
+dependency, and Mindboard works without it.
+
+- `POST /api/voice/speak` returns one sentence as WAV; nothing leaves the
+  computer. `GET /api/voice` says whether it is set up.
+- Each expert has a voice of its own (eight in turn, warm to deep), kept on
+  edits.
+- The page reads an answer when it is done, sentence by sentence, fetching the
+  next while one plays - no gaps. A Web Audio analyser measures how loud it is
+  each frame and the sand moves with the real voice. A speaker button in the
+  bar turns it off; a new question or leaving stops it.
+
+Speaking *to* an expert would need speech recognition on this computer
+(whisper.cpp): the browser's own sends audio to a server. Not built. 188 tests.

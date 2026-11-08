@@ -90,6 +90,17 @@ const apiCore = {
   updateExpert: (id: string, body: Partial<ExpertDraft>) =>
     req<Expert>(`/experts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteExpert: (id: string) => req<{ deleted: boolean }>(`/experts/${id}`, { method: 'DELETE' }),
+  /** is the experts' voice set up, and which voices there are */
+  voice: () => req<{ installed: boolean; cast: string[] }>('/voice'),
+  /** one sentence, spoken on this computer, as WAV bytes */
+  speak: async (text: string, voice: string): Promise<ArrayBuffer> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['X-Mindboard-Token'] = token
+    const res = await fetch('/api/voice/speak', { method: 'POST', headers, credentials: 'same-origin',
+      body: JSON.stringify({ text, voice }) })
+    if (!res.ok) throw new Error('could not speak')
+    return res.arrayBuffer()
+  },
   /** Who can help with this question: the experts whose boards answer it best */
   guide: (question: string) =>
     req<{ picked: { id: string; name: string; score: number; cards: string[] }[]; why: string }>(
@@ -98,7 +109,7 @@ const apiCore = {
 
 /** a monument, and whether the library is big enough for it yet */
 export interface ShapeState { shape: string; unlocked: boolean; need: string; have: number; of: number }
-export interface ExpertDraft { name: string; brief: string; boards: string[]; colour: string; shape: string }
+export interface ExpertDraft { name: string; brief: string; boards: string[]; colour: string; shape: string; voice?: string }
 export interface Expert extends Omit<ExpertDraft, 'boards'> {
   id: string; cards: number; boards: { id: string; title: string; cards: number }[]
 }

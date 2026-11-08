@@ -88,7 +88,8 @@ def _clean(dd: DataDir, data: dict, old: Optional[dict] = None) -> dict:
         raise ExpertError("connect the expert to at least one board")
     return {"name": name, "brief": str(data.get("brief", (old or {}).get("brief", ""))).strip()[:600],
             "boards": boards, "colour": str(data.get("colour") or (old or {}).get("colour") or ""),
-            "shape": _shape(dd, data.get("shape"), (old or {}).get("shape"))}
+            "shape": _shape(dd, data.get("shape"), (old or {}).get("shape")),
+            "voice": str(data.get("voice") or (old or {}).get("voice") or "")[:20]}
 
 
 def _shape(dd: DataDir, wanted: Optional[str], had: Optional[str]) -> str:
@@ -122,6 +123,9 @@ def create(dd: DataDir, data: dict) -> dict:
         experts = load(dd)
         e = {"id": ulid(), **_clean(dd, data)}
         e["colour"] = e["colour"] or COLOURS[len(experts) % len(COLOURS)]
+        if not e["voice"]:                           # a voice of its own, by turn (voice.CAST)
+            from .voice import CAST
+            e["voice"] = CAST[len(experts) % len(CAST)]
         if not e["shape"]:                           # take turns among the unlocked ones
             open_ = [x["shape"] for x in shapes(dd) if x["unlocked"]]
             e["shape"] = open_[len(experts) % len(open_)]

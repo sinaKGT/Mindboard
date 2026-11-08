@@ -216,6 +216,15 @@ A monument's size is how much its boards hold. New shapes unlock as your
 library grows: the ankh from the start, then the obelisk, the pyramid, the step
 pyramid and the temple gate.
 
+Experts can speak their answers in a natural voice, made on this computer:
+
+```
+mindboard ai voice        # one-time, about 350 MB
+```
+
+The speaker button in the chat bar turns it off. (The voice is optional: its
+pronunciation step uses espeak-ng, which is GPL-3.0.)
+
 ## Backing up
 
 Menu options **2** and **3**, or from a terminal:

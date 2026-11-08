@@ -111,3 +111,5 @@
 /* the conversation scrolls without a visible bar */
 .xp-turns { scrollbar-width: none; }
 .xp-turns::-webkit-scrollbar { display: none; }
+.xp-voice { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--xp-border); opacity: .55; font-size: 14px; }
+.xp-voice.on { opacity: 1; border-color: #e8b86466; }

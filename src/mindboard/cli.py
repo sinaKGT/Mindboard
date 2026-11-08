@@ -499,6 +499,28 @@ def ai_eval(
                 typer.echo(f"    rec@10 {s.recall10:.2f}  MRR {s.mrr:.2f}  [{s.kind}] {s.question[:70]}")
 
 
+@ai_app.command("voice")
+def ai_voice():
+    """Set up the experts' voice: Kokoro, on this computer (about 350 MB)."""
+    from . import voice
+
+    con = _console()
+    if voice.installed():
+        con.print("  The voice is set up.")
+        return
+    con.print("  Setting up the voice - Kokoro (Apache-2.0), about 350 MB, once.")
+    con.print("  Its pronunciation step uses espeak-ng (GPL-3.0); it runs only on this computer.")
+
+    def show(name, done, total):
+        con.print(f"\r  {name}: {100 * done // max(total, 1):3d}%", end="")
+    try:
+        voice.install(progress=show)
+    except voice.VoiceError as exc:
+        con.print(f"\n  [red]{exc}[/red]")
+        raise typer.Exit(1)
+    con.print("\n  Done. Experts now speak their answers.")
+
+
 @ai_app.command("status")
 def ai_status():
     """Say whether Ask your board is set up, and where."""

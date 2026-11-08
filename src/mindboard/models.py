@@ -102,3 +102,10 @@ class ExpertBody(BaseModel):
     boards: Optional[list[str]] = Field(default=None, max_length=100)
     colour: Optional[str] = Field(default=None, max_length=20)
     shape: Optional[str] = Field(default=None, max_length=20)
+    voice: Optional[str] = Field(default=None, max_length=20)
+
+
+class SpeakRequest(BaseModel):
+    """A sentence for the voice."""
+    text: str = Field(min_length=1, max_length=2000)
+    voice: str = Field(default="af_heart", max_length=20)

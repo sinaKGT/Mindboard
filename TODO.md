@@ -30,12 +30,11 @@ picture itself is left out of a question.
 that needs a far-out view drawn on a canvas - only worth it if huge flat
 levels, rather than groups, turn out to be how boards are used.
 
-## 6. Experts - part 2: the voice (DESIGN.md §40)
+## 6. Experts - done (DESIGN.md §40-41)
 
-Part 1 is built: experts, cross-board search, the guide, the 3D page,
-earned monuments. Part 2: a realistic local voice - Kokoro (check its
-version and licence before pinning) - with the sand moving to the real
-audio. Speaking to it (voice in) would need whisper.cpp: decide later.
+Experts and their voice (Kokoro, local) are built. Left, if wanted: speaking
+*to* an expert - local speech recognition with whisper.cpp (one more small
+model and program; the browser's own recognition sends audio to a server).
 
 ## 5. Housekeeping
 

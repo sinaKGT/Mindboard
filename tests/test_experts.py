@@ -138,3 +138,44 @@ def test_monuments_are_earned_as_the_library_grows(dd, library):
     obelisk = next(x for x in experts.shapes(dd) if x["shape"] == "obelisk")
     assert obelisk["unlocked"] and obelisk["have"] == 2
     assert experts.update(dd, e["id"], {"shape": "obelisk"})["shape"] == "obelisk"
+
+
+# ----------------------------------------------------------------- voice --
+
+def test_only_the_words_are_read_aloud():
+    from mindboard import voice
+
+    said = voice.speakable("**Overlap** keeps context [[" + "A" * 26 + "]].\nBeyond your board:\nAlso this.\nNEXT: and then?")
+    assert said == "Overlap keeps context . Also this." or said == "Overlap keeps context. Also this."
+
+
+def test_each_expert_gets_a_voice_of_its_own(dd, library):
+    from mindboard import voice
+
+    a = experts.create(dd, {"name": "A", "boards": [library["Garden"]["board"]]})
+    b = experts.create(dd, {"name": "B", "boards": [library["Garden"]["board"]]})
+    assert a["voice"] in voice.CAST and b["voice"] in voice.CAST and a["voice"] != b["voice"]
+    assert experts.update(dd, a["id"], {"name": "A2"})["voice"] == a["voice"], "kept on an edit"
+
+
+def test_the_voice_says_whether_it_is_set_up(dd):
+    app = create_app(dd, "t")
+    with TestClient(app) as c:
+        got = c.get("/api/voice", headers={"X-Mindboard-Token": "t"}).json()
+        assert set(got) == {"installed", "cast"} and "af_heart" in got["cast"]
+
+
+@pytest.mark.skipif(not __import__("mindboard.voice", fromlist=["installed"]).installed(),
+                    reason="the voice is not set up on this computer")
+def test_the_voice_speaks_on_this_computer():
+    import io
+    import wave
+
+    from mindboard import voice
+
+    wav = voice.speak("Hello from your expert.", "am_michael")
+    with wave.open(io.BytesIO(wav)) as w:
+        assert w.getframerate() == 24000 and w.getnchannels() == 1
+        assert w.getnframes() / w.getframerate() > 0.5, "some speech came out"
+    with pytest.raises(voice.VoiceError, match="nothing to say"):
+        voice.speak("[[" + "A" * 26 + "]]")
