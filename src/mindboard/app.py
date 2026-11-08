@@ -521,11 +521,20 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                     time.sleep(0.05)
                 else:
                     raise HTTPException(409, "still answering the last question")
+            # read the question first (DESIGN.md 46): what kind, the person's
+            # situation, what decides the answer - while the model is free
+            from .ask import analyse
+            reading: dict = {}
+            if model._asking.acquire(blocking=False):
+                try:
+                    reading = analyse(model, body.question, history)
+                finally:
+                    model._asking.release()
             try:
                 emb = search_model("embed")
                 ctx, lib = experts_mod.context(dd, expert, body.question, history, emb,
                                                emb.inst.embedder.name if emb else "",
-                                               search_model("rerank"))
+                                               search_model("rerank"), reading)
                 check_fits(ctx, body.question, history, body.think)
             except (experts_mod.ExpertError, AskError) as exc:
                 raise HTTPException(400, str(exc))

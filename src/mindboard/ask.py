@@ -70,10 +70,95 @@ How to answer:
    read next - put it after a line that reads exactly "{BEYOND}", and cite
    nothing there.
 3. If the cards do not answer the question, say so plainly first.
-4. Be direct and brief. Plain sentences and short lists; no tables.
-5. Finish with one last line that starts exactly "{NEXT}" and holds one
-   question the person could ask next: short, in their words, taking what they
-   just asked one step further, answerable from their cards or your knowledge."""
+4. Start with the answer itself. Never open with "Based on your cards", "Your
+   board says" or the like, and do not keep mentioning the cards or the board -
+   the citations already show where things come from.
+5. Short and exact by default: a few sentences or a short list, nothing
+   padded. Explain at length - steps, examples - only when they ask you to
+   explain, or ask how or why. Plain sentences and short lists; no tables.
+6. Finish with three lines, each starting exactly "{NEXT}", each holding one
+   question the person could ask next: short, in their words, about what they
+   just asked and the cards in front of you - one going deeper, one putting it
+   to use, one on a neighbouring idea from the cards."""
+
+
+# ------------------------------------------------- reading the question --
+#
+# DESIGN.md 46. Asked "which architecture for a RAG system for a school,
+# where students ask about their lectures?", an expert answered for "a school
+# project" and recommended the simplest thing, weighing nothing. It answered in
+# one pass, its rules pushing it to summarise the cards that matched. Now it
+# first reads the question: what kind it is, the person's situation in their
+# own terms, and - when it asks for advice, a comparison or a design - the
+# points of that situation that decide the answer. The answer is then asked to
+# weigh the cards' options against each point. The reading is shown, so a
+# misreading is seen at once.
+
+ANALYSE = """You read a person's question closely before an expert answers it.
+Reply with JSON only, no other text:
+{"kind": "...", "reading": "...", "weigh": ["..."], "look_up": ["..."]}
+
+- kind: "fact" (what is, define, recall), "explain" (how or why), "advice"
+  (what should they do or choose, for their situation), "compare" (which of
+  these, how they differ) or "design" (how to build or plan something).
+- reading: their situation and what they want, in one plain sentence in the
+  second person ("You want ..."), in their terms. Keep their goal as big as
+  they said it: never call it a project, homework, prototype or toy unless
+  they did, and do not decide they are a beginner.
+- weigh: for advice, compare and design only - the 3 to 6 things about their
+  situation that decide the answer: who will use it and how, the material,
+  its scale, how accurate it must be, what must be kept apart. Use only what
+  they said or what plainly follows from it; where something that matters is
+  left open, name it as an open point ("how many courses - unknown") rather
+  than assume it. Never add a budget, deadline or limit they did not give.
+  Short phrases. [] otherwise.
+- look_up: up to 2 short search phrases for things a good answer must cover
+  that the question's own words would not find. [] if none."""
+
+KINDS = ("fact", "explain", "advice", "compare", "design")
+WEIGHED = ("advice", "compare", "design")
+
+
+def analyse(model, question: str, history: Optional[list[dict]] = None) -> dict:
+    """The question, read before it is answered: {kind, reading, weigh,
+    look_up} - or {} if the model's reply cannot be used."""
+    convo = "\n".join(f"{t.get('role')}: {str(t.get('text', ''))[:300]}"
+                      for t in (history or [])[-4:] if str(t.get("text", "")).strip())
+    prompt = (f"CONVERSATION SO FAR\n{convo}\n\n" if convo else "") + f"QUESTION\n{question.strip()}"
+    try:
+        reply = model.chat([{"role": "system", "content": ANALYSE}, {"role": "user", "content": prompt}],
+                           max_tokens=350, think=False, temperature=0.2)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        return {}
+
+    def phrases(v, n):
+        return [str(x).strip()[:120] for x in (v if isinstance(v, list) else []) if str(x).strip()][:n]
+
+    kind = str(got.get("kind", "")).strip().lower()
+    kind = kind if kind in KINDS else "explain"
+    return {"kind": kind, "reading": str(got.get("reading", "")).strip()[:300],
+            "weigh": phrases(got.get("weigh"), 6) if kind in WEIGHED else [],
+            "look_up": phrases(got.get("look_up"), 2)}
+
+
+LENGTH = {"fact": "Answer in one to three sentences, then the three NEXT: lines.",
+          "explain": "Explain it clearly, with a short example if it helps, then the three NEXT: lines."}
+
+
+def weighing(reading: dict) -> str:
+    """What the answer is asked to do with the reading - said with the
+    question, so the cached start of the prompt stays put."""
+    if not reading.get("weigh"):
+        return f"\n\n({LENGTH[reading['kind']]})" if reading.get("kind") in LENGTH else ""
+    points = "\n".join(f"- {w}" for w in reading["weigh"])
+    return (f"\n\n(You read this as: {reading.get('reading', '')}\n"
+            f"What decides the answer:\n{points}\n"
+            "Answer briefly, in this order: your recommendation, in one or two sentences; why - "
+            "one short line for each point above, saying how the recommended approach meets it; "
+            "for an approach that does not fit, one line on why not; then one line on what would "
+            "change this recommendation. Do not open by restating the question or mentioning the "
+            "cards. End with the three NEXT: lines as always.)")
 
 
 class AskError(ValueError):
@@ -102,6 +187,8 @@ class Context:
     persona: str = ""                      # an expert's name and brief (experts.py)
     # for an expert: each card's board and title, so a citation can open it
     where: dict = field(default_factory=dict)
+    # an expert's reading of the question before answering (DESIGN.md 46)
+    reading: dict = field(default_factory=dict)
 
     @property
     def tokens(self) -> int:
@@ -340,7 +427,8 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     # Explain more asks for a fuller answer; said with the question, not in
     # the system prompt, so the start of the prompt - and its cache - stay put
     msgs.append({"role": "user", "content": question.strip()
-                 + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")})
+                 + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")
+                 + weighing(ctx.reading)})
     return msgs
 
 
@@ -361,17 +449,53 @@ def check_fits(ctx: Context, question: str, history: list[dict], think: bool) ->
 
 # ------------------------------------------------------------ the answer --
 
+NEXT_ANYCASE = re.compile(r"^[ \t*_>#-]*next:[ \t*_]*(.*?)[ \t*_]*$", re.MULTILINE | re.IGNORECASE)
+
+
+def split_nexts(answer: str) -> tuple[str, list[str]]:
+    """The answer, and the questions it offers next - the "NEXT:" lines that
+    end it (DESIGN.md 46: three). Only lines that end the answer count, so a
+    "NEXT:" the model happens to write mid-answer stays where it is."""
+    questions: list[str] = []
+    end = len(answer)
+    # a bare "NEXT:" with the questions on the lines under it
+    bare = [m for m in NEXT_LINE.finditer(answer) if not m.group(1).strip()]
+    if bare:
+        m = bare[-1]
+        under = [re.sub(r"^[ \t]*(?:[-*•]|\d+[.)])?[ \t]*", "", ln).strip().strip('"“”').strip()
+                 for ln in answer[m.end():].splitlines() if ln.strip()]
+        if 0 < len(under) <= 4 and all(not NEXT_LINE.match(ln) for ln in under):
+            return answer[:m.start()].rstrip(), [CITE.sub("", q).strip() for q in under][:3]
+    for m in reversed(list(NEXT_LINE.finditer(answer))):
+        if answer[m.end():end].strip():
+            break
+        q = re.sub(r"[ \t]+([.,;:?!])", r"\1", CITE.sub("", m.group(1))).strip().strip('"“”').strip()
+        if q:
+            questions.insert(0, q)
+        end = m.start()
+    if not questions:
+        # "Next: ..." in any case counts only as a block of two or more at the end -
+        # a single "Next:" line is just a word in the answer
+        block = []
+        for m in reversed(list(NEXT_ANYCASE.finditer(answer))):
+            if answer[m.end():end].strip():
+                break
+            block.insert(0, m)
+            end = m.start()
+        if len(block) >= 2:
+            questions = [CITE.sub("", m.group(1)).strip().strip('"“”').strip() for m in block]
+        else:
+            end = len(answer)
+    rest = answer[:end].rstrip()
+    # a "Beyond your board:" with nothing after it is left out
+    rest = re.sub(r"\n*[ \t*_#]*Beyond your board:[ \t*_]*$", "", rest).rstrip()
+    return rest, [q for q in questions if q][:3]
+
+
 def split_next(answer: str) -> tuple[str, str]:
-    """The answer, and the question it offers next - taken off its last line.
-    Only a line that ends the answer counts, so a "NEXT:" the model happens to
-    write mid-answer stays where it is. No line, no offer."""
-    found = [m for m in NEXT_LINE.finditer(answer) if not answer[m.end():].strip()]
-    if not found:
-        return answer, ""
-    m = found[-1]
-    question = re.sub(r"[ \t]+([.,;:?!])", r"\1", CITE.sub("", m.group(1)))
-    question = question.strip().strip('"“”').strip()
-    return answer[:m.start()].rstrip(), question
+    """The answer, and the first question it offers next."""
+    answer, questions = split_nexts(answer)
+    return answer, questions[0] if questions else ""
 
 
 def check_citations(answer: str, allowed: set[str]) -> dict:
@@ -406,7 +530,8 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     used = check_fits(ctx, question, history, think)
     yield {"event": "context", "cards": ctx.cards, "pictures": len(ctx.pictures), "tokens": used,
            "whole": ctx.whole, "pictures_left_out": ctx.pictures_left_out,
-           "mode": ctx.mode, "total": ctx.total, "how": ctx.how, "where": ctx.where}
+           "mode": ctx.mode, "total": ctx.total, "how": ctx.how, "where": ctx.where,
+           "reading": ctx.reading}
     text: list[str] = []
     timings: dict = {}
     for ev in model.stream(messages(ctx, question, history),
@@ -422,9 +547,10 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
             yield {"event": "thinking", "text": ev["text"]}
         elif ev["type"] == "done":
             timings = ev
-    answer, next_question = split_next("".join(text))
+    answer, questions = split_nexts("".join(text))
+    next_question = questions[0] if questions else ""
     result = check_citations(answer, set(ctx.cards))
-    yield {"event": "done", **result, "next": next_question,
+    yield {"event": "done", **result, "next": next_question, "nexts": questions,
            "stopped": bool(timings.get("stopped")),
            "tokens_per_second": timings.get("tokens_per_second")}
 

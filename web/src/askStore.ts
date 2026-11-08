@@ -37,6 +37,8 @@ export interface Turn {
   progress?: { done: number; total: number; cached: number }
   /** the question the model offers to answer next */
   next?: string
+  /** the three questions it offers next (DESIGN.md 46) */
+  nexts?: string[]
 }
 
 interface Ask {
@@ -174,6 +176,7 @@ export const useAsk = create<Ask>()((set, get) => ({
           } else if (name === 'done') {
             patch({ text: data.answer, board: data.board, beyond: data.beyond,
                     cited: data.cited, dropped: data.dropped.length, next: data.next || undefined,
+                    nexts: data.nexts?.length ? data.nexts : data.next ? [data.next] : undefined,
                     status: data.stopped ? 'stopped' : 'done' })
           } else if (name === 'error') {
             patch({ error: data.message, status: 'done' })

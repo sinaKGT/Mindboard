@@ -21,7 +21,7 @@ const STARTER = 'What am I missing here?'
  *  line off when the answer is done and sends the question on its own. While
  *  the answer is still being written, the line - or the start of it - is kept
  *  out of sight here. */
-const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
+const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/i
 const hideNext = (text: string) => text.replace(NEXT_LINE, '')
 /** **Beyond your board:**, or a heading of it, read as the plain line - as the
  *  server does (ask.BEYOND_MARK) - so no stray ** is left either side */
@@ -197,12 +197,12 @@ function Answer({ turn, offer, question }: {
               <Icon name="plus" size={11} /> Add to board
             </button>
       ) : null}
-      {offer && turn.next && turn.status === 'done' ? (
+      {offer && turn.nexts?.length && turn.status === 'done' ? (
         <div className="ask-next">
-          <span className="ask-next-lead">Would you like to know</span>
-          <button className="starter" title="Ask this" onClick={() => offer(turn.next!)}>
-            {turn.next}
-          </button>
+          <span className="ask-next-lead">You could ask next</span>
+          {turn.nexts.map((q, i) => (
+            <button key={i} className="starter" title="Ask this" onClick={() => offer(q)}>{q}</button>
+          ))}
         </div>
       ) : null}
     </div>

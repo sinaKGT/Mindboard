@@ -209,17 +209,22 @@ def library(dd: DataDir, expert: dict, embedder=None, embed_model: str = "",
 
 
 def search(lib: Library, question: str, embedder=None, reranker=None,
-           budget: Optional[int] = None) -> retrieve.Found:
+           budget: Optional[int] = None, also: Optional[list[str]] = None) -> retrieve.Found:
     """Each board searched as a board is (retrieve.score), merged by
     reciprocal rank so every board's best cards come near the top, then the
-    strongest that fit one budget."""
+    strongest that fit one budget. `also`: what the reading of the question
+    says to look up as well (DESIGN.md 46) - added beside the question, which
+    counts twice, never instead of it (37)."""
     rankings, used = [], ["keywords"]
     for bid, index in lib.indexes.items():
         mine = {k: v for k, v in lib.nodes.items() if lib.board_of[k] == bid}
         if not mine:
             continue
         scored, how = retrieve.score(index, question, mine, lib.edges, embedder, reranker)
-        rankings.append(retrieve.ranked(scored))
+        rankings += [retrieve.ranked(scored)] * (2 if also else 1)
+        for phrase in also or []:
+            extra, _ = retrieve.score(index, phrase, mine, lib.edges, embedder, reranker)
+            rankings.append(retrieve.ranked(extra))
         used = how
     cost = {}
     for index in lib.indexes.values():
@@ -229,13 +234,16 @@ def search(lib: Library, question: str, embedder=None, reranker=None,
 
 
 def context(dd: DataDir, expert: dict, question: str, history: Optional[list[dict]] = None,
-            embedder=None, embed_model: str = "", reranker=None) -> tuple[Context, Library]:
-    """What the model reads to answer as this expert."""
+            embedder=None, embed_model: str = "", reranker=None,
+            reading: Optional[dict] = None) -> tuple[Context, Library]:
+    """What the model reads to answer as this expert - with its reading of
+    the question, if one was made (ask.analyse)."""
     lib = library(dd, expert, embedder, embed_model)
     if not lib.nodes:
         raise ExpertError("this expert's boards have no cards yet")
     asked = [str(t.get("text", "")) for t in (history or []) if t.get("role") == "user"]
-    found = search(lib, " ".join(asked[-2:] + [question]), embedder, reranker)
+    found = search(lib, " ".join(asked[-2:] + [question]), embedder, reranker,
+                   also=(reading or {}).get("look_up") or None)
     ids = found.ids
     blocks = {i: card_text(lib.nodes[i], lib.nodes) + f"\n    (on the board {lib.titles[lib.board_of[i]]!r})"
               for i in ids}
@@ -267,7 +275,7 @@ def context(dd: DataDir, expert: dict, question: str, history: Optional[list[dic
     ctx = Context(ids, text, pictures, whole=True, pictures_left_out=left, mode="search",
                   total=len(lib.nodes), how=found.how, persona=persona,
                   where={i: {"board": lib.board_of[i], "title": lib.nodes[i].get("title") or "Untitled"}
-                         for i in ids})
+                         for i in ids}, reading=reading or {})
     return ctx, lib
 
 

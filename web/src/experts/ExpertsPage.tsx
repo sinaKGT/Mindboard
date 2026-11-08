@@ -22,11 +22,14 @@ import { SPEEDS, Voice } from './voice'
 const BEYOND = 'Beyond your board:'
 /** **Beyond your board:**, or a heading of it, read as the plain line (as ask.BEYOND_MARK) */
 const BEYOND_MARK = /(^[ \t]*#{1,6}[ \t]*)?(\*\*|__)?[ \t]*Beyond your board:[ \t]*(\*\*|__)?/m
-const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
+const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/i
 const COLOURS = ['#f0c070', '#7fd3c4', '#e9967a', '#d8c8a8', '#b4a0e8', '#8fc8f0', '#e6d36a', '#e88fb4']
 
+/** how the expert read the question before answering (DESIGN.md 46) */
+interface Reading { kind?: string; reading?: string; weigh?: string[] }
+
 interface Turn { role: 'user' | 'expert'; text: string; where?: Record<string, { board: string; title: string }>;
-  next?: string; status?: 'thinking' | 'writing' | 'done'; error?: string; stopped?: boolean }
+  nexts?: string[]; reading?: Reading; status?: 'thinking' | 'writing' | 'done'; error?: string; stopped?: boolean }
 
 /** where a conversation waits while you look at a card it cited */
 const RETURN = 'mb_xp_return'
@@ -289,23 +292,31 @@ export function ExpertsPage() {
     setBusy(true); s.thinking = true
     voice.current.stop()
     let text = ''
+    // it speaks while it writes (DESIGN.md 46): each sentence as soon as it is finished
+    const speaking = voiceReady && voiceOn
+    const who = expertsRef.current.findIndex((x) => x.id === e.id)
+    const name = e.voice || cast[Math.max(who, 0) % Math.max(cast.length, 1)] || 'af_heart'
+    let started = false
     try {
-      await api.askExpert(e.id, { question, history }, (name, data) => {
-        if (name === 'context') patch({ where: data.where })
-        else if (name === 'text') {
+      await api.askExpert(e.id, { question, history }, (kind, data) => {
+        if (kind === 'context') patch({ where: data.where, reading: data.reading })
+        else if (kind === 'text') {
           text += data.text
           s.thinking = false
           patch({ text, status: 'writing' })
-        } else if (name === 'done') {
-          patch({ text: data.answer, next: data.next || undefined, status: 'done' })
-          // and it says it, in its own voice
-          if (voiceReady && voiceOn && data.answer) {
-            const i = expertsRef.current.findIndex((x) => x.id === e.id)
-            const spoken = data.next ? `${data.answer}\n\nWould you like to know: ${data.next}` : data.answer
-            void voice.current.say(spoken, e.voice || cast[Math.max(i, 0) % Math.max(cast.length, 1)] || 'af_heart')
+          if (speaking) {
+            if (!started) { voice.current.begin(name); started = true }
+            voice.current.feed(text)
+          }
+        } else if (kind === 'done') {
+          const nexts: string[] = data.nexts?.length ? data.nexts : data.next ? [data.next] : []
+          patch({ text: data.answer, nexts, status: 'done' })
+          if (speaking && (text || data.answer)) {
+            if (!started) voice.current.begin(name)
+            voice.current.end(text || data.answer, nexts[0] ? `Would you like to know: ${nexts[0]}` : '')
           }
         }
-        else if (name === 'error') patch({ error: data.message, status: 'done' })
+        else if (kind === 'error') { patch({ error: data.message, status: 'done' }); if (started) voice.current.end(text) }
       }, ctl.signal)
     } catch (err: any) {
       if (!ctl.signal.aborted) patch({ error: err.message || 'could not ask', status: 'done' })
@@ -405,6 +416,12 @@ export function ExpertsPage() {
               ? <div key={i} className="xp-q">{t.text}</div>
               : (
                 <div key={i} className="xp-a">
+                  {t.reading?.weigh?.length ? (
+                    <div className="xp-reading" title="How the expert read your question before answering">
+                      <span className="xp-reading-head">Read as</span> {t.reading.reading}
+                      <div className="xp-weigh">{t.reading.weigh.map((w, j) => <span key={j}>{w}</span>)}</div>
+                    </div>
+                  ) : null}
                   {t.status === 'thinking' ? <div className="xp-note">Thinking…</div> : <Said turn={t} onCard={goToCard} />}
                   {t.stopped ? <div className="xp-note">Stopped</div> : null}
                   {t.error ? <div className="xp-error">{t.error}</div> : null}
@@ -414,9 +431,9 @@ export function ExpertsPage() {
                   ) : t.status === 'done' && t.text.trim() && !t.error && !(busy && i === turns.length - 1) ? (
                     <button className="xp-add" onClick={() => setAdding(i)}>+ Add to board</button>
                   ) : null}
-                  {t.next && i === turns.length - 1 && !busy ? (
-                    <div className="xp-next"><span>Would you like to know</span>
-                      <button onClick={() => send(t.next!)}>{t.next}</button></div>
+                  {t.nexts?.length && i === turns.length - 1 && !busy ? (
+                    <div className="xp-next"><span>You could ask next</span>
+                      {t.nexts.map((q, j) => <button key={j} onClick={() => send(q)}>{q}</button>)}</div>
                   ) : null}
                 </div>
               ))}
