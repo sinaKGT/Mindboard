@@ -369,7 +369,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             board_or_404(bid)
             model = local_model()
             if model is None:
-                raise HTTPException(503, "Ask your board is not set up yet - choose 8 in the "
+                raise HTTPException(503, "Ask your board is not set up yet - choose 6 in the "
                                          "Mindboard menu, or run: mindboard ai install")
             if model._asking.locked():
                 raise HTTPException(409, "still answering the last question")
@@ -507,7 +507,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         def prepare():
             model = local_model()
             if model is None:
-                raise HTTPException(503, "Ask your board is not set up yet - choose 8 in the "
+                raise HTTPException(503, "Ask your board is not set up yet - choose 6 in the "
                                          "Mindboard menu, or run: mindboard ai install")
             if model._asking.locked():
                 raise HTTPException(409, "still answering the last question")

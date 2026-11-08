@@ -18,19 +18,21 @@ nothing installed system-wide. After that you get a menu:
   ● Mindboard 0.1.0
     3 boards · C:\Users\you\AppData\Roaming\Mindboard
 
-    1  Open Mindboard          run it and open your browser
-    2  Back up all boards      everything, media included, into one zip
-    3  Restore from a backup   put your boards back
-    4  My boards
-    5  Check the install
-    6  Open the data folder
-    7  Reinstall / update
+    1  Open my boards         run Mindboard and open your boards
+    2  Talk to my experts     run Mindboard and open the Experts
+    3  Back up all boards     everything, media included, into one zip
+    4  Restore from a backup  put your boards back
+    5  My boards              list them here
+    6  Set up the AI          the local model and the experts' voice
+    7  Check the install
+    8  Open the data folder
+    9  Reinstall / update     get the latest version
     q  Quit
 
   Choose (1):
 ```
 
-Press `1` and Enter. Your browser opens on the board list; press Enter again in
+Press `1` and Enter for your boards, or `2` for your experts. Your browser opens; press Enter again in
 that window whenever you want to stop the app. Nothing needs saving by hand.
 
 ### If you prefer a terminal
@@ -117,7 +119,7 @@ answers several times faster than one that spills over:
 It tells you what it found and what it picked before downloading anything;
 `--model <size>` chooses another.
 
-Menu option **8**, or from a terminal:
+Menu option **6** (*Set up the AI*), or from a terminal:
 
 ```
 mindboard ai install      # says what it found, what it will download, and asks first
@@ -228,7 +230,7 @@ pronunciation step uses espeak-ng, which is GPL-3.0.)
 
 ## Backing up
 
-Menu options **2** and **3**, or from a terminal:
+Menu options **3** and **4**, or from a terminal:
 
 ```
 mindboard backup                     # every board, media included, into one zip

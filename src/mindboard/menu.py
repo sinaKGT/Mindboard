@@ -88,14 +88,15 @@ def _header(dd) -> None:
 
 
 OPTIONS = [
-    ("1", "Open Mindboard", "run it and open your browser"),
-    ("2", "Back up all boards", "everything, media included, into one zip"),
-    ("3", "Restore from a backup", "put your boards back"),
-    ("4", "My boards", ""),
-    ("5", "Check the install", ""),
-    ("6", "Open the data folder", ""),
-    ("7", "Reinstall / update", ""),
-    ("8", "Ask your board", "set up the local model, or check it"),
+    ("1", "Open my boards", "run Mindboard and open your boards"),
+    ("2", "Talk to my experts", "run Mindboard and open the Experts"),
+    ("3", "Back up all boards", "everything, media included, into one zip"),
+    ("4", "Restore from a backup", "put your boards back"),
+    ("5", "My boards", "list them here"),
+    ("6", "Set up the AI", "the local model and the experts' voice"),
+    ("7", "Check the install", ""),
+    ("8", "Open the data folder", ""),
+    ("9", "Reinstall / update", "get the latest version"),
     ("q", "Quit", ""),
 ]
 
@@ -103,19 +104,21 @@ OPTIONS = [
 def _menu(dd) -> str:
     _header(dd)
     for key, label, note in OPTIONS:
-        tail = f"   [{DIM}]{note}[/{DIM}]" if note else ""
-        console.print(f"    [bold {ACCENT}]{key}[/bold {ACCENT}]  {label}{tail}")
+        tail = f"[{DIM}]{note}[/{DIM}]" if note else ""
+        console.print(f"    [bold {ACCENT}]{key}[/bold {ACCENT}]  {label:<23}{tail}")
     console.print()
     return _ask(f"Choose [{DIM}](1)[/{DIM}]:", "1").lower()
 
 
-def _open_app(dd) -> None:
+def _open_app(dd, page: str = "") -> None:
+    """Run Mindboard and open the browser on a page: the boards, or with
+    page="#/experts" the Experts."""
     token = access_token(dd)
     already = running_instance(DEFAULT_PORT)
     if already:
         console.print(f"\n  Mindboard is already running on port {DEFAULT_PORT}.")
         if _yes("Open it in your browser?", True):
-            open_in_browser(board_url(DEFAULT_PORT, token), delay=0.1)
+            open_in_browser(board_url(DEFAULT_PORT, token) + page, delay=0.1)
         _pause()
         return
 
@@ -129,18 +132,18 @@ def _open_app(dd) -> None:
 
     if not ui_built():
         console.print("\n  [red]The interface has not been built yet.[/red]")
-        console.print(f"  [{DIM}]Choose 7 (Reinstall / update) to finish setting up.[/{DIM}]")
+        console.print(f"  [{DIM}]Choose 9 (Reinstall / update) to finish setting up.[/{DIM}]")
         _pause()
         return
 
-    url = board_url(port, token)
+    url = board_url(port, token) + page
     console.clear()
     console.print()
     console.print(f"  [{ACCENT}]●[/{ACCENT}] [bold]Starting Mindboard...[/bold]")
 
     server, thread = serve_background(dd, token, port)
     if not getattr(server, "started", False):
-        console.print("\n  [red]The server did not start. Choose 5 to check the"
+        console.print("\n  [red]The server did not start. Choose 7 to check the"
                       " install.[/red]")
         stop_server(server, thread, timeout=2)
         _pause()
@@ -379,6 +382,11 @@ def _reinstall(dd) -> None:
         console.print(f"  [red]Cannot find {script.name}[/red]")
         _pause()
         return
+    if running_instance(DEFAULT_PORT):
+        console.print(f"  Mindboard is still running on port {DEFAULT_PORT} - in another window.")
+        console.print(f"  [{DIM}]Stop it there first (press Enter in that window), then choose 9 again.[/{DIM}]")
+        _pause()
+        return
     if sys.platform.startswith("win"):
         # This menu runs from the environment the installer updates, and Windows
         # will not replace a program that is running. Run inside it, the
@@ -394,8 +402,9 @@ def _reinstall(dd) -> None:
             _pause()
             return
         console.print("  The installer has opened in its own window.")
-        console.print(f"  [{DIM}]This window closes now so it can update Mindboard."
-                      f" Start Mindboard again when it says it is done.[/{DIM}]\n")
+        console.print(f"  [{DIM}]This window closes now so it can update Mindboard. If anything"
+                      f" else from Mindboard is still open, the installer says what and offers"
+                      f" to stop it. Start Mindboard again when it says it is done.[/{DIM}]\n")
         raise SystemExit(0)
     console.print(f"  Running [bold]{script.name}[/bold] ...\n")
     try:
@@ -409,9 +418,9 @@ def _reinstall(dd) -> None:
 
 def run_menu(data_dir: Optional[str] = None) -> None:
     dd = resolve_data_dir(data_dir)
-    actions = {"1": _open_app, "2": _backup, "3": _restore,
-               "4": _boards, "5": _check, "6": lambda d: _open_data(d),
-               "7": _reinstall, "8": _ask_your_board}
+    actions = {"1": _open_app, "2": lambda d: _open_app(d, "#/experts"),
+               "3": _backup, "4": _restore, "5": _boards, "6": _setup_ai,
+               "7": _check, "8": lambda d: _open_data(d), "9": _reinstall}
     while True:
         choice = _menu(dd)
         if choice in ("q", "quit", "exit"):
@@ -426,8 +435,10 @@ def run_menu(data_dir: Optional[str] = None) -> None:
             continue
 
 
-def _ask_your_board(dd) -> None:
-    """Set the local model up the first time; check it every time after."""
+def _setup_ai(dd) -> None:
+    """The local model, set up the first time and checked after; then the
+    experts' voice - to speak and to listen - if it is not set up yet."""
+    from . import voice
     from .llm import find_install
     from .llm_setup import run_check, setup
 
@@ -435,6 +446,22 @@ def _ask_your_board(dd) -> None:
         setup(console, lambda q: _yes(q, False))
     else:
         run_check(console)
+    if find_install() is not None and not (voice.installed() and voice.can_listen()):
+        console.print()
+        console.print("  [bold]The experts' voice[/bold] - they speak their answers, and you can")
+        console.print(f"  speak to them. About 510 MB, once; everything stays on this computer.")
+        console.print(f"  [{DIM}]Its pronunciation step uses espeak-ng (GPL-3.0).[/{DIM}]")
+        if _yes("Set up the voice now?", True):
+            def show(name, done, total):
+                console.print(f"\r  {name}: {100 * done // max(total, 1):3d}%", end="")
+            try:
+                voice.install(progress=show)
+                voice.install_listening(progress=show)
+                console.print("\n  The voice is set up.")
+            except voice.VoiceError as exc:
+                console.print(f"\n  [red]{exc}[/red]")
+    elif voice.installed():
+        console.print(f"\n  [{DIM}]The experts' voice is set up - speaking and listening.[/{DIM}]")
     _pause()
 
 

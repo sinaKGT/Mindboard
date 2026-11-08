@@ -52,15 +52,37 @@ function Wait-Unused {
   if (-not $full) { return }
   $prefix = $full.Path.TrimEnd('\') + '\'
   $self = $PID
-  for ($i = 0; $i -lt 30; $i++) {
-    $busy = Get-Process -ErrorAction SilentlyContinue |
-      Where-Object { $_.Id -ne $self -and $_.Path -and $_.Path.StartsWith($prefix, 'OrdinalIgnoreCase') }
-    if (-not $busy) { return }
-    if ($i -eq 0) { Say "waiting       for Mindboard to close ..." }
+  $busyNow = { Get-Process -ErrorAction SilentlyContinue |
+      Where-Object { $_.Id -ne $self -and $_.Path -and $_.Path.StartsWith($prefix, 'OrdinalIgnoreCase') } }
+  # the menu that started this closes itself: give it a few seconds
+  for ($i = 0; $i -lt 6; $i++) {
+    if (-not (& $busyNow)) { return }
+    if ($i -eq 0) { Say "waiting       for the menu to close ..." }
     Start-Sleep -Seconds 1
   }
-  Fail ("Mindboard is still running from this folder, so it cannot be updated. Close it " +
-        "(press Enter in its window, or close the window), then run this again.")
+  # anything still open is another Mindboard window: say what, and offer to stop it
+  $busy = & $busyNow
+  Write-Host ""
+  Write-Host "  Mindboard is still running from this folder, so it cannot be updated yet:"
+  foreach ($p in $busy) {
+    $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction SilentlyContinue).CommandLine
+    $what = if ($cmd -match ' run') { "Mindboard itself (a board or the Experts open in a browser)" }
+            elseif ($cmd -match ' menu') { "the Mindboard menu, in another window" }
+            else { $p.ProcessName }
+    Write-Host ("    - {0}   (process {1})" -f $what, $p.Id)
+  }
+  Write-Host ""
+  $answer = Read-Host "  Stop it and update now? Your work is already saved. [Y/n]"
+  if ($answer -match '^(n|no)$') {
+    Fail ("Not updated. Close Mindboard (press Enter in its window, or close the window), " +
+          "then choose Reinstall / update again.")
+  }
+  $busy | Stop-Process -Force -ErrorAction SilentlyContinue
+  for ($i = 0; $i -lt 10; $i++) {
+    if (-not (& $busyNow)) { Say "stopped       the running Mindboard"; return }
+    Start-Sleep -Milliseconds 500
+  }
+  Fail "Could not stop the running Mindboard - close its window, then run this again."
 }
 
 # An install can look successful and still be unusable - a stale or half-written
