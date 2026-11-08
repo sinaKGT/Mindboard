@@ -54,7 +54,7 @@ nothing installed system-wide. After that you get a menu:
   ● Mindboard 0.1.0
     3 boards · C:\Users\you\AppData\Roaming\Mindboard
 
-    1  Open my boards         run Mindboard and open your boards
+    1  Open Mindboard         the first page: your boards or your experts
     2  Talk to my experts     run Mindboard and open the Experts
     3  Back up all boards     everything, media included, into one zip
     4  Restore from a backup  put your boards back
@@ -68,11 +68,11 @@ nothing installed system-wide. After that you get a menu:
   Choose (1):
 ```
 
-Press `1` and Enter for your boards, or `2` for your experts. Your browser
+Press `1` and Enter to open Mindboard, or `2` to go straight to your experts. Your browser
 opens; press Enter again in that window whenever you want to stop the app.
 Nothing needs saving by hand.
 
-Opened any other way, Mindboard starts on the welcome page above: the two signs
+Mindboard starts on the welcome page above: the two signs
 gather out of the dust, the Eye of Horus for your experts and the scroll and
 reed pen for your boards. Click one to go in.
 

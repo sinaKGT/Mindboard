@@ -88,7 +88,7 @@ def _header(dd) -> None:
 
 
 OPTIONS = [
-    ("1", "Open my boards", "run Mindboard and open your boards"),
+    ("1", "Open Mindboard", "the first page: your boards or your experts"),
     ("2", "Talk to my experts", "run Mindboard and open the Experts"),
     ("3", "Back up all boards", "everything, media included, into one zip"),
     ("4", "Restore from a backup", "put your boards back"),
@@ -418,7 +418,7 @@ def _reinstall(dd) -> None:
 
 def run_menu(data_dir: Optional[str] = None) -> None:
     dd = resolve_data_dir(data_dir)
-    actions = {"1": lambda d: _open_app(d, "#/boards"), "2": lambda d: _open_app(d, "#/experts"),
+    actions = {"1": _open_app, "2": lambda d: _open_app(d, "#/experts"),
                "3": _backup, "4": _restore, "5": _boards, "6": _setup_ai,
                "7": _check, "8": lambda d: _open_data(d), "9": _reinstall}
     while True:

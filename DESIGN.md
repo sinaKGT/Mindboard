@@ -2533,8 +2533,11 @@ on a narrow one. The pointer eats the drifting dust as on the Experts page -
 are never touched.
 
 Routes: closing a board goes back to your boards; the Experts' *Mindboard*
-crumb goes to this page. The menu's *Open my boards* opens the board list
-directly, *Talk to my experts* the Experts.
+crumb goes to this page. The menu's *Open Mindboard* opens this page - it is
+the choice between boards and experts - and *Talk to my experts* goes
+straight to the Experts. (Option 1 first opened the board list directly,
+from before this page existed; opened that way the first page was never
+seen.)
 
 193 tests.
 
