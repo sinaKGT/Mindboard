@@ -8,6 +8,8 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { api } from './api'
+import { AnswerFiles, filesToOffer } from './AnswerFiles'
+import { AnswerPictures } from './AnswerPictures'
 import { cardsInside, revealCard, useAsk, type Turn } from './askStore'
 import { Icon } from './icons'
 import { Prose } from './Prose'
@@ -41,6 +43,35 @@ function Cite({ id }: { id: string }) {
  *  [[card]] citations as chips. Nothing is ever interpreted as HTML. */
 function Rich({ text }: { text: string }) {
   return <Prose text={text} cite={(id) => <Cite id={id} />} />
+}
+
+/** The pictures an answer cites, shown under it (DESIGN.md 48) - from the
+ *  board's own cards, which this page already has. */
+function CitedPictures({ turn }: { turn: Turn }) {
+  const nodes = useStore((s) => s.nodes)
+  const boardId = useStore((s) => s.boardId)
+  if (!boardId) return null
+  const pictures = (turn.cited ?? []).flatMap((id) => {
+    const n = nodes[id]
+    const sha = !n ? undefined : (n.type === 'image' ? n.content.sha256 : n.type === 'video' ? n.content.poster : undefined)
+    return typeof sha === 'string' ? [{ card: id, board: boardId, sha, title: n.title || 'Untitled' }] : []
+  })
+  return <AnswerPictures pictures={pictures} onShow={(p) => revealCard(p.card)} />
+}
+
+/** The PDFs this answer touches, offered to read more (DESIGN.md 48). */
+function OfferedFiles({ turn }: { turn: Turn }) {
+  const nodes = useStore((s) => s.nodes)
+  const boardId = useStore((s) => s.boardId)
+  if (!boardId) return null
+  const files = filesToOffer(turn.cited ?? [], turn.cards ?? [], (id) => {
+    const n = nodes[id]
+    const sha = n?.content.sha256
+    const name = String(n?.content.filename || n?.content.alt || n?.title || '')
+    const pdf = n?.type === 'file' && typeof sha === 'string' && (n.content.mime === 'application/pdf' || /\.pdf$/i.test(name))
+    return pdf ? { card: id, board: boardId, sha: sha as string, name } : null
+  })
+  return <AnswerFiles files={files} onShow={(f) => revealCard(f.card)} />
 }
 
 const fmt = (n: number) => n.toLocaleString()
@@ -168,6 +199,7 @@ function Answer({ turn, offer, question }: {
         </div>
       ) : null}
       {turn.status === 'writing' ? <span className="caret" /> : null}
+      {turn.status === 'done' ? <><CitedPictures turn={turn} /><OfferedFiles turn={turn} /></> : null}
       {turn.error ? <div className="ask-error">{turn.error}</div> : null}
       {turn.status === 'stopped' ? <div className="ask-note">Stopped.</div> : null}
       {turn.mode === 'search' && turn.status && ['done', 'stopped'].includes(turn.status) ? (

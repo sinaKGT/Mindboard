@@ -53,8 +53,12 @@ export function Viewer() {
   )
 }
 
-function Open({ src, title, alt, openedAt }: {
+/** The open picture itself. The canvas opens it for an image card (above); an
+ *  answer opens it for a picture it cites (AnswerPictures), with `onClose` and
+ *  an `action` of its own - "Show on its board". */
+export function Open({ src, title, alt, openedAt, onClose, action }: {
   src: string; title: string; alt: string; openedAt: number
+  onClose?: () => void; action?: { label: string; run: () => void }
 }) {
   const root = useRef<HTMLDivElement>(null)
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
@@ -77,7 +81,8 @@ function Open({ src, title, alt, openedAt }: {
 
   const close = () => {
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
-    useUI.getState().set('viewing', null)
+    if (onClose) onClose()
+    else useUI.getState().set('viewing', null)
   }
 
   /** Fitted to the window, but never blown up past its own pixels: a small
@@ -288,6 +293,10 @@ function Open({ src, title, alt, openedAt }: {
 
       <div className="viewer-caption">
         {title ? <div className="viewer-title">{title}</div> : null}
+        {action ? (
+          <button className="viewer-action" onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => { close(); action.run() }}>{action.label}</button>
+        ) : null}
         <div className="viewer-hint">
           scroll to zoom · drag to move · double-click for actual size · F full screen · Esc to close
         </div>

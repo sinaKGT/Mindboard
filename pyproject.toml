@@ -21,6 +21,9 @@ dependencies = [
   # stemmed keyword search, numpy for exact vector search
   "tantivy>=0.27",
   "numpy>=2.0",
+  # a PDF's text, read once so it is found by what it covers (DESIGN.md 48):
+  # pure Python, BSD-3-Clause
+  "pypdf>=5.0",
 ]
 
 [project.optional-dependencies]

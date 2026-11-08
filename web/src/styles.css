@@ -1187,3 +1187,46 @@ a.btn { text-decoration: none; }
 .turn .prose-table-wrap { overflow-x: auto; }
 .turn .prose-table { border-collapse: collapse; }
 .turn .prose-table th, .turn .prose-table td { padding: 3px 8px; border-bottom: 1px solid var(--mb-border, #8884); text-align: left; vertical-align: top; }
+
+/* ---------------------------------------------------- pictures in answers -- */
+/* The pictures an answer cites, under it (AnswerPictures, DESIGN.md 48). */
+.answer-pictures { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 2px; }
+.answer-picture {
+  display: flex; flex-direction: column; width: 132px; padding: 0; overflow: hidden; text-align: left;
+  border-radius: 8px; border: 1px solid var(--mb-border); background: var(--mb-surface-2); cursor: zoom-in;
+  transition: border-color .15s, transform .15s;
+}
+.answer-picture:hover { border-color: var(--mb-accent); transform: translateY(-1px); }
+.answer-picture img { width: 100%; height: 88px; object-fit: contain; display: block; background: var(--mb-surface-3); }
+.answer-picture-title {
+  padding: 4px 7px 5px; font-size: 11px; color: var(--mb-text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* the caption lets clicks through to the dark behind it; its button takes them */
+.viewer-action {
+  pointer-events: auto; margin-top: 6px; padding: 3px 12px; border-radius: 999px; font-size: 12px;
+  color: #e7eaf0; border: 1px solid #ffffff40; background: #ffffff14;
+}
+.viewer-action:hover { background: #ffffff26; }
+.answer-picture.is-missing { cursor: default; }
+.answer-picture.is-missing:hover { transform: none; }
+.answer-picture-gone {
+  height: 88px; display: flex; align-items: center; justify-content: center; padding: 0 8px; text-align: center;
+  font-size: 11px; color: var(--mb-text-faint); background: var(--mb-surface-3);
+}
+
+/* the PDFs an answer touches, to read more (AnswerFiles, DESIGN.md 48) */
+.answer-files { margin: 10px 0 2px; display: flex; flex-direction: column; gap: 4px; }
+.answer-files-lead { font-size: 11px; color: var(--mb-text-faint); letter-spacing: .04em; }
+.answer-file {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px;
+  border: 1px solid var(--mb-border); background: var(--mb-surface-2); font-size: 12.5px;
+}
+.answer-file-badge {
+  flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .06em; padding: 1px 5px; border-radius: 4px;
+  color: #ff8a7a; border: 1px solid #ff8a7a66;
+}
+.answer-file-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mb-text); }
+.answer-file-btn { flex: none; font-size: 11.5px; padding: 2px 9px; border-radius: 999px; color: var(--mb-accent); border: 1px solid var(--mb-border); }
+.answer-file-btn:hover { border-color: var(--mb-accent); }
+.answer-files-said { font-size: 11.5px; color: var(--mb-text-dim); }

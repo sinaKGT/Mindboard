@@ -19,7 +19,7 @@ from typing import Any, Iterator, Optional
 
 from . import retrieve
 from .assets import resolve
-from .search_index import BoardIndex, PictureNotes
+from .search_index import BoardIndex, FileNotes, PictureNotes, card_notes, file_of
 from .ops import read_graph
 from .paths import DataDir
 
@@ -48,6 +48,10 @@ BEYOND_MARK = re.compile(r"(?:^[ \t]*#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*Beyond your
                          r"(?:\*\*|__)?", re.MULTILINE)
 CITE = re.compile(r"\[\[([0-9A-Za-z]{26})\]\]")
 LONE_ID = re.compile(r"(?<!\[)\[([0-9A-Z]{26})\](?!\])")
+# Told its cited pictures are shown, the model once also wrote a markdown image
+# - "[![diagram](file.png)](https://...)" with an address it made up. The
+# citation shows the picture (DESIGN.md 48); an image it writes is taken out.
+MD_IMAGE = re.compile(r"\[?!\[[^\]\n]*\]\([^)\n]*\)(?:\]\([^)\n]*\))?")
 # the question the model offers to answer next, on the answer's last line
 NEXT = "NEXT:"
 NEXT_LINE = re.compile(r"^[ \t*_>#-]*NEXT:[ \t*_]*(.*?)[ \t*_]*$", re.MULTILINE)
@@ -62,7 +66,13 @@ SYSTEM = f"""You help one person think, using their own mind map.
 CARDS are their notes. Each starts with its id in brackets, like [01ABC...]. A
 PICTURE belongs to the card named just before it. RELATIONSHIPS are claims the
 person made about how their cards connect - treat them as their judgement, not
-yours; "contradicts" means they think the two disagree.
+yours; "contradicts" means they think the two disagree. A picture card you cite
+is shown to the person beside your answer: when they ask to see, show or find a
+picture, diagram or screenshot, cite the cards whose pictures show it - never
+say you cannot show pictures, and never write an image or a link to one: the
+citation is what shows it. A FILE card's text is excerpted under it ("file
+holds"): when a file covers what they ask, cite it - it is offered to them to
+read more.
 
 How to answer:
 1. Answer from the cards first. Every time you use something from a card, cite
@@ -293,10 +303,23 @@ class Context:
     # an expert's plan for the question - its reading, steps and what they
     # found - made before answering (DESIGN.md 46-47)
     reading: dict = field(default_factory=dict)
+    # PDFs that match the question itself, offered to read more (DESIGN.md 48)
+    offer: list[str] = field(default_factory=list)
 
     @property
     def tokens(self) -> int:
         return estimate(self.text) + sum(p.tokens for p in self.pictures)
+
+
+FILE_EXCERPT = 700       # characters of a PDF's text the model reads with its card
+
+
+def file_excerpt(dd: DataDir, node: dict) -> str:
+    """The start of a PDF's text, under its card, so the model knows what the
+    file covers and can offer it (DESIGN.md 48). "" for other cards."""
+    sha = file_of(node)
+    text = FileNotes.get(dd).notes.get(sha) if sha else ""
+    return f"\n    file holds: {text[:FILE_EXCERPT]}" if text else ""
 
 
 def estimate(text: str) -> int:
@@ -399,7 +422,7 @@ def board_index(dd: DataDir, conn: sqlite3.Connection, bid: str, nodes: dict[str
     row = conn.execute("SELECT revision FROM board WHERE id=?", (bid,)).fetchone()
     revision = row["revision"] if row else 0
     index = BoardIndex.get(dd, bid)
-    notes = PictureNotes.get(dd).notes
+    notes = card_notes(dd)
     try:
         if not background:
             index.sync(nodes, revision, embedder, embed_model, notes)
@@ -457,7 +480,7 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
         ids, mode, how = expand(nodes, chosen), "chosen", ""
         if not ids:
             raise AskError("none of those cards are on this board any more")
-    blocks = {i: card_text(nodes[i], nodes) for i in ids}
+    blocks = {i: card_text(nodes[i], nodes) + file_excerpt(dd, nodes[i]) for i in ids}
 
     inside = set(ids)
     pictures: list[Picture] = []
@@ -619,7 +642,8 @@ def check_citations(answer: str, allowed: set[str]) -> dict:
 
     # the model sometimes copies an id as the RELATIONSHIPS list writes it,
     # in single brackets: read it as the citation it is meant to be
-    answer = LONE_ID.sub(r"[[\1]]", BEYOND_MARK.sub(BEYOND, answer))
+    answer = LONE_ID.sub(r"[[\1]]", BEYOND_MARK.sub(BEYOND, MD_IMAGE.sub("", answer)))
+    answer = re.sub(r"\n{3,}", "\n\n", answer)
     clean = CITE.sub(keep, answer)
     clean = re.sub(r"[ \t]+([.,;:])", r"\1", clean)
     board, _, beyond = clean.partition(BEYOND)
@@ -636,7 +660,7 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     yield {"event": "context", "cards": ctx.cards, "pictures": len(ctx.pictures), "tokens": used,
            "whole": ctx.whole, "pictures_left_out": ctx.pictures_left_out,
            "mode": ctx.mode, "total": ctx.total, "how": ctx.how, "where": ctx.where,
-           "reading": ctx.reading}
+           "reading": ctx.reading, "offer": ctx.offer}
     text: list[str] = []
     timings: dict = {}
     for ev in model.stream(messages(ctx, question, history),

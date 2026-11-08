@@ -80,6 +80,23 @@ def picture_of(node: dict) -> Optional[str]:
         c.get("poster") if node.get("type") == "video" else None)
 
 
+def file_of(node: dict) -> Optional[str]:
+    """The PDF a file card holds, by its hash - the files whose text is read
+    (DESIGN.md 48). Other files are found by their name and note only."""
+    c = node.get("content") or {}
+    name = str(c.get("filename") or c.get("alt") or node.get("title") or "")
+    if node.get("type") == "file" and c.get("sha256") and (
+            c.get("mime") == "application/pdf" or name.lower().endswith(".pdf")):
+        return c["sha256"]
+    return None
+
+
+def noted(node: dict) -> Optional[str]:
+    """The hash under which a card's derived words are kept: its picture's, or
+    its PDF's."""
+    return picture_of(node) or file_of(node)
+
+
 class PictureNotes:
     """What each picture shows, in words, by the picture's hash (DESIGN.md 38):
     written once by the local model (indexer.py), so a picture is found by what
@@ -88,6 +105,7 @@ class PictureNotes:
     regenerated if deleted."""
 
     _all: dict[str, "PictureNotes"] = {}
+    FILE = "pictures.json"
 
     def __init__(self, path: Path):
         self.path = path
@@ -99,7 +117,7 @@ class PictureNotes:
 
     @classmethod
     def get(cls, dd: DataDir) -> "PictureNotes":
-        key = str(dd.root / "search" / "pictures.json")
+        key = str(dd.root / "search" / cls.FILE)
         with _registry:
             if key not in cls._all:
                 cls._all[key] = cls(Path(key))
@@ -114,6 +132,21 @@ class PictureNotes:
             tmp.replace(self.path)
 
 
+class FileNotes(PictureNotes):
+    """The text of each PDF on the boards, by the file's hash (DESIGN.md 48):
+    read once by the background indexer, so a PDF is found by what it covers,
+    not only by its name. Kept like the pictures' descriptions, in
+    `<data>/search/files.json`; "" marks a PDF with no text to read (a scan)."""
+
+    _all: dict[str, "PictureNotes"] = {}
+    FILE = "files.json"
+
+
+def card_notes(dd: DataDir) -> dict[str, str]:
+    """Every card's derived words, by hash: pictures' descriptions and PDFs' text."""
+    return {**PictureNotes.get(dd).notes, **FileNotes.get(dd).notes}
+
+
 def card_fields(node: dict, nodes: dict[str, dict],
                 notes: Optional[dict[str, str]] = None) -> dict[str, str]:
     c = node.get("content") or {}
@@ -122,9 +155,9 @@ def card_fields(node: dict, nodes: dict[str, dict],
         trail.insert(0, cur.get("title") or "")
         cur = nodes.get(cur.get("parent") or "")
     body = [str(c.get(k) or "") for k in ("text", "summary", "excerpt", "alt", "filename", "url")]
-    seen = (notes or {}).get(picture_of(node) or "")
+    seen = (notes or {}).get(noted(node) or "")
     if seen:
-        body.append(f"Picture shows: {seen}")
+        body.append(f"Picture shows: {seen}" if picture_of(node) else f"File holds: {seen}")
     return {"title": node.get("title") or "", "body": "\n".join(b for b in body if b),
             "path": " / ".join(t for t in trail if t)}
 
@@ -269,7 +302,7 @@ class BoardIndex:
             if notes is not None:
                 self.notes = notes
             shown = sorted((s, self.notes[s]) for n in nodes.values()
-                           if (s := picture_of(n)) and s in self.notes)
+                           if (s := noted(n)) and s in self.notes)
             notes_key = hashlib.sha1(json.dumps(shown).encode("utf-8")).hexdigest()
             if (revision == self.revision and self.index is not None
                     and self._passages is not None and notes_key == self._notes_key):

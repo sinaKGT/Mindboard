@@ -613,3 +613,15 @@ def test_a_run_holds_the_model_once_and_a_stop_holds_for_the_rest_of_it(model):
         assert again[-1]["type"] == "done" and not again[-1]["stopped"], "a new question starts afresh"
     finally:
         m.stop()
+
+
+def test_an_image_the_model_writes_is_taken_out():
+    """The citation shows a picture (DESIGN.md 48); a markdown image the model
+    writes - once with an address it made up - is removed."""
+    cid = "A" * 26
+    got = ask.check_citations(
+        f"Here is the diagram:\n\n[![Pipeline](pipeline.png)](https://user-images.example.com/1)\n\n"
+        f"It starts with the query [[{cid}]], see ![x](y.png) there.", {cid})
+    assert "![" not in got["answer"] and "example.com" not in got["answer"]
+    assert got["answer"].startswith("Here is the diagram:\n\nIt starts with the query")
+    assert got["cited"] == [cid]

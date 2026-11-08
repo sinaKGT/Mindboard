@@ -185,6 +185,9 @@ const apiMore = {
 
   assetUrl: (boardId: string, sha: string) =>
     `/api/boards/${boardId}/assets/${sha}${token ? `?t=${encodeURIComponent(token)}` : ''}`,
+  /** a picture, small: made once on the server and kept (assets.thumbnail) */
+  thumbUrl: (boardId: string, sha: string, size = 240) =>
+    `/api/boards/${boardId}/assets/${sha}/thumb?size=${size}${token ? `&t=${encodeURIComponent(token)}` : ''}`,
   exportUrl: (boardId: string) =>
     `/api/boards/${boardId}/export${token ? `?t=${encodeURIComponent(token)}` : ''}`,
   backupUrl: () => `/api/backup${token ? `?t=${encodeURIComponent(token)}` : ''}`,

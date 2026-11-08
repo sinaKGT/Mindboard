@@ -2782,3 +2782,76 @@ was; it is not used for Ask your board, only for experts; and a follow-up
 like "why did you choose that?" sees the earlier answer, not its plan.
 
 218 tests.
+
+## 48. Pictures and PDFs, shown and offered with the answer (2026-11-08)
+
+Search already found a picture by what it shows (§38), and the model read the
+best pictures themselves, but an answer showed a cited picture only as its
+title, a chip. Seeing it meant going to its board; from an expert, that meant
+leaving the conversation. PDFs were stored and opened in the person's
+reader, but their text was never read: a PDF was found only by its name and
+whatever note was written on its card.
+
+**Pictures in the answer** (`AnswerPictures.tsx`, board chat and Experts).
+- Each picture card an answer cites appears under it as a thumbnail, in the
+  order cited, at most 6. The server already made and kept thumbnails
+  (`/assets/{sha}/thumb`).
+- A click opens it full size over the page, in the canvas's own viewer
+  (`Viewer.Open`, now reusable: zoom, drag, full screen, Esc), with "Show on
+  its board" for its place in the map. It opens in a portal on the page's
+  body, so it sits above the Experts page as well.
+- Experts send each card's picture with `where` (`experts.where`: board,
+  title, `pic`); board chat takes it from the board's cards, which the page
+  already has.
+- A picture whose file is not on this computer shows as "picture file
+  missing" rather than a broken image. The 10,000-card test library has no
+  files at all, which is how this was found.
+- The rules tell the model that cited pictures are shown, so it cites them
+  when asked to show or find one. Told this, it once also wrote a markdown
+  image with an address it made up; images it writes are now taken out
+  (`ask.MD_IMAGE`), and the rules forbid them.
+- An expert's pictures left out of the question now go in as words, "picture
+  shows: …", as a board's always did (§39), in the answer and in each step.
+
+**PDFs found by what they cover.**
+- `assets.pdf_text` reads a PDF's first 40 pages, up to 12,000 characters,
+  with pypdf (pure Python, BSD-3-Clause, the one new dependency). A PDF with
+  no text layer, a scan, gives "".
+- The background indexer reads each board's PDFs not yet read, before it
+  indexes, with no model: a few tenths of a second a file. The text is kept
+  by file hash in `<data>/search/files.json` (`FileNotes`), beside the
+  pictures' words, derived and regenerated like them. Your cards are
+  unchanged.
+- The text joins the card's searchable body ("File holds: …"): keywords,
+  meaning and the reranker all see it. The model reads the first 700
+  characters under the card ("file holds: …"), so it knows what the file
+  covers, and the rules tell it to cite a file that covers the question.
+
+**PDFs offered with the answer** (`AnswerFiles.tsx`): "Read more in your
+files", up to 3. Each has Open, which hands the file to your PDF reader as a
+click on its card does, and "Show on its board". The files offered are the
+PDFs the answer cites, then PDFs among the question's best matches even if it
+did not cite them. In a planned expert answer the steps' cards come first and
+pushed a matching PDF out, so the PDFs among the question's own 8 best
+matches (the glimpse taken before planning) are kept in the answer's cards
+and offered by name (`Context.offer`).
+
+Measured on the test library, with a 5-page PDF on chunking named
+`reading-list-03.pdf` (its name says nothing of its subject):
+- Opening the board read it at once (`files.json`, 5 pages).
+- Board chat, "How much overlap should I use between chunks for lecture
+  notes?": answered from it in 16 s ("10 to 20 percent… 300 to 500 tokens"),
+  cited it, and offered it.
+- The Retrieval Engineer, same question, planned in 4 steps: before
+  `Context.offer` it used the same facts but offered nothing; after, it cited
+  the PDF and offered it.
+- "Show me a diagram of how reranking fits into retrieval": board chat and
+  the expert both showed the diagram (a picture card added for the test) in
+  10-11 s; it opened full size over the Experts page and closed with Esc,
+  leaving the conversation as it was.
+
+Not done: other file types (Word, slides) are still found by name only; a
+scanned PDF has no text to read; and Open was not pressed in the test, as it
+starts the PDF reader on this computer.
+
+226 tests.

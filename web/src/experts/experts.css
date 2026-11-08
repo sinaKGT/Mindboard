@@ -232,3 +232,16 @@
 .xp-found summary { cursor: pointer; color: var(--xp-dim); font-size: 11.5px; }
 .xp-found .xp-said { margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--xp-border); font-size: 12.5px; }
 @keyframes xpPulse { 50% { opacity: .35; } }
+
+/* the pictures an answer cites, in the experts' sand and gold (DESIGN.md 48) */
+.xp-pictures .answer-picture { border-color: var(--xp-border); background: #0a0806; }
+.xp-pictures .answer-picture:hover { border-color: var(--gold); }
+.xp-pictures .answer-picture img { background: #120e0a; }
+.xp-pictures .answer-picture-title { color: var(--xp-dim); }
+.xp-pictures .answer-picture-gone { background: #120e0a; color: var(--xp-faint); }
+.xp-files .answer-files-lead { color: var(--xp-faint); }
+.xp-files .answer-file { border-color: var(--xp-border); background: #0a0806; }
+.xp-files .answer-file-name { color: var(--xp-text); }
+.xp-files .answer-file-btn { color: var(--gold); border-color: var(--xp-border); }
+.xp-files .answer-file-btn:hover { border-color: var(--gold); }
+.xp-files .answer-files-said { color: var(--xp-dim); }

@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from .boards import conn_for
 from .ops import read_graph
 from .paths import DataDir
-from .search_index import BoardIndex, PictureNotes, picture_of
+from .search_index import BoardIndex, FileNotes, PictureNotes, card_notes, file_of, picture_of
 
 log = logging.getLogger("mindboard.indexer")
 
@@ -127,18 +127,33 @@ class Indexer:
         nodes = {n["id"]: n for n in read_graph(conn, bid)["nodes"]}
         index = BoardIndex.get(self.dd, bid)
         notes = PictureNotes.get(self.dd)
-        index.sync_text(nodes, row["revision"], model.inst.embedder.name, notes.notes)
+        self._read_files(bid, conn, nodes)
+        index.sync_text(nodes, row["revision"], model.inst.embedder.name, card_notes(self.dd))
         try:
             # stop between batches if the board changed again: it is back in
             # the queue, and its next round starts from the new cards
             while index.pending() and not self._changed_again(bid):
                 index.embed_some(model, self.batch)
             if self._describe(bid, conn, nodes, notes):
-                index.sync_text(nodes, row["revision"], model.inst.embedder.name, notes.notes)
+                index.sync_text(nodes, row["revision"], model.inst.embedder.name, card_notes(self.dd))
                 while index.pending() and not self._changed_again(bid):
                     index.embed_some(model, self.batch)
         finally:
             index.flush()
+
+    def _read_files(self, bid: str, conn, nodes: dict) -> None:
+        """Read the text of the board's PDFs not yet read (DESIGN.md 48). No
+        model is needed - a few tenths of a second a file - so it is done first,
+        and the PDFs are searchable by what they cover from this round on."""
+        from .assets import pdf_text, resolve
+
+        files = FileNotes.get(self.dd)
+        for sha in dict.fromkeys(s for n in nodes.values() if (s := file_of(n)) and s not in files.notes):
+            if self._changed_again(bid):
+                return
+            path = resolve(self.dd, conn, bid, sha)
+            if path is not None:
+                files.put(sha, pdf_text(path))
 
     def _describe(self, bid: str, conn, nodes: dict, notes: PictureNotes) -> bool:
         """Describe the board's pictures not yet described (DESIGN.md 38) -

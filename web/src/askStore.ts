@@ -31,6 +31,8 @@ export interface Turn {
    *  never the whole board sent entire */
   mode?: 'chosen' | 'search' | 'explain'
   used?: number
+  /** the cards the answer was given, best match first - for the files it offers (DESIGN.md 48) */
+  cards?: string[]
   total?: number
   how?: string
   /** how far the model has read, while it reads */
@@ -164,7 +166,7 @@ export const useAsk = create<Ask>()((set, get) => ({
           if (name === 'context') {
             patch({ warning: data.warning, status: data.loading ? 'loading' : 'reading',
                     whole: data.whole, tokens: data.tokens, leftOut: data.pictures_left_out,
-                    mode: data.mode, used: data.cards?.length, total: data.total, how: data.how })
+                    mode: data.mode, used: data.cards?.length, cards: data.cards, total: data.total, how: data.how })
           } else if (name === 'progress') {
             // the first progress means the model is loaded and reading
             patch({ status: 'reading',

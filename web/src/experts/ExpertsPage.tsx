@@ -9,6 +9,8 @@
  */
 import { useEffect, useRef, useState } from 'react'
 
+import { AnswerFiles, filesToOffer } from '../AnswerFiles'
+import { AnswerPictures } from '../AnswerPictures'
 import { api, type Expert, type ExpertDraft, type ShapeState } from '../api'
 import { Prose } from '../Prose'
 import type { BoardMeta } from '../types'
@@ -25,7 +27,8 @@ const BEYOND_MARK = /(^[ \t]*#{1,6}[ \t]*)?(\*\*|__)?[ \t]*Beyond your board:[ \
 const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/i
 const COLOURS = ['#f0c070', '#7fd3c4', '#e9967a', '#d8c8a8', '#b4a0e8', '#8fc8f0', '#e6d36a', '#e88fb4']
 
-type Where = Record<string, { board: string; title: string }>
+/** where each card is, and its picture or PDF if it has one (DESIGN.md 48) */
+type Where = Record<string, { board: string; title: string; pic?: string; pdf?: string; file?: string }>
 /** how the expert read the question before answering (DESIGN.md 46) */
 interface Reading { kind?: string; reading?: string; weigh?: string[] }
 /** a step of its plan (DESIGN.md 47): what to look for, and what to work out from it */
@@ -33,7 +36,7 @@ interface PlanStep { find: string; work_out: string; uses: number }
 /** a step as it runs, and what it found */
 interface StepRun { status: 'waiting' | 'running' | 'done' | 'stopped'; text?: string; where?: Where; looked_at?: number }
 
-interface Turn { role: 'user' | 'expert'; text: string; where?: Where;
+interface Turn { role: 'user' | 'expert'; text: string; where?: Where; cited?: string[]; offer?: string[];
   nexts?: string[]; reading?: Reading; plan?: PlanStep[]; steps?: StepRun[];
   status?: 'thinking' | 'writing' | 'done'; error?: string; stopped?: boolean }
 
@@ -346,7 +349,7 @@ export function ExpertsPage() {
             steps[data.i] = { status: data.status, text: data.text, where: data.where, looked_at: data.looked_at }
             return { steps }
           })
-        } else if (kind === 'context') patch({ where: data.where, reading: data.reading })
+        } else if (kind === 'context') patch({ where: data.where, reading: data.reading, offer: data.offer })
         else if (kind === 'text') {
           text += data.text
           s.thinking = false
@@ -357,7 +360,7 @@ export function ExpertsPage() {
           }
         } else if (kind === 'done') {
           const nexts: string[] = data.nexts?.length ? data.nexts : data.next ? [data.next] : []
-          patch({ text: data.answer, nexts, status: 'done', stopped: data.stopped || undefined })
+          patch({ text: data.answer, nexts, cited: data.cited, status: 'done', stopped: data.stopped || undefined })
           if (speaking && (text || data.answer)) {
             if (!started) voice.current.begin(name)
             voice.current.end(text || data.answer, nexts[0] ? `Would you like to know: ${nexts[0]}` : '')
@@ -480,6 +483,20 @@ export function ExpertsPage() {
                         : t.plan?.length ? 'Writing the answer…' : 'Thinking…'
                     })()}</div>
                   ) : <Said turn={t} onCard={goToCard} />}
+                  {t.status === 'done' ? (
+                    <AnswerPictures className="xp-pictures" onShow={(p) => goToCard(p.board, p.card)}
+                      pictures={(t.cited ?? []).flatMap((id) => {
+                        const w = t.where?.[id]
+                        return w?.pic ? [{ card: id, board: w.board, sha: w.pic, title: w.title }] : []
+                      })} />
+                  ) : null}
+                  {t.status === 'done' ? (
+                    <AnswerFiles className="xp-files" onShow={(f) => goToCard(f.board, f.card)}
+                      files={filesToOffer(t.cited ?? [], [...(t.offer ?? []), ...Object.keys(t.where ?? {})], (id) => {
+                        const w = t.where?.[id]
+                        return w?.pdf ? { card: id, board: w.board, sha: w.pdf, name: w.file || w.title } : null
+                      })} />
+                  ) : null}
                   {t.stopped ? <div className="xp-note">Stopped</div> : null}
                   {t.error ? <div className="xp-error">{t.error}</div> : null}
                   {adding === i ? (

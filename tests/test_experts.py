@@ -215,3 +215,50 @@ def test_what_the_voice_says_can_be_heard_back(dd):
         heard = c.post("/api/voice/listen", headers={"X-Mindboard-Token": "t", "Content-Type": "audio/wav"},
                        content=out.getvalue()).json()["text"].lower()
     assert "experts" in heard and "chunking" in heard
+
+
+# -------------------------------------------------------------- pictures --
+
+def test_an_expert_answer_can_show_the_pictures_it_cites(dd, monkeypatch):
+    """DESIGN.md 48: each cited card says which picture it shows, so the
+    answer can show it; a picture left out of the question still goes in as
+    words, as it does for a board (39)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    from mindboard.assets import store_bytes
+    from mindboard.search_index import PictureNotes
+
+    b = create_board(dd, "Diagrams", "")
+    c = conn_for(dd, b["id"])
+    buf = BytesIO()
+    Image.new("RGB", (64, 32), "#335577").save(buf, "PNG")
+    pic = store_bytes(dd, c, b["id"], buf.getvalue(), declared_mime="image/png", orig_name="pipeline.png")
+    img = {"id": ulid(), "type": "image", "pos": [0, 0], "title": "RAG pipeline",
+           "content": {"sha256": pic["sha256"], "text": "the pipeline"}}
+    txt = node("Chunking", "split documents into windows")
+    assert not apply_envelopes(c, b["id"], [{"opId": ulid(), "op": {"kind": "node.create", "node": n}}
+                                            for n in (img, txt)])["rejected"]
+    PictureNotes.get(dd).put(pic["sha256"], "a diagram of a retrieval pipeline")
+    e = experts.create(dd, {"name": "Drawer", "boards": [b["id"]]})
+    try:
+        ctx, lib = experts.context(dd, e, "show me the RAG pipeline diagram")
+        assert ctx.where[img["id"]] == {"board": b["id"], "title": "RAG pipeline", "pic": pic["sha256"]}
+        assert experts.where(lib, txt["id"]) == {"board": b["id"], "title": "Chunking"}, \
+            "a card without a picture has none"
+        assert len(ctx.pictures) == 1, "the model sees the picture itself"
+
+        monkeypatch.setattr(experts, "SEARCH_PICTURE_TOKENS", 0)
+        ctx, _ = experts.context(dd, e, "show me the RAG pipeline diagram")
+        assert ctx.pictures == [] and ctx.pictures_left_out == 1
+        assert "picture shows: a diagram of a retrieval pipeline" in ctx.text, "left out, it goes in as words"
+        assert "cite the cards whose pictures show it" in ask.SYSTEM, "the model knows it can show them"
+    finally:
+        BoardIndex.drop(dd, b["id"])
+
+
+def test_a_video_shows_its_cover():
+    assert experts.picture_of({"type": "video", "content": {"sha256": "v", "poster": "p"}}) == "p"
+    assert experts.picture_of({"type": "image", "content": {"sha256": "i"}}) == "i"
+    assert experts.picture_of({"type": "text", "content": {"text": "x"}}) is None
