@@ -2660,4 +2660,12 @@ board's own).
 - Measured: an answer with two sections and 26 list items, 18 of them
   nested, showed no raw `#` or `*`.
 
+**The microphone is never hidden.** It shows whenever listening is installed.
+If hands-free talking is not ready, pressing it says why, just above the
+bar, inside an expert as well as on the overview. Either Mindboard was
+updated while running and needs restarting (an older server does not report
+`talk`), or the small download is missing (Set up the AI). §44 hid the
+button instead, which looked like the option did not exist. Messages about
+the microphone used to appear only on the overview.
+
 210 tests.

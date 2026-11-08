@@ -167,6 +167,9 @@ export function ExpertsPage() {
   // talking hands-free: just speak; Smart Turn tells when you have finished (DESIGN.md 44)
   const talk = useRef<Talk | null>(null)
   const [canListen, setCanListen] = useState(false)
+  // true: ready; false: a piece is missing; undefined: this server is older than the page
+  const [talkReady, setTalkReady] = useState<boolean | undefined>(false)
+  const [notice, setNotice] = useState('')         // a word about the microphone, wherever you are
   const [talkState, setTalkState] = useState<TalkState>('off')
   const [heard, setHeard] = useState('')
   const [adding, setAdding] = useState<number | null>(null)   // the answer being made a card
@@ -205,7 +208,7 @@ export function ExpertsPage() {
     if (!host.current) return
     scene.current = new ExpertScene(host.current, (i) => enter(i), (i) => setEditing(expertsRef.current[i]))
     void load()
-    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast); setCanListen(v.talk) }).catch(() => {})
+    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast); setCanListen(v.listen); setTalkReady(v.talk) }).catch(() => {})
     voice.current.onPlaying = setSpeaking
     voice.current.speed = speed
     // the sand moves with the voice: its loudness, read every frame
@@ -222,6 +225,7 @@ export function ExpertsPage() {
   }, [])
   useEffect(() => { if (scene.current) scene.current.current = current }, [current])
   useEffect(() => { if (stick.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [turns])
+  useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(''), 9000); return () => clearTimeout(t) }, [notice])
   // a new monument is announced for a while, then steps aside
   useEffect(() => { if (!unlocked) return; const t = setTimeout(() => setUnlocked(null), 9000); return () => clearTimeout(t) }, [unlocked])
 
@@ -330,16 +334,25 @@ export function ExpertsPage() {
   /** the microphone: on, and you just talk; off again when you are done */
   const toggleTalk = async () => {
     if (talk.current?.on) { talk.current.stop(); setHeard(''); return }
+    // say what stands in the way, rather than hide the button
+    if (talkReady === undefined) {
+      setNotice('Mindboard was updated while it was running. Stop it (press Enter in its window) and start it again to talk hands-free.')
+      return
+    }
+    if (!talkReady) {
+      setNotice('Talking hands-free needs one more small download - choose 6 (Set up the AI) in the Mindboard menu, or run: mindboard ai voice')
+      return
+    }
     talk.current = new Talk({
       state: setTalkState,
       level: (v) => bar.current?.style.setProperty('--lv', v.toFixed(3)),
       partial: setHeard,
       turn: (text) => { setHeard(''); sendRef.current(text) },
       interrupt: () => interruptRef.current(),
-      failed: (why) => setGuideSaid({ why, picked: [] }),
+      failed: (why) => setNotice(why),
     })
     try { await talk.current.start() }
-    catch { talk.current.stop(); setGuideSaid({ why: 'The microphone is not available - check the browser allows it.', picked: [] }) }
+    catch { talk.current.stop(); setNotice('The microphone is not available - check the browser allows it.') }
   }
   const cycleSpeed = () => {
     const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length] ?? 1
@@ -421,6 +434,7 @@ export function ExpertsPage() {
         </div>
       ) : null}
 
+      {notice ? <div className="xp-notice" onClick={() => setNotice('')}>{notice}</div> : null}
       {experts.length ? (
         <div className={`xp-bar ${busy ? 'busy' : ''} talk-${talkState}`} ref={bar}>
           {talkState !== 'off' ? <span className="xp-wave" aria-hidden="true"><i /><i /><i /><i /><i /></span> : null}

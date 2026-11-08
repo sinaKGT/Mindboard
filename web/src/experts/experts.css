@@ -205,3 +205,8 @@
 .xp-said .prose-hr, .xp-said .prose-table th, .xp-said .prose-table td { border-color: var(--xp-border); }
 .xp-said .prose-table th { color: var(--gold); }
 .xp-said .prose em { color: #f3e4c4; }
+
+/* a word about the microphone, just above the bar - inside an expert too */
+.xp-notice { position: absolute; left: 50%; bottom: 92px; transform: translateX(-50%); width: min(600px, 88vw); z-index: 7;
+  padding: 10px 16px; border-radius: 12px; background: #0d0a07f0; border: 1px solid #e8b86466; color: var(--xp-text);
+  font-size: 13px; line-height: 1.5; cursor: pointer; animation: xpIn .4s ease both; }
