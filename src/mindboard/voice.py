@@ -113,3 +113,87 @@ def speak(text: str, voice: str = CAST[0], speed: float = 1.0, home: Optional[Pa
         w.setframerate(rate)
         w.writeframes(pcm.tobytes())
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------- listening --
+#
+# Speaking *to* an expert: whisper.cpp (MIT) turns a short recording into
+# words, on this computer - the browser's own speech recognition would send
+# the audio to a server. The official processor build (release b5454, beside
+# v1.9.5) and the English base model, both pinned. A spoken question is a few
+# seconds long, which the processor transcribes in about a second.
+
+WHISPER_BUILD = "b5454"
+_WHISPER = f"https://github.com/ggml-org/whisper.cpp/releases/download/{WHISPER_BUILD}/"
+WHISPER_BIN = {
+    "windows": Pinned("whisper-bin-x64.zip", _WHISPER + "whisper-bin-x64.zip", 8928640,
+                      "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb"),
+    "linux": Pinned("whisper-bin-ubuntu-x64.tar.gz", _WHISPER + "whisper-bin-ubuntu-x64.tar.gz", 10364195,
+                    "a72becf15d7917f990f6313867a52638b82b7f9ef237fb0c980dac56a135781c"),
+}
+WHISPER_MODEL = Pinned("ggml-base.en.bin",
+                       "https://huggingface.co/ggerganov/whisper.cpp/resolve/"
+                       "5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin", 147964211,
+                       "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002")
+
+
+def _whisper_dir(home: Optional[Path] = None) -> Path:
+    return (home or llm_home()) / "whisper" / WHISPER_BUILD
+
+
+def whisper_cli(home: Optional[Path] = None) -> Optional[Path]:
+    name = "whisper-cli.exe" if sys.platform == "win32" else "whisper-cli"
+    found = sorted(_whisper_dir(home).rglob(name)) if _whisper_dir(home).exists() else []
+    return found[0] if found else None
+
+
+def can_listen(home: Optional[Path] = None) -> bool:
+    return whisper_cli(home) is not None and (folder(home) / WHISPER_MODEL.name).exists()
+
+
+def install_listening(home: Optional[Path] = None, progress: Optional[Progress] = None) -> None:
+    """whisper.cpp's program and its English model, pinned and checked."""
+    import tarfile
+    import zipfile
+
+    plat = "windows" if sys.platform == "win32" else "linux" if sys.platform.startswith("linux") else ""
+    if not plat:
+        raise VoiceError("speaking to experts is not available on this kind of computer yet")
+    pin, target = WHISPER_BIN[plat], _whisper_dir(home)
+    archive = download(pin, target.parent / "downloads", progress)
+    if whisper_cli(home) is None:
+        target.mkdir(parents=True, exist_ok=True)
+        root = target.resolve()
+        if pin.name.endswith(".zip"):
+            with zipfile.ZipFile(archive) as z:
+                for m in z.namelist():                    # never write outside its folder
+                    if not (target / m).resolve().is_relative_to(root):
+                        raise VoiceError("the whisper archive is not what was expected")
+                z.extractall(target)
+        else:
+            with tarfile.open(archive) as t:
+                t.extractall(target, filter="data")
+        cli = whisper_cli(home)
+        if cli is not None and plat == "linux":
+            cli.chmod(0o755)
+    download(WHISPER_MODEL, folder(home), progress)
+
+
+def transcribe(wav: bytes, home: Optional[Path] = None) -> str:
+    """The words in a short recording (16 kHz mono WAV), in English."""
+    import tempfile
+
+    cli = whisper_cli(home)
+    if cli is None or not can_listen(home):
+        raise VoiceError("listening is not set up - run: mindboard ai voice")
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "said.wav"
+        f.write_bytes(wav)
+        done = subprocess.run([str(cli), "-m", str(folder(home) / WHISPER_MODEL.name), "-f", str(f),
+                               "-nt", "-np", "-l", "en", "-t", "4"],
+                              capture_output=True, text=True, timeout=120, cwd=str(cli.parent),
+                              creationflags=0x08000000 if sys.platform == "win32" else 0)
+    if done.returncode != 0:
+        raise VoiceError("could not make out the words")
+    text = " ".join(done.stdout.split())
+    return re.sub(r"\[(BLANK_AUDIO|MUSIC|NOISE)[^\]]*\]", "", text).strip()

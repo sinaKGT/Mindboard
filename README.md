@@ -222,7 +222,8 @@ Experts can speak their answers in a natural voice, made on this computer:
 mindboard ai voice        # one-time, about 350 MB
 ```
 
-The speaker button in the chat bar turns it off. (The voice is optional: its
+The speaker button in the chat bar turns it off. The microphone button lets you
+speak your question instead of typing it — heard by whisper.cpp, on this computer. (The voice is optional: its
 pronunciation step uses espeak-ng, which is GPL-3.0.)
 
 ## Backing up

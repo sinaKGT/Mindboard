@@ -505,20 +505,22 @@ def ai_voice():
     from . import voice
 
     con = _console()
-    if voice.installed():
-        con.print("  The voice is set up.")
+    if voice.installed() and voice.can_listen():
+        con.print("  The voice is set up - experts speak, and listen.")
         return
-    con.print("  Setting up the voice - Kokoro (Apache-2.0), about 350 MB, once.")
+    con.print("  Setting up the voice - Kokoro (Apache-2.0) to speak, whisper.cpp (MIT) to")
+    con.print("  listen - about 510 MB, once. Everything stays on this computer.")
     con.print("  Its pronunciation step uses espeak-ng (GPL-3.0); it runs only on this computer.")
 
     def show(name, done, total):
         con.print(f"\r  {name}: {100 * done // max(total, 1):3d}%", end="")
     try:
         voice.install(progress=show)
+        voice.install_listening(progress=show)
     except voice.VoiceError as exc:
         con.print(f"\n  [red]{exc}[/red]")
         raise typer.Exit(1)
-    con.print("\n  Done. Experts now speak their answers.")
+    con.print("\n  Done. Experts now speak their answers - and you can speak to them.")
 
 
 @ai_app.command("status")

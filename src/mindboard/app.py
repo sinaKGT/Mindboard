@@ -530,7 +530,22 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     @app.get("/api/voice")
     def api_voice():
         from . import voice
-        return {"installed": voice.installed(), "cast": voice.CAST}
+        return {"installed": voice.installed(), "cast": voice.CAST, "listen": voice.can_listen()}
+
+    @app.post("/api/voice/listen")
+    async def api_voice_listen(request: Request):
+        """A short recording (16 kHz WAV) turned into words by whisper.cpp,
+        on this computer. The audio is not kept."""
+        from starlette.concurrency import run_in_threadpool
+
+        from . import voice
+        wav = await request.body()
+        if not wav or len(wav) > 8_000_000:
+            raise HTTPException(400, "a recording of up to about four minutes")
+        try:
+            return {"text": await run_in_threadpool(voice.transcribe, wav)}
+        except voice.VoiceError as exc:
+            raise HTTPException(400, str(exc))
 
     @app.post("/api/voice/speak")
     def api_voice_speak(body: SpeakRequest):

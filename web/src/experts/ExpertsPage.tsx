@@ -13,7 +13,7 @@ import type { BoardMeta } from '../types'
 import { ExpertScene } from './scene'
 import './experts.css'
 import { SHAPES, SHAPE_WORDS } from './shapes'
-import { Voice } from './voice'
+import { Ear, Voice } from './voice'
 
 const BEYOND = 'Beyond your board:'
 const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
@@ -149,6 +149,11 @@ export function ExpertsPage() {
   const [voiceReady, setVoiceReady] = useState(false)
   const [cast, setCast] = useState<string[]>([])
   const [voiceOn, setVoiceOn] = useState(localStorage.getItem('mb_xp_voice') !== '0')
+  // listening: speak a question instead of typing it (whisper.cpp, on this computer)
+  const ear = useRef(new Ear())
+  const [canListen, setCanListen] = useState(false)
+  const [listening, setListening] = useState(false)
+  const [hearing, setHearing] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
 
   const load = async () => {
@@ -167,7 +172,7 @@ export function ExpertsPage() {
     if (!host.current) return
     scene.current = new ExpertScene(host.current, (i) => enter(i), (i) => setEditing(expertsRef.current[i]))
     void load()
-    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast) }).catch(() => {})
+    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast); setCanListen(v.listen) }).catch(() => {})
     // the sand moves with the voice: its loudness, read every frame
     let raf = 0
     const listen = () => {
@@ -268,6 +273,21 @@ export function ExpertsPage() {
   }
   const e = experts[current]
 
+  /** the microphone: press to speak, press again to send what was said */
+  const toggleListen = async () => {
+    if (!listening) {
+      try { voice.current.stop(); await ear.current.start(); setListening(true) }
+      catch { setGuideSaid({ why: 'The microphone is not available - check the browser allows it.', picked: [] }) }
+      return
+    }
+    setListening(false); setHearing(true)
+    try {
+      const wav = await ear.current.stop()
+      const said = wav ? (await api.listen(wav)).trim() : ''
+      if (said) send(said)
+    } catch { /* nothing heard */ } finally { setHearing(false) }
+  }
+
   return (
     <div className={`xp ${inside ? 'inside' : ''}`} ref={host}>
       <div className="xp-top">
@@ -325,7 +345,12 @@ export function ExpertsPage() {
         <div className={`xp-bar ${busy ? 'busy' : ''}`}>
           <input value={draft} onChange={(ev) => setDraft(ev.target.value)}
             onKeyDown={(ev) => { if (ev.key === 'Enter') send(draft) }}
-            placeholder={inside && e ? `Ask ${e.name}…` : 'Not sure who to ask? Ask here…'} />
+            placeholder={listening ? 'Listening…' : inside && e ? `Ask ${e.name}…` : 'Not sure who to ask? Ask here…'} />
+          {canListen ? (
+            <button className={`xp-mic ${listening ? 'on' : ''}`} disabled={busy || hearing}
+              title={listening ? 'Listening - press again to ask' : hearing ? 'Making out the words…' : 'Speak your question'}
+              onClick={() => void toggleListen()}>{hearing ? '…' : '🎙'}</button>
+          ) : null}
           {inside && voiceReady ? (
             <button className={`xp-voice ${voiceOn ? 'on' : ''}`} title={voiceOn ? 'Voice on' : 'Voice off'}
               onClick={() => { const on = !voiceOn; setVoiceOn(on); localStorage.setItem('mb_xp_voice', on ? '1' : '0')

@@ -162,7 +162,7 @@ def test_the_voice_says_whether_it_is_set_up(dd):
     app = create_app(dd, "t")
     with TestClient(app) as c:
         got = c.get("/api/voice", headers={"X-Mindboard-Token": "t"}).json()
-        assert set(got) == {"installed", "cast"} and "af_heart" in got["cast"]
+        assert set(got) == {"installed", "cast", "listen"} and "af_heart" in got["cast"]
 
 
 @pytest.mark.skipif(not __import__("mindboard.voice", fromlist=["installed"]).installed(),
@@ -179,3 +179,39 @@ def test_the_voice_speaks_on_this_computer():
         assert w.getnframes() / w.getframerate() > 0.5, "some speech came out"
     with pytest.raises(voice.VoiceError, match="nothing to say"):
         voice.speak("[[" + "A" * 26 + "]]")
+
+
+def test_listening_needs_its_setup(tmp_path):
+    from mindboard import voice
+
+    assert not voice.can_listen(tmp_path)
+    with pytest.raises(voice.VoiceError, match="mindboard ai voice"):
+        voice.transcribe(b"RIFF....", home=tmp_path)
+    for pin in [voice.WHISPER_MODEL, *voice.WHISPER_BIN.values()]:
+        assert pin.size > 0 and len(pin.sha256) == 64 and pin.url.startswith("https://")
+        assert "/main/" not in pin.url and "latest" not in pin.url, "pinned, never floating"
+
+
+@pytest.mark.skipif(not (__import__("mindboard.voice", fromlist=["x"]).can_listen()
+                         and __import__("mindboard.voice", fromlist=["x"]).installed()),
+                    reason="the voice is not set up on this computer")
+def test_what_the_voice_says_can_be_heard_back(dd):
+    import io
+    import wave
+
+    import numpy as np
+
+    from mindboard import voice
+
+    said = voice.speak("Which experts know about chunking?", "am_michael")
+    with wave.open(io.BytesIO(said)) as w:
+        pcm, rate = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16), w.getframerate()
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+        w.writeframes(pcm[np.arange(0, len(pcm), rate / 16000).astype(int)].tobytes())
+    app = create_app(dd, "t")
+    with TestClient(app) as c:
+        heard = c.post("/api/voice/listen", headers={"X-Mindboard-Token": "t", "Content-Type": "audio/wav"},
+                       content=out.getvalue()).json()["text"].lower()
+    assert "experts" in heard and "chunking" in heard

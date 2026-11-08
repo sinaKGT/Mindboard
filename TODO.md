@@ -2,7 +2,7 @@
 
 What is left from the v2 conversations, in the order we planned to take it.
 Each item says what was asked, what was decided, and what done looks like.
-Last updated 2026-11-08.
+Last updated 2026-11-08 - everything planned is done; what is left is optional.
 
 ---
 
@@ -24,17 +24,17 @@ questions alone.
 Described once, searchable, and given to the answering model in words when a
 picture itself is left out of a question.
 
-## 4. A fast canvas for big levels - done as far as elements go (DESIGN.md §35-36, §39)
+## 4. A fast canvas for big levels - done as far as it needs to go (DESIGN.md §35-36, §39)
 
-3,000 cards on one level zoom at 17-18 frames a second (2 before). Beyond
-that needs a far-out view drawn on a canvas - only worth it if huge flat
-levels, rather than groups, turn out to be how boards are used.
+3,000 cards on one level zoom at 17-18 frames a second (2 before); boards in
+groups are fast at 10,000 cards. A far-out view drawn on a canvas would go
+further, but only matters if huge flat levels - not groups - become how
+boards are used. Not planned until then.
 
-## 6. Experts - done (DESIGN.md §40-41)
+## 6. Experts - done (DESIGN.md §40-42)
 
-Experts and their voice (Kokoro, local) are built. Left, if wanted: speaking
-*to* an expert - local speech recognition with whisper.cpp (one more small
-model and program; the browser's own recognition sends audio to a server).
+Experts, their voice (Kokoro) and speaking to them (whisper.cpp) are built,
+all on this computer.
 
 ## 5. Housekeeping
 

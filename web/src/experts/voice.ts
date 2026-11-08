@@ -83,3 +83,46 @@ export class Voice {
     return Math.min(1, Math.sqrt(sum / this.data.length) * 4.5)
   }
 }
+
+/** Listening: record from the microphone until stopped, then hand back a
+ *  16 kHz mono WAV - what whisper.cpp reads. The audio never leaves the computer. */
+export class Ear {
+  private rec: MediaRecorder | null = null
+  private chunks: Blob[] = []
+  private stream: MediaStream | null = null
+
+  async start() {
+    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    this.chunks = []
+    this.rec = new MediaRecorder(this.stream)
+    this.rec.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data) }
+    this.rec.start()
+  }
+
+  get listening() { return this.rec?.state === 'recording' }
+
+  async stop(): Promise<Blob | null> {
+    const rec = this.rec
+    if (!rec) return null
+    await new Promise<void>((done) => { rec.onstop = () => done(); rec.stop() })
+    this.stream?.getTracks().forEach((t) => t.stop())
+    this.rec = null
+    const recorded = new Blob(this.chunks, { type: rec.mimeType })
+    // decode, bring down to 16 kHz mono, and write a WAV
+    const raw = await new AudioContext().decodeAudioData(await recorded.arrayBuffer())
+    const frames = Math.ceil(raw.duration * 16000)
+    if (frames < 1600) return null                                     // under a tenth of a second
+    const off = new OfflineAudioContext(1, frames, 16000)
+    const src = off.createBufferSource()
+    src.buffer = raw; src.connect(off.destination); src.start()
+    const pcm = (await off.startRendering()).getChannelData(0)
+    const out = new DataView(new ArrayBuffer(44 + pcm.length * 2))
+    const text = (o: number, t: string) => { for (let i = 0; i < t.length; i++) out.setUint8(o + i, t.charCodeAt(i)) }
+    text(0, 'RIFF'); out.setUint32(4, 36 + pcm.length * 2, true); text(8, 'WAVE'); text(12, 'fmt ')
+    out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true)
+    out.setUint32(24, 16000, true); out.setUint32(28, 32000, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true)
+    text(36, 'data'); out.setUint32(40, pcm.length * 2, true)
+    for (let i = 0; i < pcm.length; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true)
+    return new Blob([out], { type: 'audio/wav' })
+  }
+}

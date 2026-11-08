@@ -113,3 +113,6 @@
 .xp-turns::-webkit-scrollbar { display: none; }
 .xp-voice { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--xp-border); opacity: .55; font-size: 14px; }
 .xp-voice.on { opacity: 1; border-color: #e8b86466; }
+.xp-mic { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--xp-border); font-size: 14px; }
+.xp-mic.on { border-color: #f0907a; box-shadow: 0 0 0 0 #f0907a88; animation: xpMic 1.4s ease-out infinite; }
+@keyframes xpMic { to { box-shadow: 0 0 0 12px #f0907a00; } }

@@ -91,7 +91,15 @@ const apiCore = {
     req<Expert>(`/experts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteExpert: (id: string) => req<{ deleted: boolean }>(`/experts/${id}`, { method: 'DELETE' }),
   /** is the experts' voice set up, and which voices there are */
-  voice: () => req<{ installed: boolean; cast: string[] }>('/voice'),
+  voice: () => req<{ installed: boolean; cast: string[]; listen: boolean }>('/voice'),
+  /** words from a short recording, made on this computer (whisper.cpp) */
+  listen: async (wav: Blob): Promise<string> => {
+    const headers: Record<string, string> = { 'Content-Type': 'audio/wav' }
+    if (token) headers['X-Mindboard-Token'] = token
+    const res = await fetch('/api/voice/listen', { method: 'POST', headers, body: wav, credentials: 'same-origin' })
+    if (!res.ok) throw new Error('could not make out the words')
+    return (await res.json()).text as string
+  },
   /** one sentence, spoken on this computer, as WAV bytes */
   speak: async (text: string, voice: string): Promise<ArrayBuffer> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }

@@ -2487,3 +2487,24 @@ dependency, and Mindboard works without it.
 
 Speaking *to* an expert would need speech recognition on this computer
 (whisper.cpp): the browser's own sends audio to a server. Not built. 188 tests.
+
+## 42. Speaking to the experts, and the black hole (2026-11-08)
+
+- **Listening.** A microphone button in the Experts bar: press, speak, press
+  again. The browser records; the page brings the recording down to 16 kHz
+  mono WAV and posts it to `/api/voice/listen`, where **whisper.cpp** (MIT)
+  turns it into words on this computer - the browser's own speech recognition
+  would send the audio to a server. The official processor build (release
+  `b5454`, beside v1.9.5) and the English base model (148 MB), both pinned by
+  size and SHA-256, installed by the same `mindboard ai voice`. Measured: a
+  spoken question made by Kokoro was heard back word for word in 1.3 s. The
+  question is then asked as if typed - to the guide in the overview, or to the
+  expert you are with. The audio is not kept.
+- **The black hole** eats only loose sand. The drifting sand keeps per-grain
+  state in the page: near the pointer a grain is drawn in at its own depth
+  and swirled; at the centre it is eaten, and 1.5-5.5 s later a new grain is
+  born somewhere else and fades in. The monuments are never touched.
+- The voice no longer moves the sand, and reads the suggested question after
+  the answer ("Would you like to know: ...").
+
+190 tests.
