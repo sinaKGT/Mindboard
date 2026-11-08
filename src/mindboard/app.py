@@ -530,7 +530,9 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     @app.get("/api/voice")
     def api_voice():
         from . import voice
-        return {"installed": voice.installed(), "cast": voice.CAST, "listen": voice.can_listen()}
+        from . import turn
+        return {"installed": voice.installed(), "cast": voice.CAST, "listen": voice.can_listen(),
+                "turn": turn.installed()}
 
     @app.post("/api/voice/listen")
     async def api_voice_listen(request: Request):
@@ -547,6 +549,26 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         except voice.VoiceError as exc:
             raise HTTPException(400, str(exc))
 
+    @app.post("/api/voice/turn")
+    async def api_voice_turn(request: Request):
+        """Have you finished speaking? Smart Turn reads the sound of the turn so
+        far (16 kHz WAV, its last 8 seconds count) and says how likely it is
+        that it is complete (DESIGN.md 44). On this computer; nothing is kept."""
+        from starlette.concurrency import run_in_threadpool
+
+        from . import turn
+        wav = await request.body()
+        if not wav or len(wav) > 2_000_000:
+            raise HTTPException(400, "a recording of up to about a minute")
+        if not turn.installed():
+            raise HTTPException(400, "hands-free talking is not set up - run: mindboard ai voice")
+        try:
+            pcm = turn.pcm_from_wav(wav)
+        except Exception:
+            raise HTTPException(400, "expected 16 kHz mono 16-bit audio")
+        p = await run_in_threadpool(turn.probability, pcm)
+        return {"complete": p > turn.THRESHOLD, "probability": round(p, 4)}
+
     @app.post("/api/voice/speak")
     def api_voice_speak(body: SpeakRequest):
         """One sentence spoken by Kokoro, on this computer (DESIGN.md 41)."""
@@ -554,10 +576,18 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
 
         from . import voice
         try:
-            return Response(voice.speak(body.text, body.voice), media_type="audio/wav",
+            return Response(voice.speak(body.text, body.voice, body.speed), media_type="audio/wav",
                             headers={"Cache-Control": "no-store"})
         except voice.VoiceError as exc:
             raise HTTPException(400, str(exc))
+
+    @app.post("/api/experts/ask/stop")
+    def api_expert_ask_stop():
+        """Stop an expert's answer - the Stop button, or speaking over it."""
+        model = held.get("model")
+        if model is not None:
+            model.cancel()
+        return {"stopped": model is not None}
 
     @app.post("/api/boards/{bid}/ask/stop")
     def api_ask_stop(bid: str):

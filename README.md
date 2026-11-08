@@ -39,7 +39,7 @@ practise next.
 | **Ask your board** | A local model (Qwen3.5 9B) answers from your own cards, with citations you can click. What it adds from its own knowledge is kept apart, so you always know which ideas are yours. |
 | **Find your gaps** | **What am I missing here?** is one click away. It points out where your understanding is thin and what to look at next. |
 | **Experts** | Turn boards into experts you can talk to, standing as monuments of glowing sand in a night desert. A guide tells you who can answer your question, and new monuments unlock as your knowledge grows. |
-| **Voice** | Experts speak their answers, and you can speak your questions. Both run on this computer. |
+| **Voice** | Talk to your experts hands-free and interrupt them, as in a conversation. Speech, listening and turn-taking all run on this computer. |
 | **Yours** | Everything is copied into Mindboard's own folder and backs up into one zip. Nothing is sent anywhere. |
 
 ## Getting started
@@ -285,22 +285,33 @@ board.
 - **Not sure who to ask?** Type the question in the overview and the guide says
   who can help, and why.
 - **Talk to one:** click its monument or its name to go inside.
+- **Stop it any time:** the ■ button, or `Esc`, stops the answer and the voice.
+  Scroll up to read while it writes; the conversation stays where you put it.
+- **Add to board:** under every answer. The model drafts a card from it; you
+  choose which of the expert's boards it goes on and which card it links to,
+  then press **Add**. It is marked as made by AI.
+- **Open a cited card and come back:** the conversation is still there.
 - **They grow with you:** a monument's size is how much its boards hold. New
   shapes unlock as your library grows: the ankh from the start, then the
   obelisk, the pyramid, the step pyramid and the temple gate.
 
 ### Voice
 
-Experts can speak their answers in a natural voice (Kokoro), and the microphone
-button lets you speak your question instead of typing it (whisper.cpp). Both
-run on this computer, and the audio is not kept.
+Experts speak their answers in a natural voice (Kokoro), and you can talk to
+them hands-free: press the microphone once and just speak. Your words appear
+in the bar as you say them. When you pause, **Smart Turn** listens to how your
+voice ended and tells whether you have finished or are only taking a breath;
+when you have, your question is asked. Speak while the expert is answering
+and it stops to listen, as in a conversation. Everything runs on this
+computer, and the audio is not kept.
 
 ```
-mindboard ai voice        # one-time, about 510 MB, speaking and listening
+mindboard ai voice        # one-time, about 520 MB: speaking, listening, Smart Turn
 ```
 
-The speaker button in the chat bar turns speaking off. The voice is optional:
-its pronunciation step uses espeak-ng, which is GPL-3.0.
+In the chat bar, the **1×** chip sets how fast the expert speaks, and the
+speaker button turns speaking off. The voice is optional: its pronunciation
+step uses espeak-ng, which is GPL-3.0.
 
 ## Backing up
 

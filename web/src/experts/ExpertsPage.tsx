@@ -4,7 +4,8 @@
  *  sized by how much it knows. Ask the guide which expert can help, or pick
  *  one and go in: its monument comes apart and you are inside its sand, where
  *  you talk to it. Nothing is remembered once you leave - each visit starts
- *  fresh, as asked.
+ *  fresh, as asked - except that opening a cited card and coming back finds
+ *  the conversation where it was (DESIGN.md 44).
  */
 import { Fragment, useEffect, useRef, useState } from 'react'
 
@@ -13,14 +14,19 @@ import type { BoardMeta } from '../types'
 import { ExpertScene } from './scene'
 import './experts.css'
 import { SHAPES, SHAPE_WORDS } from './shapes'
-import { Ear, Voice } from './voice'
+import { AddCard } from './AddCard'
+import { Talk, type TalkState } from './talk'
+import { SPEEDS, Voice } from './voice'
 
 const BEYOND = 'Beyond your board:'
 const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
 const COLOURS = ['#f0c070', '#7fd3c4', '#e9967a', '#d8c8a8', '#b4a0e8', '#8fc8f0', '#e6d36a', '#e88fb4']
 
 interface Turn { role: 'user' | 'expert'; text: string; where?: Record<string, { board: string; title: string }>;
-  next?: string; status?: 'thinking' | 'writing' | 'done'; error?: string }
+  next?: string; status?: 'thinking' | 'writing' | 'done'; error?: string; stopped?: boolean }
+
+/** where a conversation waits while you look at a card it cited */
+const RETURN = 'mb_xp_return'
 
 /** go to a card on its board, wherever it is */
 function openCard(board: string, card: string) {
@@ -28,17 +34,28 @@ function openCard(board: string, card: string) {
   location.hash = `#/b/${board}`
 }
 
+/** the icons in the bar, drawn in the page's gold rather than as coloured emoji */
+const MicIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+    <rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" /></svg>)
+const SpeakerIcon = ({ on }: { on: boolean }) => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+    {on ? <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /> : <path d="M16 9.5l5 5M21 9.5l-5 5" />}</svg>)
+
 /** an answer: light formatting, citations as chips that open their card */
-function Said({ turn }: { turn: Turn }) {
+function Said({ turn, onCard }: { turn: Turn; onCard: (board: string, card: string) => void }) {
   const text = turn.status === 'done' ? turn.text : turn.text.replace(NEXT_LINE, '')
   const at = text.indexOf(BEYOND)
   const parts = at >= 0 ? [text.slice(0, at), text.slice(at + BEYOND.length)] : [text]
-  const line = (s: string) => s.split(/(\[\[[0-9A-Za-z]{26}\]\]|\*\*[^*]+\*\*)/g).map((piece, j) => {
+  // a citation the model got wrong - not a card it was given - is left out, not shown raw
+  const line = (s: string) => s.split(/(\[\[[^\]\n]{1,40}\]\]|\*\*[^*]+\*\*)/g).map((piece, j) => {
     const cite = piece.match(/^\[\[([0-9A-Za-z]{26})\]\]$/)
+    if (!cite && /^\[\[.*\]\]$/.test(piece)) return null
     if (cite) {
       const w = turn.where?.[cite[1]]
       return w ? <button key={j} className="xp-cite" title="Open this card on its board"
-        onClick={() => openCard(w.board, cite[1])}>{w.title}</button> : null
+        onClick={() => onCard(w.board, cite[1])}>{w.title}</button> : null
     }
     const bold = piece.match(/^\*\*([^*]+)\*\*$/)
     return bold ? <strong key={j}>{bold[1]}</strong> : <Fragment key={j}>{piece}</Fragment>
@@ -149,12 +166,20 @@ export function ExpertsPage() {
   const [voiceReady, setVoiceReady] = useState(false)
   const [cast, setCast] = useState<string[]>([])
   const [voiceOn, setVoiceOn] = useState(localStorage.getItem('mb_xp_voice') !== '0')
-  // listening: speak a question instead of typing it (whisper.cpp, on this computer)
-  const ear = useRef(new Ear())
+  const [speaking, setSpeaking] = useState(false)
+  const [speed, setSpeed] = useState(() => Number(localStorage.getItem('mb_xp_speed')) || 1)
+  // talking hands-free: just speak; Smart Turn tells when you have finished (DESIGN.md 44)
+  const talk = useRef<Talk | null>(null)
+  const smart = useRef(false)
   const [canListen, setCanListen] = useState(false)
-  const [listening, setListening] = useState(false)
-  const [hearing, setHearing] = useState(false)
+  const [talkState, setTalkState] = useState<TalkState>('off')
+  const [heard, setHeard] = useState('')
+  const [adding, setAdding] = useState<number | null>(null)   // the answer being made a card
+  const bar = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
+  const stick = useRef(true)               // follow the answer down - unless you scrolled up to read
+  const turnsRef = useRef<Turn[]>([])
+  turnsRef.current = turns
 
   const load = async () => {
     const got = await api.experts(), list = got.experts
@@ -167,12 +192,27 @@ export function ExpertsPage() {
     localStorage.setItem('mb_xp_unlocked', JSON.stringify(open))
     scene.current?.setExperts(list.map((e) => ({ id: e.id, name: e.name, colour: e.colour, shape: e.shape, cards: e.cards })))
     setLoaded(true)
+    // back from a card the conversation cited: the conversation, where it was
+    const back = JSON.parse(sessionStorage.getItem(RETURN) ?? 'null') as { expert: string; turns: Turn[]; at: number } | null
+    sessionStorage.removeItem(RETURN)
+    const i = back && Date.now() - back.at < 2 * 3600e3 ? list.findIndex((x) => x.id === back.expert) : -1
+    if (i >= 0) { enter(i); setTurns(back!.turns) }
+  }
+  /** open a cited card, keeping the conversation to come back to */
+  const goToCard = (board: string, card: string) => {
+    const e = expertsRef.current[current]
+    if (e) sessionStorage.setItem(RETURN, JSON.stringify({ expert: e.id, at: Date.now(),
+      turns: turnsRef.current.map((t) => (t.status && t.status !== 'done' ? { ...t, status: 'done', stopped: true } : t)) }))
+    interrupt()
+    openCard(board, card)
   }
   useEffect(() => {
     if (!host.current) return
     scene.current = new ExpertScene(host.current, (i) => enter(i), (i) => setEditing(expertsRef.current[i]))
     void load()
-    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast); setCanListen(v.listen) }).catch(() => {})
+    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast); setCanListen(v.listen); smart.current = v.turn }).catch(() => {})
+    voice.current.onPlaying = setSpeaking
+    voice.current.speed = speed
     // the sand moves with the voice: its loudness, read every frame
     let raf = 0
     const listen = () => {
@@ -182,17 +222,24 @@ export function ExpertsPage() {
       if (s && s.speaking) s.speaking = false
     }
     listen()
-    return () => { cancelAnimationFrame(raf); voice.current.stop(); scene.current?.dispose(); controller.current?.abort() }
+    return () => { cancelAnimationFrame(raf); voice.current.stop(); talk.current?.stop(); scene.current?.dispose(); controller.current?.abort() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => { if (scene.current) scene.current.current = current }, [current])
-  useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [turns])
+  useEffect(() => { if (stick.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [turns])
+  // a new monument is announced for a while, then steps aside
+  useEffect(() => { if (!unlocked) return; const t = setTimeout(() => setUnlocked(null), 9000); return () => clearTimeout(t) }, [unlocked])
 
   const choose = (i: number) => { setCurrent((i + experts.length) % Math.max(experts.length, 1)); setGuideSaid(null) }
   function enter(i: number) {
     setCurrent(i)
     if (scene.current) { scene.current.current = i; scene.current.inside = true; scene.current.calls.clear() }
-    setInside(true); setGuideSaid(null); setTurns([])
+    setInside(true); setGuideSaid(null); setTurns([]); setAdding(null); stick.current = true
+  }
+  /** stop the expert: its answer, and its voice - Stop, Esc, or speaking over it */
+  function interrupt() {
+    if (busyRef.current) { controller.current?.abort(); void api.expertStop().catch(() => {}) }
+    voice.current.stop()
   }
   const leave = () => {
     controller.current?.abort()
@@ -203,11 +250,11 @@ export function ExpertsPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') {
-        if (e.key === 'Escape' && inside) leave()
+        if (e.key === 'Escape' && inside) { if (busyRef.current || voice.current.playing) interrupt(); else leave() }
         return
       }
       if (editing !== undefined) return
-      if (e.key === 'Escape' && inside) leave()
+      if (e.key === 'Escape' && inside) { if (busyRef.current || voice.current.playing) interrupt(); else leave() }
       if (!inside && e.key === 'ArrowLeft') choose(current - 1)
       if (!inside && e.key === 'ArrowRight') choose(current + 1)
       if (!inside && e.key === 'Enter' && experts.length) enter(current)
@@ -236,6 +283,7 @@ export function ExpertsPage() {
     const e = experts[current], s = scene.current!
     const history = turns.filter((t) => t.status === 'done' || t.role === 'user').slice(-10)
       .map((t) => ({ role: t.role === 'user' ? 'user' : 'assistant', text: t.text }))
+    stick.current = true
     setTurns((ts) => [...ts, { role: 'user', text: question }, { role: 'expert', text: '', status: 'thinking' }])
     const patch = (p: Partial<Turn>) => setTurns((ts) => { const c = ts.slice(); c[c.length - 1] = { ...c[c.length - 1], ...p }; return c })
     const ctl = new AbortController(); controller.current = ctl
@@ -262,31 +310,58 @@ export function ExpertsPage() {
       }, ctl.signal)
     } catch (err: any) {
       if (!ctl.signal.aborted) patch({ error: err.message || 'could not ask', status: 'done' })
+      else patch({ text, status: 'done', stopped: true })            // interrupted: what was said stays
     } finally { s.thinking = false; s.speaking = false; setBusy(false) }
   }
 
   const send = (text: string) => {
-    if (!text.trim() || busy) return
+    if (!text.trim()) return
+    if (busyRef.current) {
+      // spoken over an answer: it is being stopped - ask as soon as it has
+      if (talk.current?.on) { interrupt(); setTimeout(() => sendRef.current(text), 250) }
+      return
+    }
     setDraft('')
     if (inside) void askExpert(text.trim())
     else void askGuide(text.trim())
   }
   const e = experts[current]
 
-  /** the microphone: press to speak, press again to send what was said */
-  const toggleListen = async () => {
-    if (!listening) {
-      try { voice.current.stop(); await ear.current.start(); setListening(true) }
-      catch { setGuideSaid({ why: 'The microphone is not available - check the browser allows it.', picked: [] }) }
-      return
-    }
-    setListening(false); setHearing(true)
-    try {
-      const wav = await ear.current.stop()
-      const said = wav ? (await api.listen(wav)).trim() : ''
-      if (said) send(said)
-    } catch { /* nothing heard */ } finally { setHearing(false) }
+  const sendRef = useRef(send)
+  sendRef.current = send
+  const interruptRef = useRef(interrupt)
+  interruptRef.current = interrupt
+
+  /** the microphone: on, and you just talk; off again when you are done */
+  const toggleTalk = async () => {
+    if (talk.current?.on) { talk.current.stop(); setHeard(''); return }
+    talk.current = new Talk({
+      state: setTalkState,
+      level: (v) => bar.current?.style.setProperty('--lv', v.toFixed(3)),
+      partial: setHeard,
+      turn: (text) => { setHeard(''); sendRef.current(text) },
+      interrupt: () => interruptRef.current(),
+    }, () => busyRef.current || voice.current.playing, smart.current)
+    try { await talk.current.start() }
+    catch { talk.current.stop(); setGuideSaid({ why: 'The microphone is not available - check the browser allows it.', picked: [] }) }
   }
+  const cycleSpeed = () => {
+    const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length] ?? 1
+    setSpeed(next); voice.current.speed = next; localStorage.setItem('mb_xp_speed', String(next))
+  }
+  const talking = talkState === 'hearing' || talkState === 'writing'
+  const hint = talkState === 'writing' ? 'Writing down what you said…'
+    : talkState === 'hearing' ? 'Hearing you…'
+    : talkState === 'waiting' ? (busy || speaking ? 'Speak to interrupt…'
+      : inside && e ? `Listening - just speak to ${e.name}…` : 'Listening - just ask…')
+    : inside && e ? `Ask ${e.name}…` : 'Not sure who to ask? Ask here…'
+  const unlockCard = unlocked ? (
+    <div className="xp-unlock" onClick={() => setUnlocked(null)}>
+      <div className="xp-unlock-head">A new monument</div>
+      <div className="xp-unlock-name">{unlocked}</div>
+      <div>Your library has grown enough. Your next expert can stand as it.</div>
+    </div>
+  ) : null
 
   return (
     <div className={`xp ${inside ? 'inside' : ''}`} ref={host}>
@@ -297,6 +372,7 @@ export function ExpertsPage() {
       {!inside ? <button className="xp-new" onClick={() => setEditing(null)}>+ New expert</button> : null}
       {loaded && !experts.length ? (
         <div className="xp-empty">
+          {unlockCard}
           <div className="xp-empty-title">Your experts live here</div>
           <div>Each one knows the boards you give it, and answers from them.</div>
           <button className="xp-primary" onClick={() => setEditing(null)}>Make your first expert</button>
@@ -314,13 +390,21 @@ export function ExpertsPage() {
           <button className="xp-back" onClick={leave}>&#8249; All experts</button>
           <div className="xp-who">{e.name}</div>
           <div className="xp-cartouches">{e.boards.map((b) => <span key={b.id} className="xp-cartouche">{b.title}</span>)}</div>
-          <div className="xp-turns" ref={scroller}>
+          <div className="xp-turns" ref={scroller}
+            onScroll={(ev) => { const el = ev.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60 }}>
             {turns.map((t, i) => t.role === 'user'
               ? <div key={i} className="xp-q">{t.text}</div>
               : (
                 <div key={i} className="xp-a">
-                  {t.status === 'thinking' ? <div className="xp-note">Thinking…</div> : <Said turn={t} />}
+                  {t.status === 'thinking' ? <div className="xp-note">Thinking…</div> : <Said turn={t} onCard={goToCard} />}
+                  {t.stopped ? <div className="xp-note">Stopped</div> : null}
                   {t.error ? <div className="xp-error">{t.error}</div> : null}
+                  {adding === i ? (
+                    <AddCard boards={e.boards} question={turns[i - 1]?.text ?? ''} answer={t.text} where={t.where ?? {}}
+                      onDone={() => setAdding(null)} onOpen={goToCard} />
+                  ) : t.status === 'done' && t.text.trim() && !t.error && !(busy && i === turns.length - 1) ? (
+                    <button className="xp-add" onClick={() => setAdding(i)}>+ Add to board</button>
+                  ) : null}
                   {t.next && i === turns.length - 1 && !busy ? (
                     <div className="xp-next"><span>Would you like to know</span>
                       <button onClick={() => send(t.next!)}>{t.next}</button></div>
@@ -342,32 +426,34 @@ export function ExpertsPage() {
       ) : null}
 
       {experts.length ? (
-        <div className={`xp-bar ${busy ? 'busy' : ''}`}>
-          <input value={draft} onChange={(ev) => setDraft(ev.target.value)}
+        <div className={`xp-bar ${busy ? 'busy' : ''} talk-${talkState}`} ref={bar}>
+          {talkState !== 'off' ? <span className="xp-wave" aria-hidden="true"><i /><i /><i /><i /><i /></span> : null}
+          <input value={talking ? heard : draft} readOnly={talking} className={talking ? 'heard' : ''}
+            onChange={(ev) => setDraft(ev.target.value)}
             onKeyDown={(ev) => { if (ev.key === 'Enter') send(draft) }}
-            placeholder={listening ? 'Listening…' : inside && e ? `Ask ${e.name}…` : 'Not sure who to ask? Ask here…'} />
+            placeholder={hint} />
           {canListen ? (
-            <button className={`xp-mic ${listening ? 'on' : ''}`} disabled={busy || hearing}
-              title={listening ? 'Listening - press again to ask' : hearing ? 'Making out the words…' : 'Speak your question'}
-              onClick={() => void toggleListen()}>{hearing ? '…' : '🎙'}</button>
+            <button className={`xp-mic ${talkState !== 'off' ? 'on' : ''}`}
+              title={talkState !== 'off' ? 'Listening - press to stop' : 'Talk - just speak, hands-free'}
+              aria-label={talkState !== 'off' ? 'Stop listening' : 'Talk'}
+              onClick={() => void toggleTalk()}><MicIcon /></button>
+          ) : null}
+          {inside && voiceReady && voiceOn ? (
+            <button className="xp-speed" title="How fast the expert speaks" onClick={cycleSpeed}>{speed}×</button>
           ) : null}
           {inside && voiceReady ? (
             <button className={`xp-voice ${voiceOn ? 'on' : ''}`} title={voiceOn ? 'Voice on' : 'Voice off'}
+              aria-label={voiceOn ? 'Turn the voice off' : 'Turn the voice on'}
               onClick={() => { const on = !voiceOn; setVoiceOn(on); localStorage.setItem('mb_xp_voice', on ? '1' : '0')
-                if (!on) voice.current.stop() }}>{voiceOn ? '🔊' : '🔈'}</button>
+                if (!on) voice.current.stop() }}><SpeakerIcon on={voiceOn} /></button>
           ) : null}
-          {busy ? <button className="xp-send" onClick={() => controller.current?.abort()} aria-label="Stop">&#9632;</button>
+          {busy || speaking ? <button className="xp-send" onClick={interrupt} title="Stop (Esc)" aria-label="Stop">&#9632;</button>
             : <button className="xp-send" onClick={() => send(draft)} aria-label="Ask">&#8593;</button>}
         </div>
       ) : null}
 
-      {unlocked ? (
-        <div className="xp-unlock" onClick={() => setUnlocked(null)}>
-          <div className="xp-unlock-head">A new monument</div>
-          <div className="xp-unlock-name">{unlocked}</div>
-          <div>Your library has grown enough. Your next expert can stand as it.</div>
-        </div>
-      ) : null}
+      {/* never over a conversation; above the empty desert's words, not on them */}
+      {experts.length > 0 && !inside ? <div className="xp-unlock-top">{unlockCard}</div> : null}
       {editing !== undefined ? <Editor expert={editing} shapes={shapes} onDone={(changed) => { setEditing(undefined); if (changed) void load() }} /> : null}
     </div>
   )

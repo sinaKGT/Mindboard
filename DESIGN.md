@@ -2537,3 +2537,68 @@ crumb goes to this page. The menu's *Open my boards* opens the board list
 directly, *Talk to my experts* the Experts.
 
 193 tests.
+
+## 44. Talking with the experts: hands-free, interruptible, kept (2026-11-08)
+
+**Hands-free, with Smart Turn.** The microphone button now starts a
+conversation instead of a recording: press it once and just talk.
+- The microphone stays open, through the browser's echo cancellation, noise
+  suppression and gain control. It is taken in through an AudioWorklet and
+  brought to 16 kHz in the page.
+- A light voice detector runs on each 20 ms of sound, against a noise floor
+  it follows slowly. 80 ms of speech starts a turn, keeping the 400 ms before
+  it, so the first word is not cut.
+- While you speak, the words so far are written into the bar about every
+  1.2 s (whisper.cpp), and the bar shows a level meter.
+- When you pause, **Smart Turn v3.2** (pipecat-ai, BSD-2-Clause, 8.7 MB
+  int8 ONNX, pinned by revision, size and SHA-256) decides from how your
+  voice ended whether you have finished or are only taking a breath:
+  `POST /api/voice/turn`, 13-26 ms on the processor.
+  - It is asked after 400 ms of quiet, and again at 1.2 s if it said not
+    yet. 2.5 s of quiet ends the turn anyway.
+  - A finished turn is written down in full and asked, with nothing to press.
+- Smart Turn reads a Whisper log-mel spectrogram. Its reference code makes
+  that with `transformers`; `turn.py` does the same arithmetic in numpy. It
+  matched the reference to within 6e-6, and a test pins reference values.
+  Measured on Kokoro speech: a finished question scored 0.99, a trailing
+  "how reranking, um, and" 0.006.
+- Without Smart Turn installed, 1.2 s of quiet ends a turn.
+- Smart Turn is installed with the rest of the voice (`mindboard ai voice`,
+  about 520 MB in all). The menu and the command now check for it too.
+
+**Interrupting.**
+- Stop is offered whenever the expert is writing *or* speaking. Stop, or Esc,
+  ends both: the answer is cut where it was and marked *Stopped*, and the
+  model is told directly (`POST /api/experts/ask/stop`).
+- Hands-free, you can simply speak over the expert. While it is busy, the
+  detector asks for a clearer, longer sound (240 ms) before it treats it as
+  you; then it stops the expert at once, listens, and asks what you said.
+- Measured in the preview with a synthetic microphone: the answer stopped,
+  and "Tell me about chunking instead." was heard and asked.
+
+**The rest of the conversation.**
+- **Speed:** a chip in the bar sets how fast the expert speaks: 0.8× to
+  1.25×, remembered. It is passed to Kokoro, and the next sentence uses it.
+- **Scrolling:** the conversation follows a growing answer only while you
+  are at the bottom. Scroll up to read, and it stays where you put it.
+- **Coming back from a card:** opening a cited card keeps the conversation
+  for up to two hours. Coming back (Back, or closing the board) finds it
+  where it was, inside the same expert. Closing a board opened from a
+  conversation returns to the Experts rather than the board list.
+- **Add to board:** offered under every answer, as on a board (§34). The
+  model drafts a card from the answer, and you choose which of the expert's
+  boards it goes on (the one it cited most, by default) and which cited card
+  it links to, and how. Add writes it through the op-log with provenance
+  `ai`, beside that card. The indexer makes it searchable.
+- A citation the model got wrong (not one of the given cards) is left out
+  rather than shown as raw brackets, and is not read aloud.
+
+**Looks.**
+- The unlock notice no longer covers anything. On the empty desert it sits
+  above the words with a gap. Elsewhere it sits at the top, never inside a
+  conversation, and steps aside after 9 s.
+- The bar's icons are gold line drawings, not coloured emoji.
+- Only the conversation and inputs can be selected, so no selection
+  highlight is left behind the crumbs or buttons.
+
+200 tests.

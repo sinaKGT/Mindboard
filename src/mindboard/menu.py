@@ -446,10 +446,10 @@ def _setup_ai(dd) -> None:
         setup(console, lambda q: _yes(q, False))
     else:
         run_check(console)
-    if find_install() is not None and not (voice.installed() and voice.can_listen()):
+    if find_install() is not None and not voice.complete():
         console.print()
         console.print("  [bold]The experts' voice[/bold] - they speak their answers, and you can")
-        console.print(f"  speak to them. About 510 MB, once; everything stays on this computer.")
+        console.print(f"  speak to them. About 520 MB, once; everything stays on this computer.")
         console.print(f"  [{DIM}]Its pronunciation step uses espeak-ng (GPL-3.0).[/{DIM}]")
         if _yes("Set up the voice now?", True):
             def show(name, done, total):

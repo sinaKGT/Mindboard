@@ -91,7 +91,7 @@ const apiCore = {
     req<Expert>(`/experts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteExpert: (id: string) => req<{ deleted: boolean }>(`/experts/${id}`, { method: 'DELETE' }),
   /** is the experts' voice set up, and which voices there are */
-  voice: () => req<{ installed: boolean; cast: string[]; listen: boolean }>('/voice'),
+  voice: () => req<{ installed: boolean; cast: string[]; listen: boolean; turn: boolean }>('/voice'),
   /** words from a short recording, made on this computer (whisper.cpp) */
   listen: async (wav: Blob): Promise<string> => {
     const headers: Record<string, string> = { 'Content-Type': 'audio/wav' }
@@ -100,12 +100,22 @@ const apiCore = {
     if (!res.ok) throw new Error('could not make out the words')
     return (await res.json()).text as string
   },
+  /** have you finished speaking? Smart Turn reads the sound of the turn so far (DESIGN.md 44) */
+  turn: async (wav: Blob): Promise<{ complete: boolean; probability: number }> => {
+    const headers: Record<string, string> = { 'Content-Type': 'audio/wav' }
+    if (token) headers['X-Mindboard-Token'] = token
+    const res = await fetch('/api/voice/turn', { method: 'POST', headers, body: wav, credentials: 'same-origin' })
+    if (!res.ok) throw new Error('could not tell')
+    return res.json()
+  },
+  /** stop an expert's answer - Stop, or speaking over it */
+  expertStop: () => req<{ stopped: boolean }>('/experts/ask/stop', { method: 'POST' }),
   /** one sentence, spoken on this computer, as WAV bytes */
-  speak: async (text: string, voice: string): Promise<ArrayBuffer> => {
+  speak: async (text: string, voice: string, speed = 1): Promise<ArrayBuffer> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) headers['X-Mindboard-Token'] = token
     const res = await fetch('/api/voice/speak', { method: 'POST', headers, credentials: 'same-origin',
-      body: JSON.stringify({ text, voice }) })
+      body: JSON.stringify({ text, voice, speed }) })
     if (!res.ok) throw new Error('could not speak')
     return res.arrayBuffer()
   },

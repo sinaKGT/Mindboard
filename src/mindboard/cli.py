@@ -501,15 +501,16 @@ def ai_eval(
 
 @ai_app.command("voice")
 def ai_voice():
-    """Set up the experts' voice - speaking and listening, on this computer (about 510 MB)."""
+    """Set up the experts' voice - speaking and listening, on this computer (about 520 MB)."""
     from . import voice
 
     con = _console()
-    if voice.installed() and voice.can_listen():
+    if voice.complete():
         con.print("  The voice is set up - experts speak, and listen.")
         return
     con.print("  Setting up the voice - Kokoro (Apache-2.0) to speak, whisper.cpp (MIT) to")
-    con.print("  listen - about 510 MB, once. Everything stays on this computer.")
+    con.print("  listen, and Smart Turn (BSD-2) to know when you have finished - about 520 MB,")
+    con.print("  once. Everything stays on this computer.")
     con.print("  Its pronunciation step uses espeak-ng (GPL-3.0); it runs only on this computer.")
 
     def show(name, done, total):

@@ -1,6 +1,11 @@
 /* The Experts page (DESIGN.md 40): gold on a night desert. */
 .xp { --gold: #e8b864; --xp-text: #f1e7d6; --xp-dim: #a8977c; --xp-faint: #6e624f; --xp-surface: #120e0a; --xp-border: #3a2e20;
-  position: fixed; inset: 0; background: #030304; color: var(--xp-text); overflow: clip; z-index: 1; }
+  position: fixed; inset: 0; background: #030304; color: var(--xp-text); overflow: clip; z-index: 1;
+  user-select: none; -webkit-user-select: none; }
+/* only what is worth copying can be selected - no highlight left behind the crumbs or buttons */
+.xp-turns, .xp-guide, .xp input, .xp textarea { user-select: text; -webkit-user-select: text; }
+.xp button:focus { outline: none; }
+.xp button:focus-visible { outline: 1px solid #e8b86499; outline-offset: 2px; }
 /* clip, not hidden: a hidden overflow can still be scrolled - focusing the box once scrolled the whole page up */
 .xp canvas { display: block; }
 .xp-top { position: absolute; top: 16px; left: 18px; display: flex; gap: 10px; color: var(--xp-dim); z-index: 5; letter-spacing: .04em; }
@@ -98,24 +103,47 @@
 .xp-shapes button.locked { opacity: .45; cursor: not-allowed; }
 .xp-progress { margin-left: 6px; font-size: 10.5px; color: var(--xp-faint); }
 /* a monument unlocked: announced once, gold on the night */
-.xp-unlock { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%); z-index: 8; text-align: center;
+.xp-unlock-top { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 8; }
+.xp-unlock { position: relative; margin-bottom: 36px; text-align: center; max-width: min(560px, 90vw);
   padding: 22px 30px; border-radius: 16px; background: #0b0805ee; border: 1px solid var(--gold); color: var(--xp-dim);
   box-shadow: 0 0 60px #e8b86433; cursor: pointer; animation: xpUnlock 1.2s cubic-bezier(.22,.61,.36,1) both; }
 .xp-unlock-head { font-size: 11px; letter-spacing: .3em; text-transform: uppercase; color: var(--xp-faint); }
 .xp-unlock-name { margin: 6px 0 8px; font-size: 26px; font-weight: 300; letter-spacing: .3em; text-transform: uppercase;
   color: var(--gold); text-shadow: 0 0 20px #e8b86499; }
-@keyframes xpUnlock { from { opacity: 0; transform: translate(-50%, -40%) scale(.9); filter: blur(6px); } }
+@keyframes xpUnlock { from { opacity: 0; transform: translateY(12px) scale(.94); filter: blur(6px); } }
 .xp-name .xp-pen { opacity: 0; transition: opacity .3s; margin-left: 8px; padding: 0 6px; border-radius: 6px; color: var(--xp-faint); font-size: 12px; }
 .xp-name .xp-pen:hover { color: var(--gold); background: #e8b86422; }
 .xp-name:hover .xp-pen { opacity: 1; }
 /* the conversation scrolls without a visible bar */
 .xp-turns { scrollbar-width: none; }
 .xp-turns::-webkit-scrollbar { display: none; }
-.xp-voice { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--xp-border); opacity: .55; font-size: 14px; }
-.xp-voice.on { opacity: 1; border-color: #e8b86466; }
-.xp-mic { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--xp-border); font-size: 14px; }
-.xp-mic.on { border-color: #f0907a; box-shadow: 0 0 0 0 #f0907a88; animation: xpMic 1.4s ease-out infinite; }
-@keyframes xpMic { to { box-shadow: 0 0 0 12px #f0907a00; } }
+/* the bar's round buttons: gold line icons, never coloured emoji */
+.xp-voice, .xp-mic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid var(--xp-border); color: var(--xp-dim); background: none; transition: color .2s, border-color .2s, box-shadow .15s; }
+.xp-voice:hover, .xp-mic:hover { color: var(--gold); border-color: #e8b86488; }
+.xp-voice.on { color: var(--gold); border-color: #e8b86466; }
+.xp-voice:not(.on) { opacity: .6; }
+.xp-mic.on { color: #1a1206; background: var(--gold); border-color: var(--gold);
+  box-shadow: 0 0 0 calc(var(--lv, 0) * 10px) #e8b86438; }
+.xp-speed { height: 26px; min-width: 42px; padding: 0 9px; flex: none; border-radius: 999px; border: 1px solid var(--xp-border);
+  color: var(--xp-dim); font-size: 11.5px; letter-spacing: .03em; font-variant-numeric: tabular-nums; }
+.xp-speed:hover { color: var(--gold); border-color: #e8b86488; }
+
+/* talking hands-free (DESIGN.md 44): the bar listens - and shows it */
+.xp-wave { display: flex; align-items: center; gap: 3px; height: 22px; margin-left: -6px; flex: none; }
+.xp-wave i { display: block; width: 3px; height: 18px; border-radius: 2px; background: var(--gold); opacity: .85;
+  transform: scaleY(calc(.18 + var(--lv, 0) * var(--k, 1))); transition: transform .08s linear; }
+.xp-wave i:nth-child(1) { --k: .5; } .xp-wave i:nth-child(2) { --k: .9; } .xp-wave i:nth-child(3) { --k: 1.3; }
+.xp-wave i:nth-child(4) { --k: .8; } .xp-wave i:nth-child(5) { --k: .45; }
+.talk-waiting .xp-wave i { opacity: .5; }
+.talk-writing .xp-wave i { animation: xpWrite 1s ease-in-out infinite; transform: scaleY(.3); }
+.talk-writing .xp-wave i:nth-child(2) { animation-delay: .12s; } .talk-writing .xp-wave i:nth-child(3) { animation-delay: .24s; }
+.talk-writing .xp-wave i:nth-child(4) { animation-delay: .36s; } .talk-writing .xp-wave i:nth-child(5) { animation-delay: .48s; }
+@keyframes xpWrite { 50% { transform: scaleY(.85); } }
+.xp-bar.talk-hearing { box-shadow: 0 0 calc(12px + var(--lv, 0) * 36px) #e8b86430; }
+.xp-bar input.heard { color: #f3e4c4; font-style: italic; }
+.xp-bar input::placeholder { color: var(--xp-faint); }
+.talk-waiting input::placeholder, .talk-hearing input::placeholder, .talk-writing input::placeholder { color: var(--gold); opacity: .75; }
 
 /* the welcome page (DESIGN.md 43) */
 .wl-title { position: absolute; top: 9vh; width: 100%; text-align: center; z-index: 5; pointer-events: none;
@@ -128,3 +156,22 @@
 .wl-door-name { color: var(--xp-dim); font-size: 14px; letter-spacing: .3em; text-transform: uppercase; transition: color .4s, text-shadow .4s; }
 .wl-door-note { margin-top: 4px; color: var(--xp-faint); font-size: 11px; letter-spacing: .25em; text-transform: uppercase; }
 .wl-door.on .wl-door-name, .wl-door:hover .wl-door-name { color: var(--gold); text-shadow: 0 0 14px #e8b86488; }
+
+/* Add to board, from an answer (DESIGN.md 44) */
+.xp-add { margin-top: 10px; padding: 3px 12px; border-radius: 999px; border: 1px solid var(--xp-border);
+  color: var(--xp-dim); font-size: 12px; }
+.xp-add:hover { color: var(--gold); border-color: var(--gold); }
+.xp-draft { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--xp-border); display: flex; flex-direction: column; gap: 8px; }
+.xp-draft input, .xp-draft textarea, .xp-draft select { background: #0a0806; border: 1px solid var(--xp-border); border-radius: 8px;
+  color: var(--xp-text); padding: 6px 10px; font: inherit; font-size: 13px; outline: none; }
+.xp-draft input:focus, .xp-draft textarea:focus, .xp-draft select:focus { border-color: #e8b86488; }
+.xp-draft input { font-weight: 600; }
+.xp-draft textarea { resize: vertical; line-height: 1.5; }
+.xp-draft-where { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--xp-faint); font-size: 12px; }
+.xp-draft-where select { padding: 4px 8px; font-size: 12px; max-width: 220px; }
+.xp-draft-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.xp-draft-actions button:not(.xp-primary) { padding: 6px 14px; border-radius: 999px; color: var(--xp-dim); }
+.xp-draft-actions button:disabled { opacity: .5; }
+.xp-added { margin-top: 10px; display: flex; gap: 10px; align-items: center; color: var(--gold); font-size: 12.5px; }
+.xp-added button { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--xp-border); color: var(--xp-dim); font-size: 12px; }
+.xp-added button:hover { color: var(--gold); border-color: var(--gold); }

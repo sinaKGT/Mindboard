@@ -51,10 +51,12 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    // leaving a board goes back to your boards; the other pages keep their place
+    // leaving a board goes back to your boards - or to the expert's conversation
+    // that opened it (DESIGN.md 44); the other pages keep their place
     const h = location.hash
+    const back = sessionStorage.getItem('mb_xp_return') ? '#/experts' : '#/boards'
     const want = boardId ? `#/b/${boardId}` : (h === '#/experts' || h === '#/boards' || h === '' || h === '#/'
-      ? (h === '#/' ? '' : h) : '#/boards')
+      ? (h === '#/' ? '' : h) : back)
     if (location.hash !== want) history.replaceState({}, '', location.pathname + want)
     setPage(want)   // replaceState fires no hashchange
   }, [boardId])

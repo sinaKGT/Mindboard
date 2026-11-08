@@ -109,3 +109,4 @@ class SpeakRequest(BaseModel):
     """A sentence for the voice."""
     text: str = Field(min_length=1, max_length=2000)
     voice: str = Field(default="af_heart", max_length=20)
+    speed: float = Field(default=1.0, ge=0.5, le=1.6)
