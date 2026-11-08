@@ -190,6 +190,15 @@ def _backup(dd) -> None:
     for b in result["boards"]:
         console.print(f"    [green]✓[/green] {b['title'][:40]:<40} "
                       f"[{DIM}]{b['nodes']} nodes[/{DIM}]")
+    if result["missing"]:
+        from rich.markup import escape
+
+        from .bundle import missing_note
+
+        console.print()
+        for line in missing_note(result["missing"]).rstrip().splitlines():
+            # card titles are the person's words: never read as markup
+            console.print(f"  [yellow]{escape(line)}[/yellow]", highlight=False)
     console.print()
     console.print(f"  [bold]{target.name}[/bold]  [{DIM}]{_size(target)}[/{DIM}]")
     console.print(f"  [{DIM}]{target.parent}[/{DIM}]")

@@ -24,7 +24,7 @@ from .assets import (
 )
 from .boards import board_meta, conn_for, create_board, delete_board, list_boards
 from .bundle import (
-    BundleError, backup_filename, create_backup, export_board, import_bundle, is_backup,
+    BundleError, backup_filename, check_files, create_backup, export_board, import_bundle, is_backup,
     restore_backup,
 )
 from .ids import ulid
@@ -733,13 +733,21 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             background=BackgroundTask(lambda: shutil.rmtree(tmp.parent, ignore_errors=True)),
         )
 
+    @app.get("/api/backup/check")
+    def api_backup_check():
+        """What a backup made now would lack: the files on the boards found
+        nowhere on this computer (DESIGN.md 49). Writes nothing."""
+        return check_files(dd)
+
     @app.get("/api/backup")
     def api_backup():
-        """Every board, media included, as one ordinary zip."""
+        """Every board, media included, as one ordinary zip. Files found
+        nowhere are listed inside it (MISSING-FILES.txt) and counted here."""
         tmp = Path(tempfile.mkdtemp()) / backup_filename()
-        create_backup(dd, tmp)
+        result = create_backup(dd, tmp)
         return FileResponse(
             tmp, media_type="application/zip", filename=tmp.name,
+            headers={"X-Mindboard-Missing-Files": str(len(result["missing"]))},
             background=BackgroundTask(lambda: shutil.rmtree(tmp.parent, ignore_errors=True)),
         )
 

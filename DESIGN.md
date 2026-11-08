@@ -2855,3 +2855,39 @@ scanned PDF has no text to read; and Open was not pressed in the test, as it
 starts the PDF reader on this computer.
 
 226 tests.
+
+## 49. Every file a card points to is in the backup - or named (2026-11-08)
+
+A backup carries every file any card points to (§22: found by the shape of
+a hash, whatever key it hides under). But a file missing from disk was
+skipped without a word: the backup finished normally, and the gap showed
+only after a restore. The test library is that case - its cards point to 49
+pictures whose files were never copied. The rule now: every file a board's
+cards point to goes in, or the backup says which one did not and why.
+
+- **Taken from another board's copy** (`bundle.find_file`). A file is named
+  by its hash, so when one is missing from its own board, the same file kept
+  by another board is the very same bytes. It goes into this board's bundle,
+  and a restore puts it back where it belongs.
+- **Found nowhere: named, never passed over** (`board_files`, `check_files`).
+  The backup is still made - everything else, and every card, is in it - and
+  it says what it lacks: `MISSING-FILES.txt` inside the zip, by board, card
+  and file; `missing_files` in its manifest; a warning in the terminal
+  (`mindboard backup`) and the menu; the count in the download's
+  `X-Mindboard-Missing-Files` header.
+- **Asked before the download in the app.** "Back up all" and the palette's
+  backup check first (`GET /api/backup/check`, which writes nothing and takes
+  a moment). If a file is found nowhere, they name it - board and card, up to
+  eight, the rest in the zip - and ask whether to download the backup anyway.
+  If the check itself fails, the backup is never refused for it.
+- A single board's export (`.mindboard`) follows the same rule, and counts
+  its missing files in its manifest.
+- Files no card points to any more are still left out, as before: they are
+  what `gc` removes.
+
+Measured on the test library: the backup took the 2 files it has (the
+diagram and the PDF of §48), named all 49 missing ones in the terminal, in
+`MISSING-FILES.txt` and in the manifest, and restores. In the app, "Back up
+all" named the same 49 before downloading; cancelling downloaded nothing.
+
+230 tests.

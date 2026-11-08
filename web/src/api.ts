@@ -191,6 +191,9 @@ const apiMore = {
   exportUrl: (boardId: string) =>
     `/api/boards/${boardId}/export${token ? `?t=${encodeURIComponent(token)}` : ''}`,
   backupUrl: () => `/api/backup${token ? `?t=${encodeURIComponent(token)}` : ''}`,
+  /** what a backup made now would lack: files on the boards found nowhere (DESIGN.md 49) */
+  backupCheck: () => req<{ files: number; recovered: number;
+    missing: { sha: string; board: string; board_title: string; cards: string[] }[] }>('/backup/check'),
 }
 
 /** Everything the interface asks the server, in one place. */

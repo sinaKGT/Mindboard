@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { api } from './api'
+import { backUp } from './backup'
 import { Icon } from './icons'
 import { GraphMini, ago } from './Mini'
 import { useStore } from './store'
@@ -108,10 +109,10 @@ export function Launcher({ onImport }: { onImport: () => void }) {
             <Icon name="upload" size={14} /> Import
           </button>
           {!!boards?.length && (
-            <a className="btn ghost" href={api.backupUrl()}
+            <button className="btn ghost" onClick={() => void backUp()}
               title="Download every board, media included, as one zip">
               <Icon name="download" size={14} /> Back up all
-            </a>
+            </button>
           )}
         </div>
 

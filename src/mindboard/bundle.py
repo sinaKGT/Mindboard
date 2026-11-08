@@ -52,24 +52,97 @@ def referenced_assets(nodes: list[dict[str, Any]]) -> set[str]:
     return out
 
 
+# Every file a card points to goes into the bundle (DESIGN.md 49). A file is
+# named by its hash, so when one is missing from its own board the same file
+# kept by another board is the very same bytes, and is taken from there. A file
+# found nowhere cannot be included - that is said, by board and card, never
+# passed over in silence: the backup still holds the cards, and the person
+# knows what it lacks.
+
+def find_file(dd: DataDir, board_id: str, sha: str, conn=None):
+    """A file a card points to: (path, its asset row, taken from another
+    board?) - its own board's copy first, then the same file kept by another
+    board. (None, None, False) when it is on no board at all."""
+    conn = conn or conn_for(dd, board_id)
+    row = conn.execute("SELECT * FROM asset WHERE sha256=?", (sha,)).fetchone()
+    if row is not None:
+        path = resolve(dd, conn, board_id, sha)
+        if path is not None:
+            return path, row, False
+    for b in list_boards(dd):
+        if b["id"] == board_id:
+            continue
+        other = conn_for(dd, b["id"])
+        orow = other.execute("SELECT * FROM asset WHERE sha256=?", (sha,)).fetchone()
+        path = resolve(dd, other, b["id"], sha) if orow is not None else None
+        if path is not None:
+            return path, orow, True
+    return None, None, False
+
+
+def board_files(dd: DataDir, board_id: str, conn=None, nodes: Optional[list[dict]] = None) -> dict[str, Any]:
+    """Every file a board's cards point to, found: {"found": [(sha, path,
+    row)], "recovered": [sha] taken from another board, "missing": [{"sha",
+    "board", "board_title", "cards"}] found nowhere}."""
+    conn = conn or conn_for(dd, board_id)
+    nodes = nodes if nodes is not None else read_graph(conn, board_id)["nodes"]
+    meta = board_meta(dd, board_id) or {}
+    out: dict[str, Any] = {"found": [], "recovered": [], "missing": []}
+    for sha in sorted(referenced_assets(nodes)):
+        path, row, elsewhere = find_file(dd, board_id, sha, conn)
+        if path is None:
+            cards = [n.get("title") or "Untitled" for n in nodes if sha in referenced_assets([n])]
+            out["missing"].append({"sha": sha, "board": board_id, "board_title": meta.get("title", ""),
+                                   "cards": cards})
+            continue
+        out["found"].append((sha, path, row))
+        if elsewhere:
+            out["recovered"].append(sha)
+    return out
+
+
+def check_files(dd: DataDir) -> dict[str, Any]:
+    """What a backup made now would hold and lack - quick, nothing written: the
+    files found nowhere, and how many were taken from another board."""
+    missing, recovered, files = [], 0, 0
+    for b in list_boards(dd):
+        got = board_files(dd, b["id"])
+        missing += got["missing"]
+        recovered += len(got["recovered"])
+        files += len(got["found"]) + len(got["missing"])
+    return {"files": files, "missing": missing, "recovered": recovered}
+
+
+def missing_note(missing: list[dict]) -> str:
+    """The files a backup could not include, said plainly - the backup's
+    MISSING-FILES.txt, and the terminal's warning."""
+    lines = [f"{len(missing)} file{'' if len(missing) == 1 else 's'} on your boards could not be found on "
+             "this computer, so this backup does not include "
+             f"{'it' if len(missing) == 1 else 'them'}. The cards themselves are backed up.", ""]
+    for m in missing:
+        lines.append(f"- board \"{m['board_title']}\": {', '.join(m['cards'][:3]) or 'a card'}"
+                     f"{' and others' if len(m['cards']) > 3 else ''}  (file {m['sha'][:12]})")
+    return "\n".join(lines) + "\n"
+
+
 def export_board(dd: DataDir, board_id: str, out_path: Path,
-                 include_thumbs: bool = False) -> Path:
+                 include_thumbs: bool = False, report: Optional[dict] = None) -> Path:
+    """One board, every file its cards point to included. `report`, if given,
+    is filled with the files taken from another board and those found nowhere."""
     c = conn_for(dd, board_id)
     meta = board_meta(dd, board_id)
     if meta is None:
         raise ValueError(f"no such board: {board_id}")
     graph = read_graph(c, board_id)
-    shas = referenced_assets(graph["nodes"])
+    files = board_files(dd, board_id, c, graph["nodes"])
+    if report is not None:
+        report.update(recovered=files["recovered"], missing=files["missing"])
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
         asset_rows = []
-        for sha in sorted(shas):
-            row = c.execute("SELECT * FROM asset WHERE sha256=?", (sha,)).fetchone()
-            src = resolve(dd, c, board_id, sha)
-            if row is None or src is None:
-                continue
+        for sha, src, row in files["found"]:
             z.write(src, f"assets/{sha}{row['ext']}")
             asset_rows.append({
                 "sha256": sha, "mime": row["mime"], "ext": row["ext"],
@@ -99,6 +172,7 @@ def export_board(dd: DataDir, board_id: str, out_path: Path,
                 "nodes": len(graph["nodes"]),
                 "edges": len(graph["edges"]),
                 "assets": len(asset_rows),
+                "missing": len(files["missing"]),
             },
         }, indent=2))
 
@@ -248,6 +322,8 @@ def create_backup(dd: DataDir, out_path: Path) -> dict[str, Any]:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    recovered = 0
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
@@ -255,7 +331,10 @@ def create_backup(dd: DataDir, out_path: Path) -> dict[str, Any]:
             for b in boards:
                 member = f"boards/{_slug(b['title'])}-{b['id']}.mindboard"
                 staged = tmpdir / f"{b['id']}.mindboard"
-                export_board(dd, b["id"], staged)
+                report: dict[str, Any] = {}
+                export_board(dd, b["id"], staged, report=report)
+                missing += report["missing"]
+                recovered += len(report["recovered"])
                 z.write(staged, member)
                 staged.unlink(missing_ok=True)
                 entries.append({
@@ -268,14 +347,17 @@ def create_backup(dd: DataDir, out_path: Path) -> dict[str, Any]:
             from .experts import load as load_experts
             if load_experts(dd):
                 z.writestr("experts.json", json.dumps(load_experts(dd), indent=2, ensure_ascii=False))
+            if missing:
+                z.writestr("MISSING-FILES.txt", missing_note(missing))
             z.writestr("manifest.json", json.dumps({
                 "format": BACKUP_FORMAT,
                 "app_version": __version__,
                 "created_at": now(),
                 "board_count": len(entries),
                 "boards": entries,
+                "missing_files": missing,
             }, indent=2, ensure_ascii=False))
-    return {"path": out_path, "boards": entries,
+    return {"path": out_path, "boards": entries, "missing": missing, "recovered": recovered,
             "bytes": out_path.stat().st_size if out_path.exists() else 0}
 
 

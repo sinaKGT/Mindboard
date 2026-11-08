@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { autoLayout, jumpToNode, wrapSelection } from './actions'
 import { api } from './api'
+import { backUp } from './backup'
 import { Icon } from './icons'
 import { currentParent, flushNow, useStore } from './store'
 import { useUI } from './ui'
@@ -71,7 +72,7 @@ export function Palette({ onImport }: { onImport: () => void }) {
     }
     list.push(
       { id: 'backup', label: 'Back up every board as a zip', group: 'Library',
-        run: () => { flushNow(); setTimeout(() => { location.href = api.backupUrl() }, 350) } },
+        run: () => { flushNow(); setTimeout(() => void backUp(), 350) } },
       { id: 'import', label: 'Import a bundle, or restore a backup', group: 'Library',
         run: onImport },
     )

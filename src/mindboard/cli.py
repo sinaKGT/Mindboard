@@ -201,6 +201,11 @@ def backup(
                 f"{'' if len(result['boards']) == 1 else 's'}", bold=True)
     for b in result["boards"]:
         typer.echo(f"  {b['title'][:38]:<38}  {b['nodes']:>4} nodes")
+    if result["missing"]:
+        from .bundle import missing_note
+
+        typer.echo()
+        typer.secho(missing_note(result["missing"]).rstrip(), fg=typer.colors.YELLOW)
     size = result["bytes"] / 1024 / 1024
     typer.echo()
     typer.secho(f"  {result['path']}", fg=typer.colors.CYAN)
