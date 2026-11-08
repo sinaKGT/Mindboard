@@ -27,8 +27,15 @@ function sentences(text: string): string[] {
 
 export const SPEEDS = [0.8, 0.9, 1, 1.1, 1.25]
 
+let shared: AudioContext | null = null
+/** one audio context for the page: the expert's voice plays where the
+ *  microphone listens, so echo cancellation can take the voice out (DESIGN.md 45) */
+export function audio(): AudioContext {
+  if (!shared) shared = new AudioContext()
+  return shared
+}
+
 export class Voice {
-  private ctx: AudioContext | null = null
   private source: AudioBufferSourceNode | null = null
   private turn = 0
   private _playing = false
@@ -42,15 +49,10 @@ export class Voice {
     if (playing !== this._playing) { this._playing = playing; this.onPlaying(playing) }
   }
 
-  private audio() {
-    if (!this.ctx) this.ctx = new AudioContext()
-    return this.ctx
-  }
-
   /** say it - stopping anything still being said */
   async say(text: string, voice: string) {
     this.stop()
-    const turn = ++this.turn, ctx = this.audio()
+    const turn = ++this.turn, ctx = audio()
     if (ctx.state === 'suspended') await ctx.resume()
     const parts = sentences(text)
     const fetchOne = (s: string) => api.speak(s, voice, this.speed).then((b) => ctx.decodeAudioData(b)).catch(() => null)

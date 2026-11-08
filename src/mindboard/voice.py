@@ -154,13 +154,14 @@ def can_listen(home: Optional[Path] = None) -> bool:
 def complete(home: Optional[Path] = None) -> bool:
     """Everything the voice needs: speaking, listening, and knowing when you
     have finished (Smart Turn)."""
-    from . import turn
-    return installed(home) and can_listen(home) and turn.installed(home)
+    from . import listen, turn
+    return installed(home) and can_listen(home) and turn.installed(home) and listen.installed(home)
 
 
 def install_listening(home: Optional[Path] = None, progress: Optional[Progress] = None) -> None:
-    """whisper.cpp's program and its English model, and Smart Turn - which
-    tells when you have finished speaking (DESIGN.md 44) - pinned and checked."""
+    """whisper.cpp's program and its English model, Silero VAD - who is
+    speaking - and Smart Turn - when they have finished (DESIGN.md 44, 45) -
+    pinned and checked."""
     import tarfile
     import zipfile
 
@@ -185,8 +186,9 @@ def install_listening(home: Optional[Path] = None, progress: Optional[Progress] 
         if cli is not None and plat == "linux":
             cli.chmod(0o755)
     download(WHISPER_MODEL, folder(home), progress)
-    from . import turn
+    from . import listen, turn
     download(turn.MODEL, folder(home), progress)
+    download(listen.VAD, folder(home), progress)
 
 
 def transcribe(wav: bytes, home: Optional[Path] = None) -> str:

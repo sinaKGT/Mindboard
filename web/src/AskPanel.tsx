@@ -5,11 +5,12 @@
  *  question about your own cards goes. Everything it holds is screen state;
  *  nothing here writes to the board.
  */
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { api } from './api'
 import { cardsInside, revealCard, useAsk, type Turn } from './askStore'
 import { Icon } from './icons'
+import { Prose } from './Prose'
 import { useStore } from './store'
 import { newEdge, newNode, type MEdge, type Op } from './types'
 
@@ -36,27 +37,10 @@ function Cite({ id }: { id: string }) {
   )
 }
 
-/** Plain text with the model's light formatting: **bold**, list lines, and
- *  [[card]] citations turned into chips. Nothing else is interpreted - an
- *  answer is never HTML. */
+/** An answer laid out (Prose): headings, lists with their depth, bold, and
+ *  [[card]] citations as chips. Nothing is ever interpreted as HTML. */
 function Rich({ text }: { text: string }) {
-  const lines = text.split('\n')
-  return (
-    <>
-      {lines.map((line, i) => (
-        <Fragment key={i}>
-          {line.split(/(\[\[[0-9A-Za-z]{26}\]\]|\*\*[^*]+\*\*)/g).map((piece, j) => {
-            const cite = piece.match(/^\[\[([0-9A-Za-z]{26})\]\]$/)
-            if (cite) return <Cite key={j} id={cite[1]} />
-            const bold = piece.match(/^\*\*([^*]+)\*\*$/)
-            if (bold) return <strong key={j}>{bold[1]}</strong>
-            return <Fragment key={j}>{piece}</Fragment>
-          })}
-          {i < lines.length - 1 ? '\n' : null}
-        </Fragment>
-      ))}
-    </>
-  )
+  return <Prose text={text} cite={(id) => <Cite id={id} />} />
 }
 
 const fmt = (n: number) => n.toLocaleString()

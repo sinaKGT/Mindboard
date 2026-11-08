@@ -1165,3 +1165,25 @@ a.btn { text-decoration: none; }
 /* a card zoomed far out: its title alone (DESIGN.md 36) */
 .far-title { padding: 10px 12px; font-size: 13px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .mb-edge-path.far { transition: none; }
+
+/* answers, laid out (DESIGN.md 45) - the conversation keeps its own wrapping */
+.turn .prose { white-space: normal; }
+.turn .prose > * + * { margin-top: .45em; }
+.turn .prose-p { margin: 0; }
+.turn .prose-h { font-weight: 650; color: var(--mb-text); }
+.turn .prose > .prose-h:not(:first-child) { margin-top: .9em; }
+.turn .prose-h1, .turn .prose-h2 { font-size: 1.1em; }
+.turn .prose-li + .prose-li { margin-top: .2em; }
+.turn .prose-li { display: flex; gap: .5em; align-items: baseline; }
+.turn .prose-mark { flex: none; min-width: .9em; text-align: center; color: var(--mb-text-dim); }
+.turn .prose-mark.num { min-width: 1.4em; text-align: right; font-variant-numeric: tabular-nums; }
+.turn .prose-li-text { flex: 1; min-width: 0; }
+.turn .prose code { font-family: ui-monospace, Consolas, monospace; font-size: .92em; padding: 0 .3em; border-radius: 4px;
+  background: color-mix(in srgb, var(--mb-text) 8%, transparent); }
+.turn .prose-code { margin: 0; padding: 8px 10px; border-radius: 8px; overflow-x: auto; white-space: pre;
+  font-family: ui-monospace, Consolas, monospace; font-size: .9em; background: color-mix(in srgb, var(--mb-text) 6%, transparent); }
+.turn .prose-quote { padding-left: .8em; border-left: 2px solid var(--mb-border, #8884); color: var(--mb-text-dim); }
+.turn .prose-hr { border: 0; border-top: 1px solid var(--mb-border, #8884); margin: .8em 0; }
+.turn .prose-table-wrap { overflow-x: auto; }
+.turn .prose-table { border-collapse: collapse; }
+.turn .prose-table th, .turn .prose-table td { padding: 3px 8px; border-bottom: 1px solid var(--mb-border, #8884); text-align: left; vertical-align: top; }

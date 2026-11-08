@@ -162,7 +162,7 @@ def test_the_voice_says_whether_it_is_set_up(dd):
     app = create_app(dd, "t")
     with TestClient(app) as c:
         got = c.get("/api/voice", headers={"X-Mindboard-Token": "t"}).json()
-        assert set(got) == {"installed", "cast", "listen", "turn"} and "af_heart" in got["cast"]
+        assert set(got) == {"installed", "cast", "listen", "turn", "talk"} and "af_heart" in got["cast"]
 
 
 @pytest.mark.skipif(not __import__("mindboard.voice", fromlist=["installed"]).installed(),

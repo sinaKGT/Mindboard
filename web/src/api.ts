@@ -91,7 +91,7 @@ const apiCore = {
     req<Expert>(`/experts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteExpert: (id: string) => req<{ deleted: boolean }>(`/experts/${id}`, { method: 'DELETE' }),
   /** is the experts' voice set up, and which voices there are */
-  voice: () => req<{ installed: boolean; cast: string[]; listen: boolean; turn: boolean }>('/voice'),
+  voice: () => req<{ installed: boolean; cast: string[]; listen: boolean; turn: boolean; talk: boolean }>('/voice'),
   /** words from a short recording, made on this computer (whisper.cpp) */
   listen: async (wav: Blob): Promise<string> => {
     const headers: Record<string, string> = { 'Content-Type': 'audio/wav' }

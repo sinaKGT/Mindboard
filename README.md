@@ -298,15 +298,16 @@ board.
 ### Voice
 
 Experts speak their answers in a natural voice (Kokoro), and you can talk to
-them hands-free: press the microphone once and just speak. Your words appear
-in the bar as you say them. When you pause, **Smart Turn** listens to how your
-voice ended and tells whether you have finished or are only taking a breath;
-when you have, your question is asked. Speak while the expert is answering
-and it stops to listen, as in a conversation. Everything runs on this
-computer, and the audio is not kept.
+them hands-free: press the microphone once and just speak. A voice detector
+(**Silero VAD**) tells your voice from background sounds, and your words
+appear in the bar as you say them. When you pause, **Smart Turn** listens to
+how your voice ended and tells whether you have finished or are only taking a
+breath - and if you carry on a moment later, it is still the same question.
+Speak while the expert is answering and it stops to listen, as in a
+conversation. Everything runs on this computer, and the audio is not kept.
 
 ```
-mindboard ai voice        # one-time, about 520 MB: speaking, listening, Smart Turn
+mindboard ai voice        # one-time, about 520 MB: speaking, listening, turn-taking
 ```
 
 In the chat bar, the **1×** chip sets how fast the expert speaks, and the

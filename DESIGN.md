@@ -2602,3 +2602,62 @@ conversation instead of a recording: press it once and just talk.
   highlight is left behind the crumbs or buttons.
 
 200 tests.
+
+## 45. Listening like CLARA: Silero VAD on the server, a reopen window, laid-out answers (2026-11-08)
+
+Tried with a real microphone, §44's listening fell short. A chime became a
+question ("(chiming)"). A pause mid-sentence sent half of it. The expert's
+own voice came back as fragments. Speaking over an answer gave "still
+answering the last question". §44 decided turns in the page by loudness
+alone. CLARA, the person's voice project, gets this right on the
+speech-to-speech pipeline (huggingface, v0.2.12, Apache-2.0), so this
+follows its design and its tuning.
+
+**Turns are decided on the server** (`listen.py`, `/api/voice/stream`, a
+WebSocket).
+- The page only carries sound: the microphone, through echo cancellation,
+  brought to 16 kHz in an AudioWorklet and sent in 32 ms blocks.
+- **Silero VAD v5** (MIT, 2.3 MB ONNX, pinned) gives each block a speech
+  probability. Speech starts at 0.6 and holds down to 0.45.
+- A sound counts as you only after **384 ms** of speech; resuming a turn
+  needs 192 ms. **250 ms** of quiet ends a stretch, and **Smart Turn** reads
+  the whole turn (finished at p >= 0.55). If it is not finished, the turn
+  waits up to **2 s** of quiet. 500 ms before speech is kept. These are
+  CLARA's `configs/serve-gpu.json` values.
+- **The reopen window:** when Smart Turn says finished, the turn stays open
+  for **900 ms**. If you go on within it, the same turn continues; nothing
+  was asked yet. The words are written down (whisper.cpp) during the window,
+  so it costs no time. Upstream uses this for exactly the misjudged pause.
+- Your words appear about every second while you speak. Whisper's notes on
+  sounds, "(chiming)", "[BLANK_AUDIO]", "*music*", are removed; a turn that
+  was only those is not asked.
+- The socket checks the token itself (the HTTP gate does not see
+  WebSockets) and refuses pages from other origins.
+- Measured on Kokoro speech with a chime before it: the chime made no turn.
+  "I would like to know how reranking", a 0.7 s pause, and "actually works
+  on my board." made one turn: speech, end, reopen, end, commit. Listening
+  costs 0.25 s of processor time per 10 s of sound.
+
+**Echo.** The expert's voice now plays through the same AudioContext as the
+microphone, as in CLARA, so the browser's echo canceller has the exact
+signal to take out. §44 used two contexts.
+
+**Speaking over an answer.** "speech" arrives only after 384 ms of real
+speech; then the page stops the answer and the voice. A new question to an
+expert now takes over: the server cancels the answer in progress and waits
+up to 6 s for the model, instead of refusing with "still answering".
+Measured in the preview: the answer stopped, "Wait, stop. Tell me about
+chunking instead." was heard whole, and it was answered with no error.
+
+**Answers, laid out** (`Prose.tsx`, used by the expert conversation and the
+board's own).
+- The model's markdown is read into blocks and drawn: headings as headings,
+  bullet and numbered lists at their real depth (worked out from each
+  list's own indentation), bold, italics, code, quotes, tables and rules.
+- Citations stay chips, with no gap before the full stop after them.
+  "**Beyond your board:**" in bold or as a heading is recognised.
+- Nothing is ever treated as HTML.
+- Measured: an answer with two sections and 26 list items, 18 of them
+  nested, showed no raw `#` or `*`.
+
+210 tests.

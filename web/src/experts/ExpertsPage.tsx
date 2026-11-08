@@ -7,9 +7,10 @@
  *  fresh, as asked - except that opening a cited card and coming back finds
  *  the conversation where it was (DESIGN.md 44).
  */
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { api, type Expert, type ExpertDraft, type ShapeState } from '../api'
+import { Prose } from '../Prose'
 import type { BoardMeta } from '../types'
 import { ExpertScene } from './scene'
 import './experts.css'
@@ -19,6 +20,8 @@ import { Talk, type TalkState } from './talk'
 import { SPEEDS, Voice } from './voice'
 
 const BEYOND = 'Beyond your board:'
+/** **Beyond your board:**, or a heading of it, read as the plain line (as ask.BEYOND_MARK) */
+const BEYOND_MARK = /(^[ \t]*#{1,6}[ \t]*)?(\*\*|__)?[ \t]*Beyond your board:[ \t]*(\*\*|__)?/m
 const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
 const COLOURS = ['#f0c070', '#7fd3c4', '#e9967a', '#d8c8a8', '#b4a0e8', '#8fc8f0', '#e6d36a', '#e88fb4']
 
@@ -43,29 +46,22 @@ const SpeakerIcon = ({ on }: { on: boolean }) => (
     <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
     {on ? <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /> : <path d="M16 9.5l5 5M21 9.5l-5 5" />}</svg>)
 
-/** an answer: light formatting, citations as chips that open their card */
+/** an answer, laid out (Prose), its citations as chips that open their card */
 function Said({ turn, onCard }: { turn: Turn; onCard: (board: string, card: string) => void }) {
-  const text = turn.status === 'done' ? turn.text : turn.text.replace(NEXT_LINE, '')
+  const text = (turn.status === 'done' ? turn.text : turn.text.replace(NEXT_LINE, '')).replace(BEYOND_MARK, BEYOND)
   const at = text.indexOf(BEYOND)
   const parts = at >= 0 ? [text.slice(0, at), text.slice(at + BEYOND.length)] : [text]
-  // a citation the model got wrong - not a card it was given - is left out, not shown raw
-  const line = (s: string) => s.split(/(\[\[[^\]\n]{1,40}\]\]|\*\*[^*]+\*\*)/g).map((piece, j) => {
-    const cite = piece.match(/^\[\[([0-9A-Za-z]{26})\]\]$/)
-    if (!cite && /^\[\[.*\]\]$/.test(piece)) return null
-    if (cite) {
-      const w = turn.where?.[cite[1]]
-      return w ? <button key={j} className="xp-cite" title="Open this card on its board"
-        onClick={() => onCard(w.board, cite[1])}>{w.title}</button> : null
-    }
-    const bold = piece.match(/^\*\*([^*]+)\*\*$/)
-    return bold ? <strong key={j}>{bold[1]}</strong> : <Fragment key={j}>{piece}</Fragment>
-  })
+  const cite = (id: string) => {
+    const w = turn.where?.[id]
+    return w ? <button className="xp-cite" title="Open this card on its board"
+      onClick={() => onCard(w.board, id)}>{w.title}</button> : null
+  }
   return (
     <div className="xp-said">
-      {parts[0].trim() ? <div>{parts[0].trim().split('\n').map((l, i) => <div key={i}>{line(l)}</div>)}</div> : null}
+      {parts[0].trim() ? <Prose text={parts[0].trim()} cite={cite} /> : null}
       {parts[1]?.trim() ? (
         <div className="xp-beyond"><div className="xp-beyond-head">From its own knowledge</div>
-          {parts[1].trim().split('\n').map((l, i) => <div key={i}>{line(l)}</div>)}</div>
+          <Prose text={parts[1].trim()} cite={cite} /></div>
       ) : null}
     </div>
   )
@@ -170,7 +166,6 @@ export function ExpertsPage() {
   const [speed, setSpeed] = useState(() => Number(localStorage.getItem('mb_xp_speed')) || 1)
   // talking hands-free: just speak; Smart Turn tells when you have finished (DESIGN.md 44)
   const talk = useRef<Talk | null>(null)
-  const smart = useRef(false)
   const [canListen, setCanListen] = useState(false)
   const [talkState, setTalkState] = useState<TalkState>('off')
   const [heard, setHeard] = useState('')
@@ -210,7 +205,7 @@ export function ExpertsPage() {
     if (!host.current) return
     scene.current = new ExpertScene(host.current, (i) => enter(i), (i) => setEditing(expertsRef.current[i]))
     void load()
-    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast); setCanListen(v.listen); smart.current = v.turn }).catch(() => {})
+    void api.voice().then((v) => { setVoiceReady(v.installed); setCast(v.cast); setCanListen(v.talk) }).catch(() => {})
     voice.current.onPlaying = setSpeaking
     voice.current.speed = speed
     // the sand moves with the voice: its loudness, read every frame
@@ -318,7 +313,7 @@ export function ExpertsPage() {
     if (!text.trim()) return
     if (busyRef.current) {
       // spoken over an answer: it is being stopped - ask as soon as it has
-      if (talk.current?.on) { interrupt(); setTimeout(() => sendRef.current(text), 250) }
+      if (talk.current?.on) { interrupt(); setTimeout(() => sendRef.current(text), 150) }
       return
     }
     setDraft('')
@@ -341,7 +336,8 @@ export function ExpertsPage() {
       partial: setHeard,
       turn: (text) => { setHeard(''); sendRef.current(text) },
       interrupt: () => interruptRef.current(),
-    }, () => busyRef.current || voice.current.playing, smart.current)
+      failed: (why) => setGuideSaid({ why, picked: [] }),
+    })
     try { await talk.current.start() }
     catch { talk.current.stop(); setGuideSaid({ why: 'The microphone is not available - check the browser allows it.', picked: [] }) }
   }

@@ -175,3 +175,33 @@
 .xp-added { margin-top: 10px; display: flex; gap: 10px; align-items: center; color: var(--gold); font-size: 12.5px; }
 .xp-added button { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--xp-border); color: var(--xp-dim); font-size: 12px; }
 .xp-added button:hover { color: var(--gold); border-color: var(--gold); }
+
+/* answers, laid out (DESIGN.md 45) */
+.xp-said .prose { line-height: 1.65; }
+.prose > * + * { margin-top: .5em; }
+.prose-p { margin: 0; }
+.prose-h { font-weight: 600; letter-spacing: .01em; }
+.prose > .prose-h:not(:first-child) { margin-top: 1em; }
+.prose-li + .prose-li { margin-top: .25em; }
+.prose-li { display: flex; gap: .55em; align-items: baseline; }
+.prose-mark { flex: none; min-width: .9em; text-align: center; }
+.prose-mark.num { min-width: 1.4em; text-align: right; font-variant-numeric: tabular-nums; }
+.prose-li-text { flex: 1; min-width: 0; }
+.prose code { font-family: ui-monospace, Consolas, monospace; font-size: .92em; padding: 0 .3em; border-radius: 4px; }
+.prose-code { margin: 0; padding: 8px 10px; border-radius: 8px; overflow-x: auto; font-family: ui-monospace, Consolas, monospace;
+  font-size: .9em; white-space: pre; }
+.prose-quote { padding-left: .8em; border-left: 2px solid; opacity: .9; }
+.prose-hr { border: 0; border-top: 1px solid; opacity: .25; margin: .9em 0; }
+.prose-table-wrap { overflow-x: auto; }
+.prose-table { border-collapse: collapse; font-size: .95em; }
+.prose-table th, .prose-table td { padding: 4px 10px; border-bottom: 1px solid; text-align: left; vertical-align: top; }
+.prose-table th { font-weight: 600; }
+.xp-said .prose-h { color: var(--gold); }
+.xp-said .prose-h1, .xp-said .prose-h2 { font-size: 1.12em; }
+.xp-said .prose-h3, .xp-said .prose-h4 { font-size: 1.02em; }
+.xp-said .prose-mark { color: var(--gold); opacity: .85; }
+.xp-said .prose code, .xp-said .prose-code { background: #e8b86414; color: #f3dfb8; }
+.xp-said .prose-quote { border-color: #e8b86466; color: #d9ccb6; }
+.xp-said .prose-hr, .xp-said .prose-table th, .xp-said .prose-table td { border-color: var(--xp-border); }
+.xp-said .prose-table th { color: var(--gold); }
+.xp-said .prose em { color: #f3e4c4; }

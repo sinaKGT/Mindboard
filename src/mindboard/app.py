@@ -7,10 +7,12 @@ import re
 import threading
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+import numpy as np
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -510,7 +512,15 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 raise HTTPException(503, "Ask your board is not set up yet - choose 6 in the "
                                          "Mindboard menu, or run: mindboard ai install")
             if model._asking.locked():
-                raise HTTPException(409, "still answering the last question")
+                # a conversation: the newest question replaces the one being
+                # answered - spoken over it, or asked again (DESIGN.md 45)
+                model.cancel()
+                for _ in range(120):
+                    if not model._asking.locked():
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise HTTPException(409, "still answering the last question")
             try:
                 emb = search_model("embed")
                 ctx, lib = experts_mod.context(dd, expert, body.question, history, emb,
@@ -530,9 +540,9 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     @app.get("/api/voice")
     def api_voice():
         from . import voice
-        from . import turn
+        from . import listen, turn
         return {"installed": voice.installed(), "cast": voice.CAST, "listen": voice.can_listen(),
-                "turn": turn.installed()}
+                "turn": turn.installed(), "talk": voice.can_listen() and listen.installed()}
 
     @app.post("/api/voice/listen")
     async def api_voice_listen(request: Request):
@@ -568,6 +578,105 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             raise HTTPException(400, "expected 16 kHz mono 16-bit audio")
         p = await run_in_threadpool(turn.probability, pcm)
         return {"complete": p > turn.THRESHOLD, "probability": round(p, 4)}
+
+    @app.websocket("/api/voice/stream")
+    async def api_voice_stream(ws: WebSocket):
+        """A spoken conversation (DESIGN.md 45). The page streams the microphone
+        - 16 kHz mono 16-bit, through its echo cancellation - and is told what
+        happened: speech (you began), pause, writing (your turn seems over),
+        reopen (you went on), partial (your words so far), turn (your words,
+        to ask), nothing (it was not words). Turns are decided by Silero VAD
+        and Smart Turn, the words written by whisper.cpp - all on this
+        computer. Nothing is kept."""
+        import asyncio
+        from urllib.parse import urlparse
+
+        from starlette.websockets import WebSocketDisconnect
+
+        from . import listen, voice
+        from .turn import RATE
+
+        # the HTTP gate does not see WebSockets: the same token, and only from this page
+        supplied = ws.query_params.get("t") or ws.cookies.get("mb_token")
+        origin = urlparse(ws.headers.get("origin", "")).hostname
+        if supplied != token or (origin and origin not in {"127.0.0.1", "localhost", "::1", ws.url.hostname}):
+            await ws.close(code=4401)
+            return
+        await ws.accept()
+        if not (voice.can_listen() and listen.installed()):
+            await ws.send_json({"type": "error", "message": "talking is not set up - run: mindboard ai voice"})
+            await ws.close()
+            return
+        lis = await asyncio.to_thread(listen.listener)
+        out: "asyncio.Queue[Optional[dict]]" = asyncio.Queue()
+        state = {"rev": 0, "said": 0.0}
+        writing: Optional[asyncio.Task] = None
+        partial: Optional[asyncio.Task] = None
+
+        def wav(pcm: "np.ndarray") -> bytes:
+            import io
+            import wave
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(RATE)
+                w.writeframes((np.clip(pcm, -1, 1) * 32767).astype("<i2").tobytes())
+            return buf.getvalue()
+
+        async def words(pcm) -> str:
+            try:
+                return listen.clean_heard(await asyncio.to_thread(voice.transcribe, wav(pcm)))
+            except voice.VoiceError:
+                return ""
+
+        async def send_partial(rev: int, pcm) -> None:
+            text = await words(pcm)
+            if text and rev == state["rev"] and lis.open:
+                out.put_nowait({"type": "partial", "text": text})
+
+        async def commit(rev: int, task: asyncio.Task) -> None:
+            text = await task
+            if rev == state["rev"]:
+                out.put_nowait({"type": "turn", "text": text} if text else {"type": "nothing"})
+
+        async def sender() -> None:
+            while (msg := await out.get()) is not None:
+                await ws.send_json(msg)
+
+        sending = asyncio.create_task(sender())
+        try:
+            while True:
+                data = await ws.receive_bytes()
+                pcm = np.frombuffer(data[: len(data) // 2 * 2], dtype="<i2").astype(np.float32) / 32768.0
+                for e in await asyncio.to_thread(lis.feed, pcm):
+                    kind = e["type"]
+                    if kind == "speech":
+                        state["said"] = 0.0
+                        out.put_nowait({"type": "speech"})
+                    elif kind == "pause":
+                        out.put_nowait({"type": "pause"})
+                    elif kind == "end":
+                        state["rev"] += 1
+                        writing = asyncio.create_task(words(e["audio"]))
+                        out.put_nowait({"type": "writing"})
+                    elif kind == "reopen":
+                        state["rev"] += 1                       # that ending was not one
+                        out.put_nowait({"type": "reopen"})
+                    elif kind == "commit" and writing is not None:
+                        asyncio.create_task(commit(state["rev"], writing))
+                # your words so far, about every second of speech
+                if lis.open and (partial is None or partial.done()):
+                    pcm_so_far = lis.turn_audio()
+                    secs = len(pcm_so_far) / RATE
+                    if secs - state["said"] >= 1.0:
+                        state["said"] = secs
+                        partial = asyncio.create_task(send_partial(state["rev"], pcm_so_far))
+        except WebSocketDisconnect:
+            pass
+        finally:
+            out.put_nowait(None)
+            await asyncio.gather(sending, return_exceptions=True)
 
     @app.post("/api/voice/speak")
     def api_voice_speak(body: SpeakRequest):
