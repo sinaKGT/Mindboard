@@ -15,3 +15,6 @@ backups/
 mindboard-backup-*.zip
 # the local model and its runtime (mindboard ai install): ~15 GB, never committed
 .llm/
+
+# screenshots for posts - not part of the project
+linkedin/
