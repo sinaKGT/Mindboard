@@ -197,6 +197,13 @@ def test_invented_citations_are_removed_and_counted():
     assert out["board"].startswith("It says so") and out["beyond"] == "Read more."
 
 
+def test_an_id_in_single_brackets_is_read_as_a_citation():
+    real, gone = "A" * 26, "Z" * 26
+    out = ask.check_citations(f"It relates to [{real}] and [{gone}], as [[{real}]] says.", {real})
+    assert out["cited"] == [real] and out["dropped"] == [gone, ]
+    assert f"[[{real}]]" in out["answer"] and f"[{gone}]" not in out["answer"]
+
+
 def test_a_dressed_up_beyond_line_leaves_nothing_stray():
     for line in ("**Beyond your board:**", "### Beyond your board:", "__Beyond your board:__"):
         out = ask.check_citations(f"From the cards.\n\n{line}\nFrom me.", set())
@@ -416,3 +423,82 @@ def test_asking_with_nothing_chosen_asks_the_whole_board(client, board, cards):
     context = events(res)[0][1]
     assert context["whole"] and context["mode"] == "search"
     assert set(context["cards"]) <= set(cards.values())
+
+
+# ----------------------------------------------------------- conversation --
+
+def test_explain_more_answers_from_the_conversation_without_searching(dd, board, cards, monkeypatch):
+    from mindboard import retrieve
+
+    monkeypatch.setattr(retrieve, "search", lambda *a, **k: pytest.fail("searched the board"))
+    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "explain it more",
+                    keep=[cards["mount"], "0" * 26], explain=True)
+    assert ctx.mode == "explain" and ctx.cards == [cards["mount"]], "gone cards drop out"
+    msgs = ask.messages(ctx, "explain it more", [])
+    assert ask.EXPLAIN in msgs[-1]["content"] and "examples" in msgs[-1]["content"]
+    assert ask.EXPLAIN not in msgs[0]["content"], "the start of the prompt stays put"
+    nothing = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "and why?", explain=True)
+    assert nothing.cards == [] and "answer from the conversation" in nothing.text
+
+
+def test_cards_an_answer_drew_on_stay_in_the_conversation(dd, board, cards, monkeypatch):
+    from mindboard import retrieve
+
+    monkeypatch.setattr(retrieve, "BUDGET", 60)
+    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "where does the lidar go?",
+                    keep=[cards["solar"]])
+    assert ctx.mode == "search" and ctx.cards[0] == cards["solar"], "kept first, for the cache"
+    assert cards["lidar"] in ctx.cards, "and the search still adds what the question needs"
+
+
+class DraftModel:
+    def __init__(self, reply):
+        self.reply, self.asked = reply, []
+
+    def chat(self, messages, **kw):
+        self.asked.append(messages)
+        return {"text": self.reply}
+
+
+def nodes_of(dd, board):
+    return {n["id"]: n for n in read_graph(conn_for(dd, board["id"]), board["id"])["nodes"]}
+
+
+def test_an_answer_is_drafted_into_a_card_to_check(dd, board, cards):
+    import json as js
+
+    model = DraftModel("Here: " + js.dumps({"title": "Mount high on the corner", "kind": "example-of",
+                                           "text": "A corner mount at 4 m sees both roads [[" + "A" * 26 + "]].",
+                                           "link_to": cards["mount"]}))
+    got = ask.draft_card(model, nodes_of(dd, board), "where should it go?",
+                         "**Beyond your board:** wind matters", [cards["mount"], cards["plan"]])
+    assert got["title"] == "Mount high on the corner" and got["kind"] == "example-of"
+    assert got["link_to"] == cards["mount"]
+    assert got["text"].startswith("A corner mount at 4 m sees both roads") and "[[" not in got["text"]
+    assert "Corner mount" in model.asked[0][1]["content"], "it sees the cards it may link to"
+
+
+def test_a_draft_never_links_to_a_card_the_answer_did_not_use(dd, board, cards):
+    import json as js
+
+    model = DraftModel(js.dumps({"title": "T", "text": "x", "link_to": cards["lidar"], "kind": "loves"}))
+    got = ask.draft_card(model, nodes_of(dd, board), "q", "a", [cards["mount"]])
+    assert got["link_to"] == cards["mount"] and got["kind"] == "relates"
+
+
+def test_a_model_that_strays_still_gives_a_usable_draft(dd, board, cards):
+    got = ask.draft_card(DraftModel("I cannot do JSON today."), nodes_of(dd, board),
+                         "Where should the lidar go?", "On the corner pole [[" + cards["mount"] + "]].",
+                         [cards["mount"]])
+    assert got["title"] == "Where should the lidar go?" and got["link_to"] == cards["mount"]
+    assert "[[" not in got["text"] and "corner pole" in got["text"]
+
+
+def test_drafting_writes_nothing_to_the_board(client, board, cards, model):
+    before = client.get(f"/api/boards/{board['id']}/graph", headers={"X-Mindboard-Token": TOKEN}).json()
+    res = client.post(f"/api/boards/{board['id']}/ask/draft", headers={"X-Mindboard-Token": TOKEN},
+                      json={"question": "where?", "answer": "On the corner.", "cited": [cards["mount"]]})
+    assert res.status_code == 200, res.text
+    assert set(res.json()) == {"title", "text", "link_to", "kind"}
+    after = client.get(f"/api/boards/{board['id']}/graph", headers={"X-Mindboard-Token": TOKEN}).json()
+    assert after["revision"] == before["revision"]

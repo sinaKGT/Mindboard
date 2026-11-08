@@ -9,6 +9,7 @@ back. It only reads the board; nothing here changes it.
 from __future__ import annotations
 
 import base64
+import json
 import io
 import re
 import sqlite3
@@ -30,11 +31,18 @@ THINKING_TOKENS = 8192
 # chosen by hand always bring their pictures.
 SEARCH_PICTURE_TOKENS = 6000
 BEYOND = "Beyond your board:"
+EXPLAIN = ("Explain more: I want a full explanation, not only what the cards say. Explain "
+           "it step by step, in plain words. Where the cards and our conversation fall "
+           "short, explain from your own knowledge - do not answer that the cards cannot "
+           "explain it. Give one or two concrete examples that make it clear. Cite cards for "
+           f"what comes from them, and put what comes from your own knowledge after the line "
+           f"\"{BEYOND}\". Finish with the {'NEXT:'} line as always.")
 # the model sometimes dresses the line up - **Beyond your board:**, a heading -
 # and the split then left the stray ** on both sides of it
 BEYOND_MARK = re.compile(r"(?:^[ \t]*#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*Beyond your board:[ \t]*"
                          r"(?:\*\*|__)?", re.MULTILINE)
 CITE = re.compile(r"\[\[([0-9A-Za-z]{26})\]\]")
+LONE_ID = re.compile(r"(?<!\[)\[([0-9A-Z]{26})\](?!\])")
 # the question the model offers to answer next, on the answer's last line
 NEXT = "NEXT:"
 NEXT_LINE = re.compile(r"^[ \t*_>#-]*NEXT:[ \t*_]*(.*?)[ \t*_]*$", re.MULTILINE)
@@ -214,16 +222,26 @@ def board_index(dd: DataDir, conn: sqlite3.Connection, bid: str, nodes: dict[str
 def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
           question: str = "", history: Optional[list[dict]] = None,
           embedder: Optional[retrieve.Embedder] = None, embed_model: str = "",
-          reranker: Optional[retrieve.Reranker] = None, background: bool = False) -> Context:
+          reranker: Optional[retrieve.Reranker] = None, background: bool = False,
+          keep: Optional[list[str]] = None, explain: bool = False) -> Context:
     """The context for a question. Nothing chosen means the whole board, and
     the whole board is always searched (retrieve.py), never sent: a board may
     hold ten thousand cards, and a small one asked the same way behaves the
     same way as it grows. Cards chosen by hand are never searched: they are
-    exactly what was asked about."""
+    exactly what was asked about.
+
+    `keep` are the cards earlier answers in this conversation drew on (DESIGN
+    34): they stay in context, first - so the model's prompt cache still holds
+    them - and a search fills the rest of the budget. With `explain` (Explain
+    more) there is no search at all: the answer comes from those cards and the
+    conversation."""
     graph = read_graph(conn, bid)
     nodes = {n["id"]: n for n in graph["nodes"]}
     whole = not chosen
-    if whole:
+    kept = [i for i in dict.fromkeys(keep or []) if i in nodes]
+    if whole and explain:
+        ids, mode, how = expand(nodes, kept), "explain", ""
+    elif whole:
         if not nodes:
             raise AskError("this board has no cards yet")
         if not question.strip():
@@ -232,9 +250,12 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
         asked = [str(t.get("text", "")) for t in (history or []) if t.get("role") == "user"]
         query = " ".join(asked[-2:] + [question])
         index = board_index(dd, conn, bid, nodes, embedder, embed_model, background)
+        kept = expand(nodes, kept)
+        room = max(retrieve.BUDGET - sum(index.costs.get(i, 50) for i in kept), retrieve.BUDGET // 4)
         found = retrieve.search(index, query, nodes, graph["edges"], index.costs, embedder,
-                                reranker=reranker)
-        ids, mode, how = found.ids, "search", found.how
+                                budget=room, reranker=reranker)
+        ids = kept + [i for i in found.ids if i not in set(kept)]
+        mode, how = "search", found.how
     else:
         ids, mode, how = expand(nodes, chosen), "chosen", ""
         if not ids:
@@ -266,6 +287,9 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
     if mode == "search":
         text = (f"BOARD OUTLINE (its groups)\n{retrieve.outline(nodes)}\n\n"
                 f"CARDS (the {len(ids)} of the board's {len(nodes)} that match the question)\n")
+    elif mode == "explain":
+        text = ("CARDS (from this conversation so far)\n" if ids
+                else "CARDS\n(none yet - answer from the conversation)\n")
     else:
         text = "CARDS\n"
     text += "\n\n".join(blocks[i] for i in ids)
@@ -302,7 +326,10 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     for turn in history:
         if turn.get("role") in ("user", "assistant") and str(turn.get("text", "")).strip():
             msgs.append({"role": turn["role"], "content": str(turn["text"])})
-    msgs.append({"role": "user", "content": question.strip()})
+    # Explain more asks for a fuller answer; said with the question, not in
+    # the system prompt, so the start of the prompt - and its cache - stay put
+    msgs.append({"role": "user", "content": question.strip()
+                 + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")})
     return msgs
 
 
@@ -351,7 +378,10 @@ def check_citations(answer: str, allowed: set[str]) -> dict:
         dropped.append(cid)
         return ""
 
-    clean = CITE.sub(keep, BEYOND_MARK.sub(BEYOND, answer))
+    # the model sometimes copies an id as the RELATIONSHIPS list writes it,
+    # in single brackets: read it as the citation it is meant to be
+    answer = LONE_ID.sub(r"[[\1]]", BEYOND_MARK.sub(BEYOND, answer))
+    clean = CITE.sub(keep, answer)
     clean = re.sub(r"[ \t]+([.,;:])", r"\1", clean)
     board, _, beyond = clean.partition(BEYOND)
     return {"answer": clean.strip(), "board": board.strip(), "beyond": beyond.strip(),
@@ -386,3 +416,48 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     yield {"event": "done", **result, "next": next_question,
            "stopped": bool(timings.get("stopped")),
            "tokens_per_second": timings.get("tokens_per_second")}
+
+
+# ------------------------------------------------------------ to a card --
+
+DRAFT_KINDS = ("relates", "supports", "example-of", "part-of", "causes", "contradicts")
+DRAFT_SYSTEM = """You turn one answer from a conversation into a card for a person's mind map.
+
+Reply with JSON only, no other text:
+{"title": "...", "text": "...", "link_to": "...", "kind": "..."}
+
+- title: a short name for the idea, at most 8 words.
+- text: the knowledge itself in 1-4 plain sentences - not the conversation, no
+  citations, no "Beyond your board".
+- link_to: the id of the one card below it belongs with most, or "" if none.
+- kind: how the new card relates to that card: relates, supports, example-of,
+  part-of, causes or contradicts. A new example of an idea is example-of."""
+
+
+def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
+               cited: list[str]) -> dict:
+    """A card made from an answer, for the person to check before it is added
+    (DESIGN 34): title, text, the card to link it to and how. Nothing is
+    written here - the board only changes when the person presses Add, through
+    the op-log like any edit."""
+    cards = [i for i in dict.fromkeys(cited) if i in nodes]
+    listing = "\n".join(f"{i}: {nodes[i].get('title') or 'Untitled'}" for i in cards) or "(none)"
+    clean = CITE.sub("", BEYOND_MARK.sub(BEYOND, answer)).replace(BEYOND, "\nFrom general knowledge:")
+    fallback = {"title": question.strip()[:70], "text": clean.strip()[:500],
+                "link_to": cards[0] if cards else "", "kind": "relates"}
+    try:
+        reply = model.chat([{"role": "system", "content": DRAFT_SYSTEM},
+                            {"role": "user", "content":
+                             f"QUESTION\n{question.strip()}\n\nANSWER\n{clean.strip()[:6000]}"
+                             f"\n\nCARDS IT DREW ON\n{listing}"}],
+                           max_tokens=400, think=False, temperature=0.3)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        return fallback                      # a model that strays still gives a usable card
+    title = str(got.get("title") or "").strip()[:80] or fallback["title"]
+    text = CITE.sub("", str(got.get("text") or "")).strip()[:800] or fallback["text"]
+    link = str(got.get("link_to") or "").strip()
+    kind = str(got.get("kind") or "").strip()
+    return {"title": title, "text": text,
+            "link_to": link if link in cards else (cards[0] if cards else ""),
+            "kind": kind if kind in DRAFT_KINDS else "relates"}

@@ -137,12 +137,17 @@ questions, and always stops with Mindboard.
 
 ### Asking on the canvas
 
-Select a card and press the **bubble** in its toolbar to add it to the context —
-or select several and press **Ask** on the bar above them. A group brings
-everything inside it. Cards in context carry a small bubble in their corner.
+Type into the **chat bar** at the bottom of the board (`Ctrl+J` goes there) and
+press Enter; the conversation opens above it. To ask about particular cards,
+press the **bubble** in a card's toolbar, or select several and press **Ask** on
+the bar above them; a group brings everything inside it.
 
-The panel on the right (`Ctrl+J`, or the bubble in the bottom-right corner)
-lists what is in context and holds the conversation. Answers stream in; every
+**Expand** (in the conversation's header) gives the conversation the whole
+screen. There, **Explain more** answers from the conversation and its cards —
+a fuller explanation with examples — without searching the board. Under each
+answer, **Add to board** drafts a card from it and proposes the card it
+belongs with; edit it and press **Add** (`Ctrl+Z` undoes it). Cards an answer
+cited stay in the conversation for the questions after it. Answers stream in; every
 card an answer draws on is a chip you can click to go to it, even inside a
 group, and anything the model adds from its own knowledge sits apart under
 **Beyond your board**. Under each answer it offers one question to ask next —

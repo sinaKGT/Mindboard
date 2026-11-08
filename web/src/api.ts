@@ -77,6 +77,7 @@ export const api = {
    *  the question cannot be asked at all. */
   ask: async (boardId: string, body: {
     question: string; cards: string[]; history: { role: string; text: string }[]; think: boolean
+    keep: string[]; explain: boolean
   }, onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) headers['X-Mindboard-Token'] = token
@@ -111,6 +112,10 @@ export const api = {
   },
   /** Stop the answer being written. Said out loud rather than left to the
    *  hang-up: the server does not always hear a connection close. */
+  /** A card drafted from an answer, to check before adding (nothing is written) */
+  askDraft: (boardId: string, body: { question: string; answer: string; cited: string[] }) =>
+    req<{ title: string; text: string; link_to: string; kind: string }>(
+      `/boards/${boardId}/ask/draft`, { method: 'POST', body: JSON.stringify(body) }),
   askStop: (boardId: string) =>
     req<{ stopped: boolean }>(`/boards/${boardId}/ask/stop`, { method: 'POST' }),
   /** Accepts a single .mindboard bundle or a whole backup zip. */

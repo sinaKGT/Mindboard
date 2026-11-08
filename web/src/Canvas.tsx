@@ -121,7 +121,6 @@ function CanvasInner() {
   const linking = useUI((s) => s.linking)
   const selectedIds = useUI((s) => s.selected)
   const boardId = useStore((s) => s.boardId)
-  const askOpen = useAsk((s) => s.open)
 
   // each board has its own context and conversation, kept in the tab
   useEffect(() => { useAsk.getState().load(boardId) }, [boardId])
@@ -180,11 +179,14 @@ function CanvasInner() {
       const w = internal?.measured?.width ?? node.size[0] ?? 320
       const h = internal?.measured?.height ?? node.size[1] ?? 160
       const box = wrap.current?.getBoundingClientRect()
-      const panel = useAsk.getState().open ? 404 : 0       // the panel and its margins
-      const viewW = Math.max((box?.width ?? 1200) - panel, 200)
-      const viewH = box?.height ?? 800
+      // the conversation sits at the bottom: centre the card in what is
+      // visible above it
+      const sheet = document.querySelector('.ask-sheet')?.getBoundingClientRect()
+      const viewW = box?.width ?? 1200
+      const fullH = box?.height ?? 800
+      const viewH = sheet ? Math.max(sheet.top - (box?.top ?? 0), 200) : fullH
       const z = Math.max(0.3, Math.min(1.15, (viewW * 0.6) / w, (viewH * 0.6) / h))
-      setCenter(node.pos[0] + w / 2 + panel / 2 / z, node.pos[1] + h / 2,
+      setCenter(node.pos[0] + w / 2, node.pos[1] + h / 2 + (fullH - viewH) / 2 / z,
                 { zoom: z, duration: 450 })
       setUI('foundId', focusId)
       setTimeout(() => {
@@ -576,8 +578,11 @@ function CanvasInner() {
       if (mod && e.key === '0') { e.preventDefault(); fitView({ duration: 300 }); return }
       if (mod && e.key.toLowerCase() === 'j') {
         e.preventDefault()
+        // the chat bar is always there: Ctrl+J goes to it, or closes the
+        // conversation if it is open
         const ask = useAsk.getState()
-        ask.setOpen(!ask.open)
+        if (ask.open) ask.setOpen(false)
+        else document.querySelector<HTMLTextAreaElement>('.ask-bar textarea')?.focus()
         return
       }
       if (e.key === 'Escape') {
@@ -903,10 +908,6 @@ function CanvasInner() {
         </button>
         <button className="icon-btn" title="Theme" onClick={() => setUI('themeOpen', !themeOpen)}>
           <Icon name="palette" size={14} />
-        </button>
-        <button className={`icon-btn ${askOpen ? 'on' : ''}`} title="Ask your board  (Ctrl+J)"
-          onClick={() => useAsk.getState().setOpen(!askOpen)}>
-          <Icon name="ask" size={14} />
         </button>
       </div>
 

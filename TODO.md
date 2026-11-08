@@ -2,43 +2,15 @@
 
 What is left from the v2 conversations, in the order we planned to take it.
 Each item says what was asked, what was decided, and what done looks like.
-Last updated 2026-11-07, after commit `d6842b1`.
+Last updated 2026-11-08.
 
 ---
 
-## 1. The conversation — waiting for your OK on the mockup
+## 1. The conversation — done (DESIGN.md §34)
 
-Asked for across several messages; designed as one simple whole, not
-separate features. Simplicity and a clean interface come first: it must not
-feel like many features.
-
-- **A chat bar at the bottom of the screen.** Replaces the corner bubble and
-  `Ctrl+J` as the way in (the shortcut can stay). A slim "Ask your board…"
-  bar, centred at the bottom of the canvas, with a gentle live effect so it
-  catches the eye. The conversation opens above it.
-- **Expand.** One button in the conversation's header: the conversation
-  fills most of the screen and the board dims behind it, for reading and
-  thinking. The same button, or `Esc`, goes back.
-- **Explain more** (a switch in the expanded view, beside *Think deeper*).
-  While it is on, a question is **not** searched: it goes to the model with
-  the conversation's current cards and history, asking for a proper
-  explanation, related examples and a follow-up question. Off again, questions
-  search the board as now.
-- **The conversation remembers its cards.** Cards cited in earlier answers
-  stay in context for follow-ups (first in the prompt, so the model's prompt
-  cache is reused), and each new search adds to them.
-- **Add to board.** On each answer, one small action. The model drafts a card
-  from the answer — a short title and a few lines, not the raw chat — and
-  Mindboard proposes where it goes: linked to the cards the answer cited, with
-  a relationship (for a new example, *is an example of*), in their group. A
-  small preview lets you edit the text and change the card it links to, then
-  **Add**. Written through the op-log with provenance `"ai"`, one undoable
-  step; the background indexer makes it searchable within seconds.
-  (Originally asked as "save results of our chat as a new card, connected to a
-  card the system asks me about".)
-
-Done looks like: the mockup approved, built, checked in the app, and DESIGN.md
-and README.md updated.
+Chat bar, expand, Explain more, remembered cards and Add to board are built.
+Worth watching in daily use: whether the drafted card's link and relationship
+are usually right, and whether the bar's light feels calm rather than busy.
 
 ## 2. Retrieval step 3 — planning before retrieval
 
@@ -80,8 +52,7 @@ title and caption are searchable.
 
 ## 5. Housekeeping
 
-- **Delete the unused 27B model files** (about 15 GB in
-  `.llm\models\qwen3.8-27b`) if you want the space back — your call.
+- ~~Delete the unused 27B model files~~ — done, 15 GB freed.
 - **Scratch test data**: the 10,000-card test board lives in the session's
   scratchpad, not in your data folder; nothing to clean in Mindboard itself.
 - Not committed on purpose: `.claude/` (test-server settings), your `docs/`

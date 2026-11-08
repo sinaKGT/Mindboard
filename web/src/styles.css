@@ -995,14 +995,87 @@ a.btn { text-decoration: none; }
 }
 .stage.exporting .mb-node .ctx-mark { display: none; }
 
-.ask-panel {
-  position: absolute; top: 12px; right: 12px; bottom: 62px; z-index: 20; width: 380px;
+/* The conversation (DESIGN 34): a sheet above the chat bar, centred at the
+   bottom of the board; expanded, it fills the screen and the board dims. */
+.ask-sheet {
+  position: absolute; left: 50%; bottom: 74px; z-index: 21; transform: translateX(-50%);
+  width: clamp(320px, calc(100% - 600px), 560px); height: min(54vh, 520px);
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--mb-surface); border: 1px solid var(--mb-border-strong);
-  border-radius: 12px; box-shadow: var(--mb-shadow-lg);
-  animation: pop 140ms var(--mb-ease);
+  border-radius: 14px; box-shadow: var(--mb-shadow-lg);
+  animation: rise 160ms var(--mb-ease);
+  transition: width 220ms var(--mb-ease), height 220ms var(--mb-ease);
 }
-.stage.exporting .ask-panel { display: none; }
+.ask-sheet.expanded { width: min(880px, calc(100% - 48px)); height: calc(100% - 100px); }
+.ask-sheet.expanded .ask-turns { padding: 18px 26px; font-size: 13.5px; }
+@keyframes rise { from { opacity: 0; transform: translate(-50%, 10px); } }
+.ask-dim { position: absolute; inset: 0; z-index: 20; background: #0007; animation: fade 160ms ease; }
+@keyframes fade { from { opacity: 0; } }
+.ask-head-actions { display: inline-flex; gap: 2px; }
+.stage.exporting .ask-sheet, .stage.exporting .ask-bar, .stage.exporting .ask-dim { display: none; }
+
+/* The chat bar: always there, the one way in. A slow light runs along its
+   edge so it is easy to find; it rests while you type, and stops for anyone
+   who asked their system for less motion. */
+.ask-bar {
+  position: absolute; left: 50%; bottom: 16px; z-index: 22; transform: translateX(-50%);
+  width: clamp(320px, calc(100% - 600px), 560px); min-height: 46px;
+  display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 18px;
+  border-radius: 23px; background: var(--mb-surface);
+  border: 1px solid transparent; box-shadow: var(--mb-shadow-lg);
+  background:
+    linear-gradient(var(--mb-surface), var(--mb-surface)) padding-box,
+    conic-gradient(from var(--bar-angle), var(--mb-border-strong) 0deg, var(--mb-accent) 60deg,
+      var(--mb-border-strong) 120deg, var(--mb-border-strong) 360deg) border-box;
+  animation: barLight 6s linear infinite;
+  transition: width 220ms var(--mb-ease);
+}
+.ask-bar.expanded { width: min(880px, calc(100% - 48px)); }
+.ask-bar:focus-within, .ask-bar.busy {
+  animation-play-state: paused;
+  background:
+    linear-gradient(var(--mb-surface), var(--mb-surface)) padding-box,
+    linear-gradient(var(--mb-accent), var(--mb-accent)) border-box;
+}
+@property --bar-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes barLight { to { --bar-angle: 360deg; } }
+@media (prefers-reduced-motion: reduce) { .ask-bar { animation: none; } }
+/* between the shortcuts (left) and the board controls (right); on a narrow
+   window there is no room between them, so the bar rises above the controls */
+@media (max-width: 920px) {
+  .ask-bar { bottom: 60px; }
+  .ask-sheet { bottom: 118px; }
+}
+.ask-bar textarea {
+  flex: 1; resize: none; font-size: 13px; line-height: 1.5; max-height: 120px; padding: 4px 0;
+}
+.ask-bar textarea:disabled { color: var(--mb-text-faint); }
+.bar-toggle {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-size: 11.5px; color: var(--mb-text-dim); cursor: pointer;
+}
+.bar-toggle input { accent-color: var(--mb-accent); }
+.ask-bar .send { width: 34px; height: 34px; border-radius: 50%; }
+
+/* Add to board: a small action under each answer, then the drafted card */
+.ask-add {
+  margin-top: 8px; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; color: var(--mb-text-faint);
+}
+.ask-add:hover { color: var(--mb-accent); }
+.ask-draft {
+  margin-top: 9px; padding: 9px 10px; border-radius: 10px; display: flex; flex-direction: column; gap: 6px;
+  background: var(--mb-surface-2); border: 1px solid var(--mb-accent);
+}
+.draft-title { font-size: 13px; font-weight: 600; background: transparent; }
+.draft-text { font-size: 12.5px; line-height: 1.5; resize: vertical; background: transparent; }
+.draft-link { display: flex; flex-wrap: wrap; gap: 6px; font-size: 11.5px; color: var(--mb-text-dim); }
+.draft-link select {
+  font-size: 11.5px; padding: 3px 6px; border-radius: 6px; max-width: 220px;
+  background: var(--mb-surface-3); border: 1px solid var(--mb-border); color: var(--mb-text);
+}
+.draft-actions { display: flex; gap: 8px; align-items: center; }
+.draft-actions .starter { margin-bottom: 0; }
 .ask-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 9px 9px 9px 14px; border-bottom: 1px solid var(--mb-border);
@@ -1072,7 +1145,6 @@ a.btn { text-decoration: none; }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
-.ask-compose { padding: 9px 11px 10px; border-top: 1px solid var(--mb-border); }
 .starter {
   margin-bottom: 7px; padding: 4px 10px; border-radius: 999px; font-size: 11.5px;
   background: var(--mb-surface-2); border: 1px solid var(--mb-border); color: var(--mb-text-dim);
@@ -1082,21 +1154,10 @@ a.btn { text-decoration: none; }
 .ask-next { margin-top: 9px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .ask-next-lead { color: var(--mb-text-faint); font-size: 11.5px; }
 .ask-next .starter { margin-bottom: 0; text-align: left; white-space: normal; line-height: 1.4; }
-.ask-input {
-  display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 10px;
-  border-radius: 10px; background: var(--mb-surface-2); border: 1px solid var(--mb-border);
-}
-.ask-input:focus-within { border-color: var(--mb-accent); }
-.ask-input textarea { flex: 1; resize: none; font-size: 12.5px; line-height: 1.5; max-height: 140px; }
-.ask-input textarea:disabled { color: var(--mb-text-faint); }
+.ask-hello .starter { margin-top: 10px; }
 .send {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 8px; background: var(--mb-accent); color: #0b0d11;
 }
 .send:disabled { background: var(--mb-surface-3); color: var(--mb-text-faint); cursor: default; }
 .send.stop { background: var(--mb-surface-3); color: var(--mb-text); }
-.think-toggle {
-  display: inline-flex; align-items: center; gap: 6px; margin-top: 7px;
-  font-size: 11px; color: var(--mb-text-faint); cursor: pointer;
-}
-.think-toggle input { accent-color: var(--mb-accent); }

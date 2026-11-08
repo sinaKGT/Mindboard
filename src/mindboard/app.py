@@ -26,7 +26,7 @@ from .bundle import (
     restore_backup,
 )
 from .ids import ulid
-from .models import AskRequest, BoardCreate, BoardPatch, OpsRequest
+from .models import AskRequest, BoardCreate, BoardPatch, DraftRequest, OpsRequest
 from .ops import apply_envelopes, read_graph
 from .paths import DataDir
 
@@ -333,6 +333,25 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     indexer = Indexer(dd, lambda: search_model("embed"))
     app.state.indexer = indexer
 
+    @app.post("/api/boards/{bid}/ask/draft")
+    def api_ask_draft(bid: str, body: DraftRequest):
+        """A card drafted from an answer, for the person to check. Writes
+        nothing: the card is added by the interface, through the op-log,
+        only when the person presses Add."""
+        from .ask import draft_card
+
+        board_or_404(bid)
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Ask your board is not set up yet")
+        if not model._asking.acquire(blocking=False):
+            raise HTTPException(409, "still answering the last question")
+        try:
+            nodes = {n["id"]: n for n in read_graph(conn_for(dd, bid), bid)["nodes"]}
+            return draft_card(model, nodes, body.question, body.answer, body.cited)
+        finally:
+            model._asking.release()
+
     @app.post("/api/boards/{bid}/ask")
     async def api_ask(bid: str, body: AskRequest, request: Request):
         """Ask the local model about exactly these cards. Streams server-sent
@@ -356,7 +375,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 emb = search_model("embed")
                 ctx = build(dd, conn_for(dd, bid), bid, body.cards, body.question, history,
                             emb, emb.inst.embedder.name if emb else "", search_model("rerank"),
-                            background=True)
+                            background=True, keep=body.keep, explain=body.explain)
             except AskError as exc:
                 raise HTTPException(400, str(exc))
             finally:

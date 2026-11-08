@@ -29,7 +29,7 @@ export interface Turn {
   leftOut?: number
   /** how the cards were chosen: by hand, or a search of the whole board -
    *  never the whole board sent entire */
-  mode?: 'chosen' | 'search'
+  mode?: 'chosen' | 'search' | 'explain'
   used?: number
   total?: number
   how?: string
@@ -45,6 +45,11 @@ interface Ask {
   context: string[]
   turns: Turn[]
   think: boolean
+  /** the conversation large, the board dimmed behind it */
+  expanded: boolean
+  /** Explain more (in the expanded view): answer from the conversation and
+   *  its cards, without searching the board */
+  explain: boolean
   busy: boolean
   controller: AbortController | null
   load(boardId: string | null): void
@@ -54,6 +59,8 @@ interface Ask {
   remove(id: string): void
   clear(): void
   setThink(on: boolean): void
+  setExpanded(on: boolean): void
+  setExplain(on: boolean): void
   send(question: string): Promise<void>
   stop(): void
 }
@@ -65,7 +72,7 @@ function save(s: Ask) {
   if (!s.boardId) return
   try {
     sessionStorage.setItem(KEY(s.boardId), JSON.stringify({
-      context: s.context, open: s.open, think: s.think,
+      context: s.context, open: s.open, think: s.think, expanded: s.expanded, explain: s.explain,
       // an answer cut off by a refresh is kept as far as it got
       turns: s.turns.map((t) => (t.status && t.status !== 'done'
         ? { ...t, status: 'stopped' as const } : t)),
@@ -79,6 +86,8 @@ export const useAsk = create<Ask>()((set, get) => ({
   context: [],
   turns: [],
   think: false,
+  expanded: false,
+  explain: false,
   busy: false,
   controller: null,
 
@@ -89,9 +98,10 @@ export const useAsk = create<Ask>()((set, get) => ({
       try { saved = JSON.parse(sessionStorage.getItem(KEY(boardId)) || '{}') } catch { saved = {} }
     }
     set({ boardId, open: !!saved.open, context: saved.context ?? [], turns: saved.turns ?? [],
-          think: !!saved.think, busy: false, controller: null })
+          think: !!saved.think, expanded: !!saved.expanded, explain: !!saved.explain,
+          busy: false, controller: null })
   },
-  setOpen(open) { set({ open }); save(get()) },
+  setOpen(open) { set(open ? { open } : { open, expanded: false }); save(get()) },
   toggle(id) {
     const s = get()
     const context = s.context.includes(id) ? s.context.filter((x) => x !== id) : [...s.context, id]
@@ -107,6 +117,8 @@ export const useAsk = create<Ask>()((set, get) => ({
   remove(id) { set({ context: get().context.filter((x) => x !== id) }); save(get()) },
   clear() { set({ context: [] }); save(get()) },
   setThink(on) { set({ think: on }); save(get()) },
+  setExpanded(on) { set({ expanded: on, open: on || get().open }); save(get()) },
+  setExplain(on) { set({ explain: on }); save(get()) },
 
   stop() {
     const { controller, boardId } = get()
@@ -127,9 +139,13 @@ export const useAsk = create<Ask>()((set, get) => ({
       .filter((t) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done'))
       .slice(-HISTORY_TURNS)
       .map((t) => ({ role: t.role, text: t.text }))
+    // the cards earlier answers drew on stay in the conversation (DESIGN 34)
+    const keep = [...new Set(s.turns.flatMap((t) => (t.status === 'done' && t.cited) || []))]
+      .filter((id) => nodes[id]).slice(-40)
+    const explain = s.expanded && s.explain
     const controller = new AbortController()
     set({
-      busy: true, controller,
+      busy: true, controller, open: true,
       turns: [...s.turns, { role: 'user', text: question.trim() },
               { role: 'assistant', text: '', status: 'reading' }],
     })
@@ -141,7 +157,7 @@ export const useAsk = create<Ask>()((set, get) => ({
     const last = () => get().turns[get().turns.length - 1]
 
     try {
-      await api.ask(boardId, { question: question.trim(), cards, history, think: s.think },
+      await api.ask(boardId, { question: question.trim(), cards, history, think: s.think, keep, explain },
         (name, data) => {
           if (name === 'context') {
             patch({ warning: data.warning, status: data.loading ? 'loading' : 'reading',
@@ -183,6 +199,8 @@ export function revealCard(id: string) {
   let cur = nodes[id]
   while (cur?.parent) { chain.unshift(cur.parent); cur = nodes[cur.parent] }
   useStore.setState({ path: chain })
+  // going to a card means looking at the board: the expanded view steps back
+  if (useAsk.getState().expanded) useAsk.getState().setExpanded(false)
   useUI.getState().set('focusId', id)
 }
 

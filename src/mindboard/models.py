@@ -76,3 +76,15 @@ class AskRequest(BaseModel):
     cards: list[str] = Field(default_factory=list, max_length=500)
     history: list[AskTurn] = Field(default_factory=list, max_length=40)
     think: bool = False
+    # the cards earlier answers in this conversation drew on: they stay in
+    # context, and a search adds to them
+    keep: list[str] = Field(default_factory=list, max_length=200)
+    # Explain more: answer from the conversation and its cards - no search
+    explain: bool = False
+
+
+class DraftRequest(BaseModel):
+    """An answer to turn into a card for the board."""
+    question: str = Field(min_length=1, max_length=4000)
+    answer: str = Field(min_length=1, max_length=20000)
+    cited: list[str] = Field(default_factory=list, max_length=100)

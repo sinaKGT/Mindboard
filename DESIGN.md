@@ -2244,3 +2244,49 @@ daylight) and mist (airy). The picker shows each as a small preview - its
 canvas, a card and its accent - with its feeling in words.
 
 166 tests.
+
+## 34. The conversation: one bar, expand, Explain more, Add to board (2026-11-08)
+
+Asked for over several messages, and built as one simple whole - simplicity
+and a clean interface come first, so it should not feel like many features.
+
+- **The chat bar.** The one way in: a slim bar centred at the bottom of the
+  board, always there, with a slow light running along its edge so it is easy
+  to find (it rests while typing or answering, and stops for anyone who asked
+  their system for less motion). The corner button is gone; `Ctrl+J` goes to
+  the bar. Asking opens the conversation above it. The bar fits between the
+  shortcuts and the board's controls; on a narrow window it rises above the
+  controls.
+- **Expand.** One button in the conversation's header: it fills the screen
+  and the board dims. Going to a cited card steps back to the board; `Esc`
+  steps back one level at a time.
+- **Explain more** (a switch in the expanded view). While it is on, a
+  question is not searched: it goes to the model with the conversation and
+  its cards, asking for a full explanation in plain words, an example or two,
+  and a follow-up - and to explain from its own knowledge where the cards fall
+  short, rather than say they cannot. The instruction goes with the question,
+  not in the system prompt, so the start of the prompt and its cache stay put.
+  First tried, the model held to its rule "if the cards do not answer, say so"
+  and declined; the instruction now says plainly that it should explain.
+- **The conversation remembers its cards.** Cards earlier answers cited stay
+  in context, first (where the prompt cache keeps them), and each search fills
+  the rest of its budget.
+- **Add to board.** Under each answer. The model drafts a card - a short title
+  and the knowledge in a few sentences, not the chat - and picks, from the
+  cards the answer cited, the one it belongs with and how (example of, part
+  of, ...). It can only link to a card the answer used; if its reply is not
+  usable, the draft falls back to the question and the answer. The person
+  edits the draft, changes the link, and presses **Add**: one undoable step
+  through the op-log, card and link marked `provenance: "ai"`, placed beside
+  the card it links to, in its group. The indexer makes it searchable a moment
+  later. Drafting writes nothing.
+
+Also: an id the model copies in single brackets, as the RELATIONSHIPS list
+writes them, is read as the citation it is meant to be.
+
+Checked in the app on the 10,000-card board: asked through the bar, expanded,
+drafted and added a card (one card and one link, both "ai"), and asked with
+Explain more on (4 cards from the conversation, no search, a full explanation
+with an example). 173 tests.
+
+The unused 27B model files were deleted (15 GB).

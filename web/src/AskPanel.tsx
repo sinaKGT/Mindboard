@@ -7,9 +7,11 @@
  */
 import { Fragment, useEffect, useRef, useState } from 'react'
 
+import { api } from './api'
 import { cardsInside, revealCard, useAsk, type Turn } from './askStore'
 import { Icon } from './icons'
 import { useStore } from './store'
+import { newEdge, newNode, type MEdge, type Op } from './types'
 
 const BEYOND = 'Beyond your board:'
 const STARTER = 'What am I missing here?'
@@ -78,7 +80,85 @@ function statusLine(t: Turn): string | null {
   return `Reading ${what}${t.tokens ? ` — about ${fmt(t.tokens)} tokens` : ''}…`
 }
 
-function Answer({ turn, offer }: { turn: Turn; offer?: (question: string) => void }) {
+const KIND_WORDS: Record<string, string> = {
+  relates: 'relates to', supports: 'supports', 'example-of': 'is an example of',
+  'part-of': 'is part of', causes: 'causes', contradicts: 'contradicts',
+}
+
+/** Add to board: the model drafts a card from the answer - the knowledge, not
+ *  the chat - and proposes the card it belongs with. Nothing changes until
+ *  Add: then one undoable step through the op-log, marked as made by AI, and
+ *  the background indexer makes it searchable (DESIGN 34). */
+function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; onDone: () => void }) {
+  const boardId = useStore((s) => s.boardId)
+  const nodes = useStore((s) => s.nodes)
+  const [draft, setDraft] = useState<{ title: string; text: string; link_to: string; kind: string } | null>(null)
+  const [error, setError] = useState('')
+  const cited = (turn.cited ?? []).filter((id) => nodes[id])
+
+  useEffect(() => {
+    if (!boardId) return
+    api.askDraft(boardId, { question, answer: turn.text, cited })
+      .then(setDraft).catch((e) => setError(e.message || 'could not draft the card'))
+    // drafted once, when opened
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const add = () => {
+    if (!draft || !draft.title.trim()) return
+    const store = useStore.getState()
+    const target = draft.link_to ? store.nodes[draft.link_to] : undefined
+    // beside the card it belongs with, in its group; else on the level in view
+    const pos: [number, number] = target
+      ? [target.pos[0] + (target.size[0] ?? 240) + 90, target.pos[1] + 30]
+      : [0, 0]
+    const parent = target ? target.parent : (store.path[store.path.length - 1] ?? null)
+    const card = newNode({ pos, parent, title: draft.title.trim(),
+                           content: { text: draft.text.trim() }, provenance: 'ai' })
+    const ops: Op[] = [{ kind: 'node.create', node: card }]
+    if (target) {
+      ops.push({ kind: 'edge.create',
+                 edge: newEdge(card.id, target.id, { kind: draft.kind as MEdge['kind'], provenance: 'ai' }) })
+    }
+    store.run(ops)
+    store.say('Added to your board')
+    onDone()
+    revealCard(card.id)
+  }
+
+  if (error) return <div className="ask-error">{error}</div>
+  if (!draft) return <div className="ask-note">Drafting a card from this answer…</div>
+  return (
+    <div className="ask-draft">
+      <input className="draft-title" value={draft.title} placeholder="Title"
+        onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+      <textarea className="draft-text" rows={3} value={draft.text}
+        onChange={(e) => setDraft({ ...draft, text: e.target.value })} />
+      <div className="draft-link">
+        {cited.length ? (
+          <>
+            <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
+              {Object.entries(KIND_WORDS).map(([k, w]) => <option key={k} value={k}>{w}</option>)}
+            </select>
+            <select value={draft.link_to} onChange={(e) => setDraft({ ...draft, link_to: e.target.value })}>
+              {cited.map((id) => <option key={id} value={id}>{nodes[id].title || 'Untitled'}</option>)}
+              <option value="">no card - on its own</option>
+            </select>
+          </>
+        ) : <span>On its own, on the level you are looking at</span>}
+      </div>
+      <div className="draft-actions">
+        <button className="starter" onClick={add} disabled={!draft.title.trim()}>Add</button>
+        <button className="ctx-clear" onClick={onDone}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+function Answer({ turn, offer, question }: {
+  turn: Turn; offer?: (question: string) => void; question: string
+}) {
+  const [adding, setAdding] = useState(false)
   const [showThinking, setShowThinking] = useState(false)
   const text = (turn.status === 'done' ? turn.text : hideNext(turn.text))
     .replace(BEYOND_MARK, BEYOND)
@@ -124,6 +204,15 @@ function Answer({ turn, offer }: { turn: Turn; offer?: (question: string) => voi
           in context.
         </div>
       ) : null}
+      {turn.mode === 'explain' && turn.status === 'done' ? (
+        <div className="ask-note">Explained from this conversation — the board was not searched.</div>
+      ) : null}
+      {turn.status === 'done' && turn.text.trim() && !turn.error ? (
+        adding ? <AddToBoard question={question} turn={turn} onDone={() => setAdding(false)} />
+          : <button className="ask-add" onClick={() => setAdding(true)}>
+              <Icon name="plus" size={11} /> Add to board
+            </button>
+      ) : null}
       {offer && turn.next && turn.status === 'done' ? (
         <div className="ask-next">
           <span className="ask-next-lead">Would you like to know</span>
@@ -136,8 +225,14 @@ function Answer({ turn, offer }: { turn: Turn; offer?: (question: string) => voi
   )
 }
 
+/** The conversation: a chat bar always at the bottom of the board, and above
+ *  it, once a question is asked, the conversation - which can be expanded to
+ *  fill the screen, where *Explain more* answers from the conversation alone
+ *  (DESIGN 34). One place to ask, nothing else to learn. */
 export function AskPanel() {
   const open = useAsk((s) => s.open)
+  const expanded = useAsk((s) => s.expanded)
+  const explain = useAsk((s) => s.explain)
   const context = useAsk((s) => s.context)
   const turns = useAsk((s) => s.turns)
   const busy = useAsk((s) => s.busy)
@@ -149,14 +244,13 @@ export function AskPanel() {
   const ask = useAsk.getState()
 
   /** Follow the answer as it is written - but only while the reader is at the
-   *  bottom. It used to jump to the end on every word, so nobody could scroll
-   *  up to read the start of an answer still being written. Scrolling up lets
-   *  go; scrolling back down picks it up again; a new question comes back down. */
+   *  bottom. Scrolling up lets go; scrolling back down picks it up again; a
+   *  new question comes back down. */
   const following = useRef(true)
   useEffect(() => {
     const el = scroller.current
     if (el && following.current) el.scrollTop = el.scrollHeight
-  }, [turns])
+  }, [turns, open, expanded])
   const onScroll = () => {
     const el = scroller.current
     if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
@@ -167,13 +261,13 @@ export function AskPanel() {
     const el = box.current
     if (!el) return
     el.style.height = '0px'
-    el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
   }, [draft])
 
-  if (!open) return null
   const present = context.filter((id) => nodes[id])
   const everything = Object.keys(nodes).length
   const canSend = !busy && everything > 0
+  const explaining = expanded && explain
 
   const send = (text: string) => {
     if (!canSend || !text.trim()) return
@@ -181,103 +275,128 @@ export function AskPanel() {
     void ask.send(text)
     setDraft('')
   }
+  // Esc steps back one level: the expanded view, then the conversation
+  const escape = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Escape') return
+    e.stopPropagation()
+    if (expanded) ask.setExpanded(false)
+    else if (open) ask.setOpen(false)
+    else box.current?.blur()
+  }
 
   return (
-    <aside className="ask-panel nodrag nopan" aria-label="Ask your board"
-      onKeyDown={(e) => {
-        // Esc closes the panel and nothing else - it must not also walk out of
-        // the group the canvas is showing
-        if (e.key === 'Escape') { e.stopPropagation(); ask.setOpen(false) }
-      }}>
-      <header className="ask-head">
-        <span className="ask-title"><Icon name="ask" size={14} /> Ask your board</span>
-        <button className="icon-btn" title="Close  (Esc)" onClick={() => ask.setOpen(false)}>
-          <Icon name="x" size={14} />
-        </button>
-      </header>
+    <>
+      {open && expanded ? <div className="ask-dim" onClick={() => ask.setExpanded(false)} /> : null}
+      {open ? (
+        <aside className={`ask-sheet nodrag nopan ${expanded ? 'expanded' : ''}`}
+          aria-label="Ask your board" onKeyDown={escape}>
+          <header className="ask-head">
+            <span className="ask-title"><Icon name="ask" size={14} /> Ask your board</span>
+            <span className="ask-head-actions">
+              <button className="icon-btn" title={expanded ? 'Back to the board' : 'Expand the chat'}
+                onClick={() => ask.setExpanded(!expanded)}>
+                <Icon name={expanded ? 'shrink' : 'fit'} size={14} />
+              </button>
+              <button className="icon-btn" title="Close  (Esc)" onClick={() => ask.setOpen(false)}>
+                <Icon name="x" size={14} />
+              </button>
+            </span>
+          </header>
 
-      <div className="ask-context">
-        {present.length === 0 ? (
-          <>
-            {/* nothing added: the question is about everything */}
-            <span className="ctx-chip whole" title="Every card on this board">
-              <span className="ctx-name"><Icon name="grid" size={11} /> Whole board
-                <span className="ctx-count"> · {everything} cards</span></span>
-            </span>
-            <span className="ask-empty">
-              To narrow it, use <Icon name="askAdd" size={12} /> on a card, or select several
-              and press <b>Ask</b>.
-            </span>
-          </>
-        ) : (
-          <>
-            {present.map((id) => {
-              const n = nodes[id]
-              const count = cardsInside(id)
-              return (
-                <span key={id} className="ctx-chip" title={n.title || 'Untitled'}>
-                  <button className="ctx-name" onClick={() => revealCard(id)}>
-                    {n.type === 'meta' ? <Icon name="layers" size={11} /> : null}
-                    {n.title || 'Untitled'}
-                    {count > 1 ? <span className="ctx-count"> · {count} cards</span> : null}
-                  </button>
-                  <button className="ctx-x" title="Take out of context" onClick={() => ask.remove(id)}>
-                    <Icon name="x" size={10} />
-                  </button>
+          <div className="ask-context">
+            {explaining ? (
+              <span className="ask-empty">Explain more is on: answers come from this conversation,
+                and the board is not searched.</span>
+            ) : present.length === 0 ? (
+              <>
+                <span className="ctx-chip whole" title="Every card on this board">
+                  <span className="ctx-name"><Icon name="grid" size={11} /> Whole board
+                    <span className="ctx-count"> · {everything} cards</span></span>
                 </span>
-              )
-            })}
-            <button className="ctx-clear" onClick={() => ask.clear()}>Clear</button>
-          </>
-        )}
-      </div>
-
-      <div className="ask-turns" ref={scroller} onScroll={onScroll}>
-        {turns.length === 0 ? (
-          <div className="ask-hello">
-            Ask anything about {present.length ? 'the cards in context' : 'this board'}. What
-            comes from your cards is linked to them; anything the model adds from its own
-            knowledge is kept apart.
+                <span className="ask-empty">
+                  To narrow it, use <Icon name="askAdd" size={12} /> on a card, or select several
+                  and press <b>Ask</b>.
+                </span>
+              </>
+            ) : (
+              <>
+                {present.map((id) => {
+                  const n = nodes[id]
+                  const count = cardsInside(id)
+                  return (
+                    <span key={id} className="ctx-chip" title={n.title || 'Untitled'}>
+                      <button className="ctx-name" onClick={() => revealCard(id)}>
+                        {n.type === 'meta' ? <Icon name="layers" size={11} /> : null}
+                        {n.title || 'Untitled'}
+                        {count > 1 ? <span className="ctx-count"> · {count} cards</span> : null}
+                      </button>
+                      <button className="ctx-x" title="Take out of context" onClick={() => ask.remove(id)}>
+                        <Icon name="x" size={10} />
+                      </button>
+                    </span>
+                  )
+                })}
+                <button className="ctx-clear" onClick={() => ask.clear()}>Clear</button>
+              </>
+            )}
           </div>
-        ) : turns.map((t, i) => (
-          t.role === 'user'
-            ? <div key={i} className="turn question">{t.text}</div>
-            // only the latest answer offers its next question - older offers
-            // belong to a conversation that has moved on
-            : <Answer key={i} turn={t}
-                offer={i === turns.length - 1 && canSend ? send : undefined} />
-        ))}
-      </div>
 
-      <div className="ask-compose">
-        {turns.length === 0 && everything > 0 ? (
-          <button className="starter" onClick={() => send(STARTER)}>{STARTER}</button>
+          <div className="ask-turns" ref={scroller} onScroll={onScroll}>
+            {turns.length === 0 ? (
+              <div className="ask-hello">
+                Ask anything about {present.length ? 'the cards in context' : 'this board'}. What
+                comes from your cards is linked to them; anything the model adds from its own
+                knowledge is kept apart.
+                {everything > 0 ? (
+                  <div><button className="starter" onClick={() => send(STARTER)}>{STARTER}</button></div>
+                ) : null}
+              </div>
+            ) : turns.map((t, i) => (
+              t.role === 'user'
+                ? <div key={i} className="turn question">{t.text}</div>
+                // only the latest answer offers its next question
+                : <Answer key={i} turn={t} question={turns[i - 1]?.text ?? ''}
+                    offer={i === turns.length - 1 && canSend ? send : undefined} />
+            ))}
+          </div>
+        </aside>
+      ) : null}
+
+      {/* the one way in: always at the bottom of the board */}
+      <div className={`ask-bar nodrag nopan ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''}`}
+        onKeyDown={escape}>
+        <textarea ref={box} rows={1} value={draft}
+          placeholder={explaining ? 'Ask for an explanation…'
+            : present.length ? 'Ask about these cards…'
+            : everything ? 'Ask your board…' : 'This board has no cards yet'}
+          disabled={everything === 0}
+          onFocus={() => { if (turns.length && !open) ask.setOpen(true) }}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(draft) }
+          }} />
+        {expanded && open ? (
+          <label className="bar-toggle"
+            title="Answer from this conversation, with examples, without searching the board">
+            <input type="checkbox" checked={explain} onChange={(e) => ask.setExplain(e.target.checked)} />
+            Explain more
+          </label>
         ) : null}
-        <div className="ask-input">
-          <textarea ref={box} rows={1} value={draft}
-            placeholder={present.length ? 'Ask about these cards…'
-              : everything ? 'Ask about the whole board…' : 'This board has no cards yet'}
-            disabled={everything === 0}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(draft) }
-            }} />
-          {busy ? (
-            <button className="send stop" title="Stop" onClick={() => ask.stop()}>
-              <Icon name="stop" size={13} />
-            </button>
-          ) : (
-            <button className="send" title="Ask  (Enter)" disabled={!canSend || !draft.trim()}
-              onClick={() => send(draft)}>
-              <Icon name="send" size={14} />
-            </button>
-          )}
-        </div>
-        <label className="think-toggle" title="Slower, and deeper - worth it for what is missing">
+        <label className="bar-toggle" title="Slower, and deeper - worth it for what is missing">
           <input type="checkbox" checked={think} onChange={(e) => ask.setThink(e.target.checked)} />
           Think deeper
         </label>
+        {busy ? (
+          <button className="send stop" title="Stop" onClick={() => ask.stop()}>
+            <Icon name="stop" size={13} />
+          </button>
+        ) : (
+          <button className="send" title="Ask  (Enter)" disabled={!canSend || !draft.trim()}
+            onClick={() => send(draft)}>
+            <Icon name="send" size={14} />
+          </button>
+        )}
       </div>
-    </aside>
+    </>
   )
 }
