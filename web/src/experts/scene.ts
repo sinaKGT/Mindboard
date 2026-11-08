@@ -22,11 +22,19 @@ const VERT = /* glsl */`
   attribute vec3 aHome; attribute float aSeed; attribute float aEdge; attribute float aCap;
   varying float vAlpha; varying float vGlow;
   vec3 hash3(float n) { return fract(sin(vec3(n, n + 1.7, n + 3.1)) * 43758.5453) - 0.5; }
-  // the pointer parts the sand, like a hand passing through it
-  vec2 pushed(vec4 clip, float strength) {
-    vec2 ndc = clip.xy / clip.w, dv = (ndc - uPointer) * vec2(uAspect, 1.0);
-    float f = exp(-dot(dv, dv) * 38.0) * strength;
-    return normalize(dv + 1e-5) * f * clip.w;
+  // the pointer is a small black hole: grains near it spiral in, glow at the
+  // rim and vanish at the centre; where it has passed, they fade back in
+  float holeEat = 1.0, holeRim = 0.0;
+  vec2 hole(vec4 clip) {
+    vec2 ndc = clip.xy / clip.w, dv = (uPointer - ndc) * vec2(uAspect, 1.0);
+    float d = length(dv), R = 0.2;
+    float pull = smoothstep(R, 0.0, d);
+    vec2 swirl = vec2(-dv.y, dv.x);
+    vec2 off = (dv * pull * 0.88 + swirl * pull * 0.45) / vec2(uAspect, 1.0);
+    float left = d * (1.0 - 0.88 * pull);                  // how far from the centre it ends up
+    holeEat = smoothstep(0.0, 0.035, left);
+    holeRim = pull * (1.0 - pull) * 4.0;
+    return off * clip.w;
   }
 
   // a slowly changing current: sums of sines over the grain's own position,
@@ -78,13 +86,13 @@ const VERT = /* glsl */`
     p *= 1.0 + uDissolve * uSpeak * uAmp * 0.06 * sin(uTime * 8.0 + length(p) * 3.0);
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_Position.xy += pushed(gl_Position, 0.05 + 0.08 * uDissolve);
+    gl_Position.xy += hole(gl_Position);
     vAlpha = (1.0 - blown * smoothstep(0.4, 1.0, life)) * (0.55 + 0.45 * fract(aSeed * 29.0)) * (1.0 - 0.5 * uDissolve);
     // inside, each grain brightens and dims at its own pace, more in the beam
     float twinkle = 0.5 + 0.5 * pow(0.5 + 0.5 * sin(uTime * (0.25 + 0.8 * fract(aSeed * 11.0)) + aSeed * 50.0), 2.0);
-    vAlpha *= mix(1.0, twinkle * (1.25 + 1.6 * beam), uDissolve);
+    vAlpha *= mix(1.0, twinkle * (1.25 + 1.6 * beam), uDissolve) * holeEat;
     float blink = 0.55 + 0.45 * sin(uTime * 2.2 + aSeed * 0.5);
-    vGlow = aEdge * 0.8 + h * 0.3 + uSpeak * uAmp * wave * 0.6 + uThink * 0.3 + aCap * (0.75 * blink + uCall * 0.35) + uDissolve * beam * 0.6;
+    vGlow = aEdge * 0.8 + h * 0.3 + uSpeak * uAmp * wave * 0.6 + uThink * 0.3 + aCap * (0.75 * blink + uCall * 0.35) + uDissolve * beam * 0.6 + holeRim;
     gl_PointSize = uSize * (0.6 + fract(aSeed * 41.0)) * (1.0 + aEdge * 0.7 + aCap * (0.35 + 0.15 * uCall)) * (1.0 + 0.5 * uDissolve) / -mv.z;
   }`
 const FRAG = /* glsl */`
@@ -179,11 +187,19 @@ function airSand() {
     uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color('#f2c070') },
       uPointer: { value: new THREE.Vector2(9, 9) }, uAspect: { value: 1 }, uDim: { value: 1 } },
     vertexShader: `uniform float uTime, uAspect, uDim; uniform vec2 uPointer; attribute float aSeed; varying float vA;
-        // the pointer parts the sand, like a hand passing through it
-        vec2 pushed(vec4 clip, float strength) {
-          vec2 ndc = clip.xy / clip.w, dv = (ndc - uPointer) * vec2(uAspect, 1.0);
-          float f = exp(-dot(dv, dv) * 38.0) * strength;
-          return normalize(dv + 1e-5) * f * clip.w;
+  // the pointer is a small black hole: grains near it spiral in, glow at the
+        // rim and vanish at the centre; where it has passed, they fade back in
+        float holeEat = 1.0, holeRim = 0.0;
+        vec2 hole(vec4 clip) {
+          vec2 ndc = clip.xy / clip.w, dv = (uPointer - ndc) * vec2(uAspect, 1.0);
+          float d = length(dv), R = 0.2;
+          float pull = smoothstep(R, 0.0, d);
+          vec2 swirl = vec2(-dv.y, dv.x);
+          vec2 off = (dv * pull * 0.88 + swirl * pull * 0.45) / vec2(uAspect, 1.0);
+          float left = d * (1.0 - 0.88 * pull);                  // how far from the centre it ends up
+          holeEat = smoothstep(0.0, 0.035, left);
+          holeRim = pull * (1.0 - pull) * 4.0;
+          return off * clip.w;
         }
       
       void main() { vec3 p = position;
@@ -192,8 +208,8 @@ function airSand() {
         p.z += cos(uTime * (0.1 + 0.18 * fract(aSeed * 7.7)) + aSeed * 20.0) * 0.45;
         p.x += sin(uTime * (0.09 + 0.15 * fract(aSeed * 5.1)) + aSeed * 11.0) * 0.4;
         vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
-        gl_Position.xy += pushed(gl_Position, 0.06);
-        vA = (0.25 + 0.5 * aSeed) * 0.6 * uDim; gl_PointSize = (6.0 + aSeed * 10.0) / -mv.z; }`,
+        gl_Position.xy += hole(gl_Position);
+        vA = (0.25 + 0.5 * aSeed) * 0.6 * uDim * holeEat * (1.0 + holeRim); gl_PointSize = (6.0 + aSeed * 10.0) / -mv.z; }`,
     fragmentShader: dot('uColor') })
   const pts = new THREE.Points(g, m)
   pts.frustumCulled = false

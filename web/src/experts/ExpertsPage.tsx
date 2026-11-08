@@ -172,9 +172,9 @@ export function ExpertsPage() {
     let raf = 0
     const listen = () => {
       raf = requestAnimationFrame(listen)
-      const s = scene.current, v = voice.current
-      if (s && v.playing) { s.speaking = true; s.amp = 0.25 + 0.75 * v.level() }
-      else if (s && s.speaking && !busyRef.current) s.speaking = false
+      // the voice speaks; the sand stays as it is
+      const s = scene.current
+      if (s && s.speaking) s.speaking = false
     }
     listen()
     return () => { cancelAnimationFrame(raf); voice.current.stop(); scene.current?.dispose(); controller.current?.abort() }
@@ -242,15 +242,15 @@ export function ExpertsPage() {
         if (name === 'context') patch({ where: data.where })
         else if (name === 'text') {
           text += data.text
-          s.thinking = false; s.speaking = true
-          s.amp = 0.55 + 0.45 * Math.random()          // the sand moves as it writes; a voice will drive this
+          s.thinking = false
           patch({ text, status: 'writing' })
         } else if (name === 'done') {
           patch({ text: data.answer, next: data.next || undefined, status: 'done' })
           // and it says it, in its own voice
           if (voiceReady && voiceOn && data.answer) {
             const i = expertsRef.current.findIndex((x) => x.id === e.id)
-            void voice.current.say(data.answer, e.voice || cast[Math.max(i, 0) % Math.max(cast.length, 1)] || 'af_heart')
+            const spoken = data.next ? `${data.answer}\n\nWould you like to know: ${data.next}` : data.answer
+            void voice.current.say(spoken, e.voice || cast[Math.max(i, 0) % Math.max(cast.length, 1)] || 'af_heart')
           }
         }
         else if (name === 'error') patch({ error: data.message, status: 'done' })
