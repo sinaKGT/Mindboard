@@ -86,7 +86,9 @@ const VERT = /* glsl */`
     p *= 1.0 + uDissolve * uSpeak * uAmp * 0.06 * sin(uTime * 8.0 + length(p) * 3.0);
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_Position.xy += hole(gl_Position);
+    // the black hole leaves the monuments alone - it eats only loose sand, inside
+    gl_Position.xy += hole(gl_Position) * uDissolve;
+    holeEat = mix(1.0, holeEat, uDissolve); holeRim *= uDissolve;
     vAlpha = (1.0 - blown * smoothstep(0.4, 1.0, life)) * (0.55 + 0.45 * fract(aSeed * 29.0)) * (1.0 - 0.5 * uDissolve);
     // inside, each grain brightens and dims at its own pace, more in the beam
     float twinkle = 0.5 + 0.5 * pow(0.5 + 0.5 * sin(uTime * (0.25 + 0.8 * fract(aSeed * 11.0)) + aSeed * 50.0), 2.0);
