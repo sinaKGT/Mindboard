@@ -1,6 +1,6 @@
 import {
   Background, BackgroundVariant, ConnectionMode, MarkerType, MiniMap, ReactFlow,
-  ReactFlowProvider, ViewportPortal, applyNodeChanges, useReactFlow, useViewport,
+  ReactFlowProvider, ViewportPortal, applyNodeChanges, useReactFlow, useStore as useFlow,
   type Edge, type Node, type NodeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -129,7 +129,6 @@ function CanvasInner() {
     screenToFlowPosition, flowToScreenPosition, fitView, zoomIn, zoomOut, getNodes,
     getInternalNode, setCenter, getZoom,
   } = useReactFlow()
-  const { zoom } = useViewport()
   const parent = currentParent(path)
   const wrap = useRef<HTMLDivElement>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -891,7 +890,7 @@ function CanvasInner() {
         <button className="icon-btn" title="Zoom out" onClick={() => zoomOut({ duration: 150 })}>
           <Icon name="minus" size={14} />
         </button>
-        <span className="zoom">{Math.round(zoom * 100)}%</span>
+        <ZoomLevel />
         <button className="icon-btn" title="Zoom in" onClick={() => zoomIn({ duration: 150 })}>
           <Icon name="plus" size={14} />
         </button>
@@ -936,4 +935,13 @@ export function Canvas() {
       <Viewer />
     </ReactFlowProvider>
   )
+}
+
+/** The zoom percentage, subscribed on its own. It used to come from
+ *  useViewport() in the canvas itself, which made the whole canvas - and with
+ *  it every card and relationship - render again on every frame of a zoom or
+ *  pan: 2 frames a second with 3,000 cards on a level (DESIGN.md 36). */
+function ZoomLevel() {
+  const pct = useFlow((s) => Math.round(s.transform[2] * 100))
+  return <span className="zoom">{pct}%</span>
 }

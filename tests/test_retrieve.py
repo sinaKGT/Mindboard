@@ -220,6 +220,20 @@ def test_stays_within_budget(dd, board, rag, index):
     assert sum(cost[i] for i in found.ids) <= 120
 
 
+def test_relationship_lines_count_against_the_budget(dd, board, rag, index):
+    """Ragas and Retrieval quality are linked: sent together, their line goes
+    too, and the budget pays for it."""
+    nodes, edges = graph(dd, board)
+    cost = costs(nodes)
+    pair = cost[rag["retrieval"]] + cost[rag["ragas"]]
+    found = retrieve.search(index, "recall precision retrieved chunks", nodes, edges, cost,
+                            WordEmbedder(), budget=pair + retrieve.LINK_TOKENS - 1)
+    assert not {rag["retrieval"], rag["ragas"]} <= set(found.ids), "the line did not fit"
+    found = retrieve.search(index, "recall precision retrieved chunks", nodes, edges, cost,
+                            WordEmbedder(), budget=pair + retrieve.LINK_TOKENS)
+    assert {rag["retrieval"], rag["ragas"]} <= set(found.ids)
+
+
 def test_without_an_embedder_it_searches_by_wording(dd, board, rag, index):
     nodes, edges = graph(dd, board)
     for embedder in (None, Broken()):

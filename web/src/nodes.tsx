@@ -1,5 +1,5 @@
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Handle, NodeResizer, Position, useStore as useFlow, type NodeProps } from '@xyflow/react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   addConnected, deleteNodes, duplicateNodes, linkifyNode, moveOut, refreshLinkPreview, setBodyList, setStyle, unwrapMeta, updateNode,
@@ -340,6 +340,11 @@ function Shell({ node, selected, resizable, children }: {
   const dropping = useUI((s) => s.dropTarget === node.id)
   const inContext = useAsk((s) => s.context.includes(node.id))
   const found = useUI((s) => s.foundId === node.id)
+  // Zoomed far out a card is too small to read: draw its title alone, not
+  // its editor, list, picture or link preview (DESIGN.md 36). A boolean, so
+  // the card renders again only when the line is crossed.
+  const far = useFlow((s) => s.transform[2] < 0.35)
+  if (far && !selected) children = <div className="far-title">{node.title || 'Untitled'}</div>
   return (
     <>
       {resizable && (
@@ -637,7 +642,9 @@ export function GhostNode({ data }: NodeProps) {
   )
 }
 
+// memoised: a card renders again only when its own data changes, not
+// whenever the canvas does (DESIGN.md 36)
 export const nodeTypes = {
-  text: TextNode, image: ImageNode, video: VideoNode,
-  link: LinkNode, file: FileNode, meta: MetaNode, ghost: GhostNode,
+  text: memo(TextNode), image: memo(ImageNode), video: memo(VideoNode),
+  link: memo(LinkNode), file: memo(FileNode), meta: memo(MetaNode), ghost: memo(GhostNode),
 }

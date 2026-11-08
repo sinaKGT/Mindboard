@@ -1161,3 +1161,6 @@ a.btn { text-decoration: none; }
 }
 .send:disabled { background: var(--mb-surface-3); color: var(--mb-text-faint); cursor: default; }
 .send.stop { background: var(--mb-surface-3); color: var(--mb-text); }
+
+/* a card zoomed far out: its title alone (DESIGN.md 36) */
+.far-title { padding: 10px 12px; font-size: 13px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

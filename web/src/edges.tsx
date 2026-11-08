@@ -1,8 +1,9 @@
 import {
   EdgeLabelRenderer, Position, getBezierPath, useInternalNode, useReactFlow,
+  useStore as useFlow,
   type EdgeProps,
 } from '@xyflow/react'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 
 import { deleteEdges, updateEdge } from './actions'
 import { Icon } from './icons'
@@ -97,6 +98,9 @@ export function LabeledEdge(props: EdgeProps) {
   const kind: EdgeKind = edge?.kind ?? 'relates'
   const spec = KIND_STYLE[kind]
   const editing = useUI((s) => s.editingEdgeId === id)
+  // zoomed far out a label is unreadable and only costs: leave it out
+  // (a boolean, so this renders again only when the line is crossed)
+  const far = useFlow((s) => s.transform[2] < 0.45)
   const setUI = useUI((s) => s.set)
   const [label, setLabel] = useState(edge?.label ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -157,7 +161,7 @@ export function LabeledEdge(props: EdgeProps) {
         style={{ fill: 'none', stroke: 'transparent', strokeWidth: 22 }}
         onClick={pick}
         onDoubleClick={() => edge && setUI('editingEdgeId', id)} />
-      <EdgeLabelRenderer>
+      {far && !selected && !editing ? null : <EdgeLabelRenderer>
         <div className="nodrag nopan"
           style={{ position: 'absolute', transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)`, pointerEvents: 'all' }}>
           {editing && edge ? (
@@ -209,9 +213,9 @@ export function LabeledEdge(props: EdgeProps) {
             </div>
           )}
         </div>
-      </EdgeLabelRenderer>
+      </EdgeLabelRenderer>}
     </>
   )
 }
 
-export const edgeTypes = { labeled: LabeledEdge }
+export const edgeTypes = { labeled: memo(LabeledEdge) }

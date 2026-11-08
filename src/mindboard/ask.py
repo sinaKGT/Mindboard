@@ -26,10 +26,12 @@ MAX_SIDE = 1024            # pictures are shrunk to this; larger costs time, not
 CONTEXT_TOKENS = 32768     # what the model is started with (llm.LocalModel)
 ANSWER_TOKENS = 3072
 THINKING_TOKENS = 8192
-# A search brings the found cards' pictures only up to this many tokens: thirty
-# matching screenshots would otherwise be too much to ask about at all. Cards
-# chosen by hand always bring their pictures.
-SEARCH_PICTURE_TOKENS = 6000
+# A search brings the found cards' pictures, best match first, only up to this
+# many tokens; the other cards' titles and captions still go in. Measured on
+# RAG Deep Knowledge: 6,000 brought ten pictures and the first words at 5.0 s,
+# 2,000 brings four - the best-matching cards' - and the first words at 3.0 s
+# (DESIGN.md 35). Cards chosen by hand always bring all their pictures.
+SEARCH_PICTURE_TOKENS = 2000
 BEYOND = "Beyond your board:"
 EXPLAIN = ("Explain more: I want a full explanation, not only what the cards say. Explain "
            "it step by step, in plain words. Where the cards and our conversation fall "

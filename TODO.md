@@ -35,20 +35,15 @@ Describe each picture once (the 9B reads pictures) and keep the description
 with the card, so a picture's content can be found by search — today only its
 title and caption are searchable.
 
-## 4. Things not measured or known to be rough
+## 4. A fast canvas for big levels - mostly done (DESIGN.md §35-36)
 
-- **The canvas at 10,000 cards** has not been measured — only search was.
-- **Relationships are not counted in the search budget.** A search sends
-  ~5,000 tokens of cards but the context came to ~8,900 with the outline and
-  the relationships between the sent cards.
-- **Most of the wait before the first word is now the pictures** a search
-  brings (up to 6,000 tokens). Worth measuring a smaller picture budget for
-  searches.
-- **The follow-up offer and scrolling**: once, the panel stopped about 70 px
-  short of the offered question. The pane had been resized at the same time,
-  so it may be nothing — worth watching.
-- **After a model gives the card back**, the next question pays for
-  restarting the search model it stopped (about 1.3 s). Fine for now.
+Relationship lines count in the budget; pictures in a search are capped at
+2,000 tokens (first words 5.0 s -> 3.0 s); zooming 3,000 cards on one level
+went from 2 to 18 frames a second.
+
+Left, if big flat levels matter: the remaining cost is painting ~2,300
+relationship curves per frame - thin or simplify them when zoomed far out, or
+draw them on a canvas. Measure the same way (frames a second while zooming).
 
 ## 5. Housekeeping
 

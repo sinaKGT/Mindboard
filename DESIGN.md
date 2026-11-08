@@ -2290,3 +2290,47 @@ Explain more on (4 cards from the conversation, no search, a full explanation
 with an example). 173 tests.
 
 The unused 27B model files were deleted (15 GB).
+
+## 35. What was left rough, measured (2026-11-08)
+
+- **Relationship lines now count against the search budget.** A card costs
+  its text plus 25 tokens for each relationship it has with a card already
+  chosen. On *RAG Deep Knowledge* a search now sends about 4,900 tokens of
+  text (85 cards) where it sent 8,900 (131); every right card on the test set
+  still gets through (sent 1.00, recall@10 0.94).
+- **Pictures in a search: 2,000 tokens, not 6,000.** Pictures come best match
+  first. Measured, first words: 5.0 s with 6,000 (ten pictures), 3.0 s with
+  2,000 (four), 1.8 s with none. The four kept are the best-matching cards';
+  the others' titles and captions still go in. Cards chosen by hand bring
+  every picture, as before.
+- **The canvas at 10,000 cards, measured - and not fast enough.** The
+  10,000-card board opens in 0.7 s (0.5 s to fetch its 7.3 MB), because its
+  groups keep each level small: 58 cards drawn at the top. But 3,000 cards on
+  *one* level open in 2.9 s and zoom at 2 frames a second (frames up to 0.7
+  s), drawing 741 cards and 3,380 relationships. Only what is in view is drawn
+  already; the cost is each drawn relationship's HTML label and its
+  subscriptions to selection state, and cards that are not memoised, so every
+  zoom step re-renders thousands of components. The fix - memoised cards,
+  relationship labels hidden when zoomed out, cheaper rendering far out - is
+  its own piece of work (TODO.md).
+- The 1.3 s restart of a search model after it gave the card back stays: it
+  is paid once, on the question after.
+
+174 tests.
+
+## 36. A faster canvas on big levels (2026-11-08)
+
+The canvas component read the zoom with `useViewport()` only to show the zoom
+percentage - which made the whole canvas render again on every frame of a
+zoom or pan, handing React Flow new handlers and every card and relationship
+a reason to render. The percentage now subscribes on its own (`ZoomLevel`).
+Cards and relationships are memoised; a relationship's label is left out
+below 45% zoom (unreadable there), unless it is selected or being named; a
+card below 35% draws only its title.
+
+Measured on 3,000 cards on one level, zooming: **2 frames a second before,
+18 after** (slowest frame 737 ms -> 142 ms). The rest is the browser painting
+some 2,300 relationship curves each frame; thinning or simplifying them far
+out, or drawing them on a canvas, is the next step if big flat levels matter
+(TODO.md). Boards organised in groups were never affected: the 10,000-card
+board draws 58 cards at its top level.

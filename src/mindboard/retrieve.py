@@ -33,6 +33,7 @@ from .search_index import QUERY_INSTRUCT, BoardIndex, card_fields, card_passage
 BUDGET = 5000           # tokens of cards a search may send
 SEEDS = 10              # the best cards, from which relevance spreads along the links
 RRF_K = 60
+LINK_TOKENS = 25        # one RELATIONSHIPS line: two ids and how they relate
 # what the reranker reads of each pair; together they stay inside its
 # 2,048-token context even in a script that takes a token per character
 QUERY_CHARS = 500
@@ -239,13 +240,22 @@ def search(index: BoardIndex, question: str, nodes: dict[str, dict], edges: list
         for nid, s in fused.items():   # matches beyond the seeds still count, below them
             scored.setdefault(nid, s * 0.5)
 
+    # A card costs its own text plus a line for each relationship it has with
+    # a card already chosen - those lines go to the model too. Uncounted, a
+    # 5,000-token search sent about 8,900 (DESIGN.md 35).
+    near: dict[str, list[str]] = {}
+    for e in edges:
+        near.setdefault(e["source"], []).append(e["target"])
+        near.setdefault(e["target"], []).append(e["source"])
     chosen: list[str] = []
+    picked: set[str] = set()
     spent = 0
     for nid in sorted(scored, key=scored.get, reverse=True):
-        c = cost.get(nid, 50)
+        c = cost.get(nid, 50) + LINK_TOKENS * sum(1 for o in near.get(nid, ()) if o in picked)
         if spent + c > budget:
             continue
         chosen.append(nid)
+        picked.add(nid)
         spent += c
     how = ", ".join(used[:-1]) + f" and {used[-1]}" if len(used) > 1 else used[0]
     return Found(chosen, len(nodes), how, {n: scored[n] for n in chosen})
