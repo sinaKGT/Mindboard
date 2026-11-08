@@ -1164,3 +1164,4 @@ a.btn { text-decoration: none; }
 
 /* a card zoomed far out: its title alone (DESIGN.md 36) */
 .far-title { padding: 10px 12px; font-size: 13px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mb-edge-path.far { transition: none; }

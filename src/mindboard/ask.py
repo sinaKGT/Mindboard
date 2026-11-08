@@ -276,7 +276,10 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
         if not sha:
             continue
         if mode != "chosen" and budget <= 0:
-            left_out += 1             # its card's title and caption still go in
+            left_out += 1             # its card's title and caption still go in -
+            seen = PictureNotes.get(dd).notes.get(sha)
+            if seen:                  # and what the picture shows, in words (DESIGN 39)
+                blocks[i] += f"\n    picture shows: {seen}"
             continue
         got = _picture(dd, conn, bid, sha)
         if got:

@@ -19,21 +19,16 @@ Planning before searching made search worse on the test set (MRR 0.94 ->
 a test set rich in multi-part questions, or a planner that leaves simple
 questions alone.
 
-## 3. Pictures that can be searched - done (DESIGN.md §38)
+## 3. Pictures that can be searched - done (DESIGN.md §38-39)
 
-Each picture is described once by the 9B while it is loaded anyway; the
-description is searchable. Not done: giving the descriptions to the answering
-model for pictures left out of a question (it sees the pictures it is sent).
+Described once, searchable, and given to the answering model in words when a
+picture itself is left out of a question.
 
-## 4. A fast canvas for big levels - mostly done (DESIGN.md §35-36)
+## 4. A fast canvas for big levels - done as far as elements go (DESIGN.md §35-36, §39)
 
-Relationship lines count in the budget; pictures in a search are capped at
-2,000 tokens (first words 5.0 s -> 3.0 s); zooming 3,000 cards on one level
-went from 2 to 18 frames a second.
-
-Left, if big flat levels matter: the remaining cost is painting ~2,300
-relationship curves per frame - thin or simplify them when zoomed far out, or
-draw them on a canvas. Measure the same way (frames a second while zooming).
+3,000 cards on one level zoom at 17-18 frames a second (2 before). Beyond
+that needs a far-out view drawn on a canvas - only worth it if huge flat
+levels, rather than groups, turn out to be how boards are used.
 
 ## 5. Housekeeping
 

@@ -546,6 +546,24 @@ def test_a_picture_is_found_by_what_it_shows(dd, board, cards):
     assert PictureNotes(PictureNotes.get(dd).path).notes[sha] == "a red pole beside junction 4", "kept"
 
 
+def test_a_picture_left_out_still_goes_in_as_words(dd, board, cards, monkeypatch):
+    from mindboard.search_index import BoardIndex, PictureNotes, picture_of
+
+    monkeypatch.setattr(ask, "SEARCH_PICTURE_TOKENS", 100)
+    nodes = nodes_of(dd, board)
+    said = {cards["video"]: "a drone view of the north side", cards["plan"]: "a plan of junction 4"}
+    for card, text in said.items():
+        PictureNotes.get(dd).put(picture_of(nodes[card]), text)
+    found = ask.build(dd, conn_for(dd, board["id"]), board["id"], [],
+                      "the site plan and the drone pass")
+    assert found.pictures_left_out == 1
+    sent = found.pictures[0].card
+    left = next(c for c in said if c != sent)
+    assert f"picture shows: {said[left]}" in found.text, "the left-out one, in words"
+    assert f"picture shows: {said[sent]}" not in found.text, "the one sent needs no words"
+    BoardIndex.drop(dd, board["id"])
+
+
 def test_pictures_are_described_only_while_the_model_is_loaded_and_free(dd, board, cards):
     from mindboard.indexer import Indexer
     from mindboard.search_index import BoardIndex, PictureNotes

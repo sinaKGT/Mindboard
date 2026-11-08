@@ -144,6 +144,14 @@ export function LabeledEdge(props: EdgeProps) {
   const colour = d.ghost ? 'var(--mb-edge)' : kindColour(kind)
   const bundled = bundle.length > 1
 
+  // Zoomed far out, a relationship is a plain line: no arrowhead, dashes or
+  // wide invisible click area - unreadable and unclickable at that size, and
+  // what the browser spent most of each frame painting (DESIGN.md 39)
+  if (far && !selected && !editing) {
+    return <path d={path} className="mb-edge-path far" fill="none"
+      style={{ fill: 'none', stroke: colour, strokeWidth: spec.width }} />
+  }
+
   return (
     <>
       {/* fill and stroke live on the element, not only in CSS: an exported

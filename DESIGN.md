@@ -2385,3 +2385,19 @@ breaks: symptoms and likely causes" now finds *Common RAG Problems and
 Provided Solution* first - a card whose content is only its picture, and was
 not in the top three before; "RRF score formula" moves *What is RRF* to first.
 176 tests.
+
+## 39. The last rough edges (2026-11-08)
+
+- **A picture left out of a question still goes in, as words.** A search
+  sends only the best matches' pictures (§35); the others' cards now carry
+  "picture shows: ..." from their description (§38), so the model knows what
+  they show for a few dozen tokens instead of hundreds.
+- **Relationships far out are plain lines** - below 45% zoom, no arrowhead,
+  dashes or wide invisible click area. Measured, zooming 3,000 cards on one
+  level stayed at 17-18 frames a second: painting was not the limit. Drawing
+  every card and relationship instead of only those in view made it worse (8
+  frames a second), so only-in-view stays. What is left is the browser moving
+  some 3,500 elements each frame; beyond this, a far-out view drawn on a
+  canvas instead of as elements would be needed. Boards kept in groups - each
+  level small - are not affected.
+177 tests.
