@@ -2508,3 +2508,32 @@ Speaking *to* an expert would need speech recognition on this computer
   the answer ("Would you like to know: ...").
 
 190 tests.
+
+## 43. The first page: two signs in sand (2026-11-08)
+
+Opening Mindboard (`#/` or no hash) now shows a welcome page before anything
+else: the Experts' night desert, the title, one line - *Write what you learn.
+Find your own gaps.* - and two signs of glowing sand, the two ways in:
+
+- **The Eye of Horus, knowledge** - *Your experts* (`#/experts`).
+- **A papyrus scroll and reed pen, writing** - *Your boards* (`#/boards`, the
+  board list that used to be the start page). The scroll is a new sign in
+  `signs.ts`: a gently curved sheet with its ends rolled, five lines of signs
+  (strokes, circles, uprights, hooks) and the pen across it.
+
+The signs gather grain by grain out of the dust over six seconds (by the
+clock, not by frames, so a slow or background tab gathers at the same pace),
+turn a little so their depth shows, and brighten under the pointer with
+grains rising from them. Clicked, the sign comes apart into dust while the
+camera glides into it, and its page opens 1.7 s later. The click finds its
+sign from where it lands, so a tap with no pointer move before it works.
+Side by side on a wide window; one above the other, the camera stepped back,
+on a narrow one. The pointer eats the drifting dust as on the Experts page -
+`eatSand` and the sand helpers are now shared from `scene.ts` - and the signs
+are never touched.
+
+Routes: closing a board goes back to your boards; the Experts' *Mindboard*
+crumb goes to this page. The menu's *Open my boards* opens the board list
+directly, *Talk to my experts* the Experts.
+
+193 tests.

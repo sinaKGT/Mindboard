@@ -112,7 +112,48 @@ function feather(): Pts {
   return to
 }
 
-const SIGNS: Record<string, () => Pts> = { pyramid: eye, obelisk: sun, steps: djed, pylon: scarab, ankh: feather }
+
+/** writing: a papyrus scroll, partly unrolled, lines of signs on it, and the
+ *  scribe's reed pen across it - for the boards, where you write */
+function scroll(): Pts {
+  const { to, add, curve, cylinder } = pts()
+  // the sheet, curving gently, its two ends rolled up
+  for (let k = 0; k < 800; k++) {
+    const x = -0.42 + 0.84 * R(), y = -0.32 + 0.64 * R()
+    add(x, y, 0.06 * Math.sin(x * 4.0) + (R() - 0.5) * 0.006)
+  }
+  for (const side of [-1, 1]) {
+    for (let k = 0; k < 450; k++) {
+      const a = R() * Math.PI * 2, y = -0.36 + 0.72 * R()
+      add(side * (0.46 + 0.06 * Math.cos(a)), y, 0.06 * Math.sin(side * 1.7) + 0.06 * Math.sin(a))
+    }
+  }
+  // lines of signs: short strokes, little circles and birds' hooks, brighter than the sheet
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 7; col++) {
+      const cx = -0.33 + col * 0.11, cy = 0.22 - row * 0.11, kind = (row * 7 + col * 3) % 4
+      const z = 0.06 * Math.sin(cx * 4.0) + 0.01
+      for (let k = 0; k < 50; k++) {
+        const t = R()
+        if (kind === 0) add(cx - 0.03 + 0.06 * t, cy, z)                                   // a stroke
+        else if (kind === 1) add(cx + 0.025 * Math.cos(t * 6.28), cy + 0.025 * Math.sin(t * 6.28), z)  // a circle
+        else if (kind === 2) add(cx, cy - 0.03 + 0.06 * t, z)                              // an upright
+        else add(cx - 0.03 + 0.05 * t, cy + 0.03 * Math.sin(t * 3.0), z)                   // a hook
+      }
+    }
+  }
+  // the reed pen, across the scroll, with a pointed tip
+  const pen = (t: number) => [-0.3 + 0.9 * t, -0.48 + 0.92 * t] as [number, number]
+  for (let k = 0; k < 700; k++) {
+    const t = R(), [x, y] = pen(t), r = 0.022 * (t < 0.08 ? t / 0.08 : 1), a = R() * 6.283
+    add(x + Math.cos(a) * r * 0.7, y - Math.cos(a) * r * 0.7, 0.13 + Math.sin(a) * r)
+  }
+  void curve; void cylinder
+  return to
+}
+
+const SIGNS: Record<string, () => Pts> = { pyramid: eye, obelisk: sun, steps: djed, pylon: scarab, ankh: feather,
+  eye, scroll }
 
 export function signFor(shape: string): Pts {
   return (SIGNS[shape] ?? eye)()

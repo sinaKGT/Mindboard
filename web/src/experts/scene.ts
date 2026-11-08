@@ -102,7 +102,7 @@ const FRAG = /* glsl */`
     vec3 col = mix(uColor * 0.55, uColor * 1.6 + 0.15, clamp(vGlow, 0.0, 1.0));
     gl_FragColor = vec4(col, smoothstep(0.5, 0.0, d) * vAlpha);
   }`
-const dot = (a: string) => `uniform vec3 uColor; varying float vA;
+export const dot = (a: string) => `uniform vec3 uColor; varying float vA;
   void main() { float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard;
     gl_FragColor = vec4(${a}, smoothstep(0.5, 0.0, d) * vA); }`
 
@@ -128,7 +128,7 @@ function monument(shape: string, colour: string) {
 }
 
 /** grains of light rising from the crown's tip into the sky */
-function rising(colour: string, from: number) {
+export function rising(colour: string, from: number) {
   const n = 4500, seed = new Float32Array(n)
   for (let i = 0; i < n; i++) seed[i] = Math.random()
   const g = new THREE.BufferGeometry()
@@ -181,7 +181,7 @@ function sign_(shape: string, colour: string) {
  *  a small black hole - can truly eat it: drawn in, swallowed, and a few
  *  seconds later a new grain is born somewhere else and fades in (Sand.eat). */
 const AIR = 9000
-function airSand() {
+export function airSand() {
   const pos = new Float32Array(AIR * 3), seed = new Float32Array(AIR), born = new Float32Array(AIR), heat = new Float32Array(AIR)
   for (let i = 0; i < AIR; i++) { pos.set(spawnAt(), i * 3); seed[i] = Math.random(); born[i] = -10 }
   const g = new THREE.BufferGeometry()
@@ -220,7 +220,7 @@ function drifted(b: Float32Array, i: number, s: number, t: number, out: THREE.Ve
                  b[i * 3 + 2] + Math.cos(t * (0.1 + 0.18 * fract(s * 7.7)) + s * 20) * 0.45)
 }
 
-function dunes() {
+export function dunes() {
   const n = 30000, pos = new Float32Array(n * 3)
   for (let i = 0; i < n; i++) {
     const x = (Math.random() - 0.5) * 70, z = (Math.random() - 0.5) * 50 - 6
@@ -231,6 +231,52 @@ function dunes() {
   return new THREE.Points(g, new THREE.PointsMaterial({ size: 0.03, color: 0x8a6a3c, transparent: true, opacity: 0.55,
     blending: THREE.AdditiveBlending, depthWrite: false }))
 }
+
+const _q = new THREE.Vector3(), _w = new THREE.Vector3()
+/** The black hole: grains near the pointer are drawn in, swirling; at its
+ *  centre they are eaten, and a new grain is born somewhere else a few
+ *  seconds later. Only the loose sand in the air - never the monuments. */
+export function eatSand(air: THREE.Points, camera: THREE.PerspectiveCamera, t: number, px: number, py: number) {
+  if (Math.abs(px) > 1.2 || Math.abs(py) > 1.2) return
+  const g = air.geometry, base = g.getAttribute('position').array as Float32Array
+  const seed = g.getAttribute('aSeed').array as Float32Array, born = g.getAttribute('aBorn').array as Float32Array
+  const heat = g.getAttribute('aHeat').array as Float32Array, aspect = camera.aspect, R = 0.2
+  const right = _q.setFromMatrixColumn(camera.matrixWorld, 0).clone()
+  const up = _q.setFromMatrixColumn(camera.matrixWorld, 1).clone()
+  let changed = false
+  for (let i = 0; i < AIR; i++) {
+    if (born[i] > t) continue                                   // not yet born again
+    const w = drifted(base, i, seed[i], t, _w)
+    const at = _q.copy(w).project(camera)
+    if (at.z < -1 || at.z > 1) { if (heat[i]) { heat[i] = 0; changed = true } continue }
+    const dx = (px - at.x) * aspect, dy = py - at.y, d = Math.hypot(dx, dy)
+    if (d > R) { if (heat[i]) { heat[i] = 0; changed = true } continue }
+    const pull = 1 - d / R
+    if (d < 0.012) {                                            // eaten
+      base.set(spawnAt(), i * 3)
+      born[i] = t + 1.5 + Math.random() * 4
+      heat[i] = 0
+      changed = true
+      continue
+    }
+    // drawn towards the centre, at the grain's own depth, and swirled round it
+    const target = _q.set(px, py, at.z).unproject(camera)
+    const k = 0.03 + 0.22 * pull * pull
+    const step = (target.x - w.x) * k, stepY = (target.y - w.y) * k, stepZ = (target.z - w.z) * k
+    const swirl = 0.012 * pull * w.distanceTo(camera.position)
+    base[i * 3] += step + (right.x * -dy + up.x * dx) * swirl
+    base[i * 3 + 1] += stepY + (right.y * -dy + up.y * dx) * swirl
+    base[i * 3 + 2] += stepZ + (right.z * -dy + up.z * dx) * swirl
+    heat[i] = pull * (1 - pull) * 4
+    changed = true
+  }
+  if (changed) {
+    g.getAttribute('position').needsUpdate = true
+    g.getAttribute('aBorn').needsUpdate = true
+    g.getAttribute('aHeat').needsUpdate = true
+  }
+}
+
 
 interface Piece { pts: THREE.Points; top: number; middle: number; rise: THREE.Points; sign: THREE.Points;
   call: number; show: number; label: HTMLDivElement }
@@ -245,8 +291,6 @@ export class ExpertScene {
   private experts: SceneExpert[] = []
   private ambient: THREE.Points[] = []
   private air!: THREE.Points
-  private w = new THREE.Vector3()
-  private q = new THREE.Vector3()
   private look = new THREE.Vector3()
   private camPos = new THREE.Vector3(0, 1.6, 6.5)
   private tmp = new THREE.Vector3()
@@ -380,7 +424,7 @@ export class ExpertScene {
       feed(a.material as THREE.Material)
     }
     for (const p of this.pieces) feed(p.pts.material as THREE.Material)
-    this.eat(t, px, py)
+    eatSand(this.air, this.camera, t, px, py)
     const box = this.renderer.domElement.getBoundingClientRect()
     this.pieces.forEach((p, i) => {
       const e = this.experts[i], me = i === this.current
@@ -436,50 +480,6 @@ export class ExpertScene {
     this.camera.position.copy(this.camPos)
     this.camera.lookAt(this.look)
     this.composer.render()
-  }
-
-  /** The black hole: grains near the pointer are drawn in, swirling; at its
-   *  centre they are eaten, and a new grain is born somewhere else a few
-   *  seconds later. Only the loose sand in the air - never the monuments. */
-  private eat(t: number, px: number, py: number) {
-    if (Math.abs(px) > 1.2 || Math.abs(py) > 1.2) return
-    const g = this.air.geometry, base = g.getAttribute('position').array as Float32Array
-    const seed = g.getAttribute('aSeed').array as Float32Array, born = g.getAttribute('aBorn').array as Float32Array
-    const heat = g.getAttribute('aHeat').array as Float32Array, aspect = this.camera.aspect, R = 0.2
-    const right = this.q.setFromMatrixColumn(this.camera.matrixWorld, 0).clone()
-    const up = this.q.setFromMatrixColumn(this.camera.matrixWorld, 1).clone()
-    let changed = false
-    for (let i = 0; i < AIR; i++) {
-      if (born[i] > t) continue                                   // not yet born again
-      const w = drifted(base, i, seed[i], t, this.w)
-      const at = this.q.copy(w).project(this.camera)
-      if (at.z < -1 || at.z > 1) { if (heat[i]) { heat[i] = 0; changed = true } continue }
-      const dx = (px - at.x) * aspect, dy = py - at.y, d = Math.hypot(dx, dy)
-      if (d > R) { if (heat[i]) { heat[i] = 0; changed = true } continue }
-      const pull = 1 - d / R
-      if (d < 0.012) {                                            // eaten
-        base.set(spawnAt(), i * 3)
-        born[i] = t + 1.5 + Math.random() * 4
-        heat[i] = 0
-        changed = true
-        continue
-      }
-      // drawn towards the centre, at the grain's own depth, and swirled round it
-      const target = this.q.set(px, py, at.z).unproject(this.camera)
-      const k = 0.03 + 0.22 * pull * pull
-      const step = (target.x - w.x) * k, stepY = (target.y - w.y) * k, stepZ = (target.z - w.z) * k
-      const swirl = 0.012 * pull * w.distanceTo(this.camera.position)
-      base[i * 3] += step + (right.x * -dy + up.x * dx) * swirl
-      base[i * 3 + 1] += stepY + (right.y * -dy + up.y * dx) * swirl
-      base[i * 3 + 2] += stepZ + (right.z * -dy + up.z * dx) * swirl
-      heat[i] = pull * (1 - pull) * 4
-      changed = true
-    }
-    if (changed) {
-      g.getAttribute('position').needsUpdate = true
-      g.getAttribute('aBorn').needsUpdate = true
-      g.getAttribute('aHeat').needsUpdate = true
-    }
   }
 
   dispose() {

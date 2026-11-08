@@ -2,6 +2,12 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from './api'
 import { Canvas } from './Canvas'
+// the welcome page: two signs in sand, the first thing you see (DESIGN.md 43)
+const Welcome = lazy(() => import('./experts/Welcome').then((m) => ({ default: m.Welcome }))
+  .catch((err) => {
+    if (!sessionStorage.getItem('mb_reloaded')) { sessionStorage.setItem('mb_reloaded', '1'); location.reload() }
+    throw err
+  }))
 // the Experts page brings three.js: loaded only when it is opened
 // (after an update, a tab still open asks for the old build's file: reload once to get the new one)
 const ExpertsPage = lazy(() => import('./experts/ExpertsPage').then((m) => ({ default: m.ExpertsPage }))
@@ -24,7 +30,8 @@ export default function App() {
   const setUI = useUI((s) => s.set)
   const fileRef = useRef<HTMLInputElement>(null)
   // the Experts page lives at #/experts (DESIGN.md 40)
-  const [experts, setExperts] = useState(location.hash === '#/experts')
+  // which page without a board: the welcome (''), your boards, or your experts
+  const [page, setPage] = useState(location.hash)
 
   useEffect(() => { applyTheme(settings) }, [settings])
 
@@ -32,7 +39,7 @@ export default function App() {
   // browser's back button walks out of a board the way you'd expect.
   useEffect(() => {
     const fromHash = () => {
-      setExperts(location.hash === '#/experts')
+      setPage(location.hash)
       const id = location.hash.match(/^#\/b\/([0-9A-Za-z]{26})/)?.[1] ?? null
       const current = useStore.getState().boardId
       if (id && id !== current) void useStore.getState().open(id)
@@ -44,8 +51,12 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const want = boardId ? `#/b/${boardId}` : (location.hash === '#/experts' ? '#/experts' : '')
+    // leaving a board goes back to your boards; the other pages keep their place
+    const h = location.hash
+    const want = boardId ? `#/b/${boardId}` : (h === '#/experts' || h === '#/boards' || h === '' || h === '#/'
+      ? (h === '#/' ? '' : h) : '#/boards')
     if (location.hash !== want) history.replaceState({}, '', location.pathname + want)
+    setPage(want)   // replaceState fires no hashchange
   }, [boardId])
 
   useEffect(() => {
@@ -83,7 +94,10 @@ export default function App() {
 
   return (
     <>
-      {boardId ? <Canvas /> : experts ? <Suspense fallback={null}><ExpertsPage /></Suspense> : <Launcher onImport={pickBundle} />}
+      {boardId ? <Canvas />
+        : page === '#/experts' ? <Suspense fallback={null}><ExpertsPage /></Suspense>
+        : page === '#/boards' ? <Launcher onImport={pickBundle} />
+        : <Suspense fallback={null}><Welcome /></Suspense>}
       <Palette onImport={pickBundle} />
       <input ref={fileRef} type="file" accept=".mindboard,.zip" hidden
         onChange={(e) => {

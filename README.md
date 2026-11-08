@@ -35,6 +35,10 @@ nothing installed system-wide. After that you get a menu:
 Press `1` and Enter for your boards, or `2` for your experts. Your browser opens; press Enter again in
 that window whenever you want to stop the app. Nothing needs saving by hand.
 
+Opened any other way, Mindboard starts on a welcome page: two signs of glowing
+sand gather out of the dust - the Eye of Horus for your experts, a scroll and
+reed pen for your boards. Click one to go in.
+
 ### If you prefer a terminal
 
 ```powershell
@@ -207,7 +211,7 @@ quiet or battery-saving power mode can hold the card to a fraction of its speed.
 
 ## Experts
 
-**Experts** on the start page opens a night desert where your experts stand as
+**Experts** on the board list (or the Eye on the welcome page) opens a night desert where your experts stand as
 monuments of glowing sand. An expert is a name, a sentence about what it knows,
 and the boards it draws on: it answers from those boards, in its own voice, and
 every card it cites opens on its board. Not sure who to ask? Type the question

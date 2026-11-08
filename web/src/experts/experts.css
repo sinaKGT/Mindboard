@@ -116,3 +116,15 @@
 .xp-mic { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--xp-border); font-size: 14px; }
 .xp-mic.on { border-color: #f0907a; box-shadow: 0 0 0 0 #f0907a88; animation: xpMic 1.4s ease-out infinite; }
 @keyframes xpMic { to { box-shadow: 0 0 0 12px #f0907a00; } }
+
+/* the welcome page (DESIGN.md 43) */
+.wl-title { position: absolute; top: 9vh; width: 100%; text-align: center; z-index: 5; pointer-events: none;
+  animation: xpIn 2.5s ease .5s both; }
+.wl-name { color: var(--gold); font-size: 30px; font-weight: 300; letter-spacing: .45em; text-transform: uppercase;
+  text-shadow: 0 0 24px #e8b86466; }
+.wl-line { margin-top: 10px; color: var(--xp-dim); font-size: 13px; letter-spacing: .12em; }
+.wl-door { position: absolute; transform: translate(-50%, -50%); text-align: center; cursor: pointer; z-index: 5;
+  transition: opacity .6s; }
+.wl-door-name { color: var(--xp-dim); font-size: 14px; letter-spacing: .3em; text-transform: uppercase; transition: color .4s, text-shadow .4s; }
+.wl-door-note { margin-top: 4px; color: var(--xp-faint); font-size: 11px; letter-spacing: .25em; text-transform: uppercase; }
+.wl-door.on .wl-door-name, .wl-door:hover .wl-door-name { color: var(--gold); text-shadow: 0 0 14px #e8b86488; }
