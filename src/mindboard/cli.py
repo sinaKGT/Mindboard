@@ -501,7 +501,7 @@ def ai_eval(
 
 @ai_app.command("voice")
 def ai_voice():
-    """Set up the experts' voice: Kokoro, on this computer (about 350 MB)."""
+    """Set up the experts' voice - speaking and listening, on this computer (about 510 MB)."""
     from . import voice
 
     con = _console()
