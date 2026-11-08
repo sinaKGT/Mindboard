@@ -12,22 +12,12 @@ Chat bar, expand, Explain more, remembered cards and Add to board are built.
 Worth watching in daily use: whether the drafted card's link and relationship
 are usually right, and whether the bar's light feels calm rather than busy.
 
-## 2. Retrieval step 3 — planning before retrieval
+## 2. Retrieval step 3 - measured, not adopted (DESIGN.md §37)
 
-The third of the three measured steps (DESIGN.md §30). Steps 1 (search
-engine) and 2 (reranker and graph ranking) are done.
-
-- The model plans a question before searching: split a multi-part question
-  into parts, follow a chain for multi-hop questions ("Docling is an example
-  of what, and what does that relate to?"), and decide whether the board needs
-  searching at all.
-- Show the plan in the panel, briefly.
-- **Decide the search budget per question here.** Today it is a fixed 5,000
-  tokens. Measured: with the reranker, 2,000 still sends every right card on
-  the test set and answers about 1.8 s sooner, but broad questions ("What am I
-  missing here?") would see less. The planner can give broad questions more
-  and specific ones less.
-- Measure with `mindboard ai eval` before and after, as steps 1 and 2 were.
+Planning before searching made search worse on the test set (MRR 0.94 ->
+0.87) and 1.5 s slower; multi-hop questions gained nothing. Revisit only with
+a test set rich in multi-part questions, or a planner that leaves simple
+questions alone.
 
 ## 3. Pictures that can be searched
 

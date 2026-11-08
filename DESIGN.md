@@ -2334,3 +2334,27 @@ some 2,300 relationship curves each frame; thinning or simplifying them far
 out, or drawing them on a canvas, is the next step if big flat levels matter
 (TODO.md). Boards organised in groups were never affected: the 10,000-card
 board draws 58 cards at its top level.
+
+## 37. Planning before searching - measured, and not adopted (2026-11-08)
+
+Step 3 of §30: the model plans a question before searching - one to three
+search phrases (one per part, or per link in a chain) and whether it is broad
+- and the searches are merged by reciprocal rank. Measured on the 20
+questions, against today's search (reranked, then PageRank):
+
+| | rec@10 | MRR | multi-part | multi-hop | per question |
+|---|---|---|---|---|---|
+| today's search | 0.94 | 0.94 | 0.83 | 0.89 | 0.65 s |
+| the plan's searches only | 0.87 | 0.81 | 0.92 | 0.89 | 1.76 s |
+| the question twice + the plan's | 0.95 | 0.87 | 0.92 | 0.89 | 2.16 s |
+
+Split into phrases, a question loses what made it specific, and the first
+answer ranks lower (MRR). Keeping the whole question beside the phrases wins
+back recall but not the ranking, and every question pays 1.5 s more: the plan
+itself takes 0.6 s, and the model splits almost every question, even simple
+ones. Questions that cross links gain nothing - the reranker reading cards
+with their links, and PageRank spreading from them, already follow the chain.
+It never judged a question "broad". So the planner is not used, and its code
+was removed; search was split into `score` and `fit` on the way, which stays.
+Worth trying again only with a test set where multi-part questions matter
+more, or a planner that leaves simple questions alone.

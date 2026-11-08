@@ -224,6 +224,14 @@ def search(index: BoardIndex, question: str, nodes: dict[str, dict], edges: list
     `index` must be synced to the board; `cost` is each card's size in tokens
     as it would be sent."""
     budget = BUDGET if budget is None else budget      # read now, not when imported
+    scored, used = score(index, question, nodes, edges, embedder, reranker)
+    return fit(scored, nodes, edges, cost, budget, used)
+
+
+def score(index: BoardIndex, question: str, nodes: dict[str, dict], edges: list[dict],
+          embedder: Optional[Embedder], reranker: Optional[Reranker]
+          ) -> tuple[dict[str, float], list[str]]:
+    """Every candidate card's score for one question, and what searched."""
     fused, sims, used = candidates(index, question, embedder)
     fused = {k: v for k, v in fused.items() if k in nodes}
     if not fused:                      # nothing matched at all: the board's shape is all there is
@@ -239,7 +247,12 @@ def search(index: BoardIndex, question: str, nodes: dict[str, dict], edges: list
         scored = walk(top(fused, SEEDS), nodes, edges, sims)
         for nid, s in fused.items():   # matches beyond the seeds still count, below them
             scored.setdefault(nid, s * 0.5)
+    return scored, used
 
+
+def fit(scored: dict[str, float], nodes: dict[str, dict], edges: list[dict],
+        cost: dict[str, int], budget: int, used: list[str]) -> Found:
+    """The strongest cards that fit the budget."""
     # A card costs its own text plus a line for each relationship it has with
     # a card already chosen - those lines go to the model too. Uncounted, a
     # 5,000-token search sent about 8,900 (DESIGN.md 35).
