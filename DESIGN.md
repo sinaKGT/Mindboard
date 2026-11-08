@@ -2672,3 +2672,113 @@ button instead, which looked like the option did not exist. Messages about
 the microphone used to appear only on the overview.
 
 210 tests.
+
+## 46. Experts read the question first, and offer three next questions (2026-11-08)
+
+Asked "which architecture for a RAG system for a school, where students ask
+about their lectures?", an expert answered for "a school project" and
+recommended the simplest thing, weighing nothing. It answered in one pass,
+and its rules pushed it to summarise whichever cards matched.
+
+- **A reading before the answer.** One short call works out what kind of
+  question it is (fact, explain, advice, compare, design), the person's
+  situation in one sentence in their own terms, and, for advice, comparisons
+  and designs, the 3 to 6 points that decide the answer. Points the person
+  left open are named as open, never assumed. The reading is shown above the
+  answer, so a misreading is seen at once. §47 turned it into the plan.
+- **Weighed answers** come in a fixed order: the recommendation; one line
+  per deciding point; why another approach does not fit; what would change
+  the advice. Fact questions get one to three sentences. The instructions go
+  with the question, not the system prompt, so the cached cards at the start
+  of the prompt stay put.
+- **Three next questions** end every answer, as buttons: one going deeper,
+  one putting it to use, one on a neighbouring idea from the cards. "Next:"
+  in any case is understood, and kept out of sight and out of the voice.
+- **The voice speaks while the answer is written**, one finished sentence at
+  a time, instead of after the whole answer.
+- The install test (`test_not_set_up_until_every_piece_is_there`) left 6 GB
+  in the temp folder on every run: on Windows `truncate()` writes zeros. It
+  now writes only the last byte, and the file stays sparse.
+
+Measured on RAG Deep Knowledge, the same question gave three different main
+recommendations in three runs (Naive RAG + Reranking, Hybrid Search +
+Reranking, Modular RAG): the answer is sampled at temperature 0.7, and the
+reading changed what it thought was open.
+
+## 47. A plan, run step by step, before the answer (2026-11-08)
+
+The person asked for a planner that writes the steps needed to answer a
+question - what to look up, what to work out - then runs them one after the
+other and answers from what they found. §37 measured a planner that split
+every question into search phrases: it made search worse and slower. This
+one differs in three ways: it leaves questions about one thing alone, it adds
+its searches beside the question's own instead of replacing it, and it works
+something out at every step rather than only searching.
+
+**The plan** (`ask.make_plan`). The reading of §46 now also returns up to 4
+steps. Each step has `find` (a search phrase for the cards, or "" for a step
+that only works from earlier ones), `work_out` (one sentence) and `uses` (the
+earlier step whose result it needs). Advice, compare and design questions get
+one step per option worth checking, then a step that weighs them. Fewer than
+two steps, or steps that look nothing up, count as no plan
+(`ask.clean_plan`): one look is the question's own search. A reply that
+cannot be read is logged, and the question is answered as it stands.
+
+- **Planned from what the notes hold.** Planned blind, the first plan asked
+  about embedding models, vector databases and LLMs; the boards hold none of
+  that, and all four steps came back "Not in the cards". Now the question is
+  searched first and the planner sees the titles of the 30 best-matching
+  cards. Its steps then name real cards: "Modular RAG", "Common RAG Problems
+  and Provided Solution".
+- **Two options at least.** Told "2 to 4 options", the 9B checked one. The
+  prompt now says checking one option weighs nothing, and gives an example
+  outside RAG, so it does not bias these boards.
+
+**The steps** (`experts.run_plan`). Each step searches the expert's boards
+(2,500 tokens of cards), then the model writes 1 to 5 lines of notes from
+those cards and from what the earlier steps found, citing cards. Citations of
+cards the step was not shown are removed. A step that `uses` an earlier one
+searches its phrase plus the titles of the cards that step cited: a chain is
+followed by name, with no extra model call. A weighing step has no cards and
+works from the findings above it.
+
+**The answer** is the normal streamed answer. Its cards are the question's
+own search, plus each step's phrase, plus every card the findings cite, put
+first so the answer can cite them. The findings and the weighing go with the
+question.
+
+**One run, one hold.** The plan, the steps and the answer are separate
+model calls but one question. The endpoint now streams at once and holds the
+model's single slot for the whole run (`stream_answer(hold=True)`; inside it,
+`LocalModel.stream(hold=False)`), so nothing slips in between the calls. A
+Stop given during the run stays set: every later call ends at once, and a
+new question still takes over between steps or mid-step.
+
+**On screen.** The plan appears above the answer as a checklist: waiting,
+running (pulsing), done, each with what it looked for, how many cards it
+read, and a "What it found" that opens, its citations chips like the answer's.
+While it works, the note says "Working through step 2 of 4…".
+
+Measured on RAG Deep Knowledge (10,000 cards), with the model loaded:
+
+| question | steps | plan | steps done | answer done |
+|---|---|---|---|---|
+| What is reranking? | none | — | — | 8 s |
+| Which architecture for students asking about lectures? | 4 | 4.5 s | 17-19 s | 28-31 s |
+| Add multimodal capability to that | 4 | 4.7 s | 18 s | 28 s |
+
+- The school question was asked three times with the plan; each answer
+  recommended Naive RAG + Reranking and said why Modular, self-correcting or
+  agentic RAG were not needed. Three runs is too few to call it steady, but
+  §46's three runs gave three different answers.
+- The multimodal follow-up planned from the conversation (the Naive RAG +
+  reranking pipeline it had recommended) and said plainly that the boards
+  hold nothing on multimodal approaches beyond captioning.
+- A cold start is slow because loading is: the 9.5 GB model took 4.5 minutes
+  to read from a disk shared with downloads, and the plan waits for it.
+
+Not done: the plan is not measured on the retrieval test set the way §37
+was; it is not used for Ask your board, only for experts; and a follow-up
+like "why did you choose that?" sees the earlier answer, not its plan.
+
+218 tests.

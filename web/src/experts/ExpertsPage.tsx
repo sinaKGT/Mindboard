@@ -25,11 +25,17 @@ const BEYOND_MARK = /(^[ \t]*#{1,6}[ \t]*)?(\*\*|__)?[ \t]*Beyond your board:[ \
 const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/i
 const COLOURS = ['#f0c070', '#7fd3c4', '#e9967a', '#d8c8a8', '#b4a0e8', '#8fc8f0', '#e6d36a', '#e88fb4']
 
+type Where = Record<string, { board: string; title: string }>
 /** how the expert read the question before answering (DESIGN.md 46) */
 interface Reading { kind?: string; reading?: string; weigh?: string[] }
+/** a step of its plan (DESIGN.md 47): what to look for, and what to work out from it */
+interface PlanStep { find: string; work_out: string; uses: number }
+/** a step as it runs, and what it found */
+interface StepRun { status: 'waiting' | 'running' | 'done' | 'stopped'; text?: string; where?: Where; looked_at?: number }
 
-interface Turn { role: 'user' | 'expert'; text: string; where?: Record<string, { board: string; title: string }>;
-  nexts?: string[]; reading?: Reading; status?: 'thinking' | 'writing' | 'done'; error?: string; stopped?: boolean }
+interface Turn { role: 'user' | 'expert'; text: string; where?: Where;
+  nexts?: string[]; reading?: Reading; plan?: PlanStep[]; steps?: StepRun[];
+  status?: 'thinking' | 'writing' | 'done'; error?: string; stopped?: boolean }
 
 /** where a conversation waits while you look at a card it cited */
 const RETURN = 'mb_xp_return'
@@ -48,6 +54,35 @@ const SpeakerIcon = ({ on }: { on: boolean }) => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
     <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
     {on ? <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /> : <path d="M16 9.5l5 5M21 9.5l-5 5" />}</svg>)
+
+/** the plan, as it runs: each step, waiting, running or done, with what it found */
+function Plan({ turn, onCard }: { turn: Turn; onCard: (board: string, card: string) => void }) {
+  const mark = { waiting: '\u25cb', running: '\u25cc', done: '\u2713', stopped: '\u2013' }
+  return (
+    <ol className="xp-plan">
+      {turn.plan!.map((s, j) => {
+        const run = turn.steps?.[j] ?? { status: 'waiting' as const }
+        return (
+          <li key={j} className={`xp-step is-${run.status}`}>
+            <span className="xp-step-mark">{mark[run.status]}</span>
+            <div className="xp-step-body">
+              <div className="xp-step-what">{s.work_out}</div>
+              <div className="xp-step-find">
+                {s.find ? <>looks for “{s.find}”</> : <>from the steps before</>}
+                {run.status === 'done' && run.looked_at ? <> · read {run.looked_at} cards</> : null}
+              </div>
+              {run.text ? (
+                <details className="xp-found"><summary>What it found</summary>
+                  <Said turn={{ role: 'expert', text: run.text, where: run.where, status: 'done' }} onCard={onCard} />
+                </details>
+              ) : null}
+            </div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
 
 /** an answer, laid out (Prose), its citations as chips that open their card */
 function Said({ turn, onCard }: { turn: Turn; onCard: (board: string, card: string) => void }) {
@@ -287,7 +322,9 @@ export function ExpertsPage() {
       .map((t) => ({ role: t.role === 'user' ? 'user' : 'assistant', text: t.text }))
     stick.current = true
     setTurns((ts) => [...ts, { role: 'user', text: question }, { role: 'expert', text: '', status: 'thinking' }])
-    const patch = (p: Partial<Turn>) => setTurns((ts) => { const c = ts.slice(); c[c.length - 1] = { ...c[c.length - 1], ...p }; return c })
+    const update = (f: (t: Turn) => Partial<Turn>) =>
+      setTurns((ts) => { const c = ts.slice(); c[c.length - 1] = { ...c[c.length - 1], ...f(c[c.length - 1]) }; return c })
+    const patch = (p: Partial<Turn>) => update(() => p)
     const ctl = new AbortController(); controller.current = ctl
     setBusy(true); s.thinking = true
     voice.current.stop()
@@ -299,7 +336,17 @@ export function ExpertsPage() {
     let started = false
     try {
       await api.askExpert(e.id, { question, history }, (kind, data) => {
-        if (kind === 'context') patch({ where: data.where, reading: data.reading })
+        if (kind === 'plan') {
+          // its plan, shown before it looks anything up (DESIGN.md 47)
+          patch({ reading: data, plan: data.steps?.length ? data.steps : undefined,
+                  steps: data.steps?.map(() => ({ status: 'waiting' as const })) })
+        } else if (kind === 'step') {
+          update((t) => {
+            const steps = (t.steps ?? []).slice()
+            steps[data.i] = { status: data.status, text: data.text, where: data.where, looked_at: data.looked_at }
+            return { steps }
+          })
+        } else if (kind === 'context') patch({ where: data.where, reading: data.reading })
         else if (kind === 'text') {
           text += data.text
           s.thinking = false
@@ -310,7 +357,7 @@ export function ExpertsPage() {
           }
         } else if (kind === 'done') {
           const nexts: string[] = data.nexts?.length ? data.nexts : data.next ? [data.next] : []
-          patch({ text: data.answer, nexts, status: 'done' })
+          patch({ text: data.answer, nexts, status: 'done', stopped: data.stopped || undefined })
           if (speaking && (text || data.answer)) {
             if (!started) voice.current.begin(name)
             voice.current.end(text || data.answer, nexts[0] ? `Would you like to know: ${nexts[0]}` : '')
@@ -416,13 +463,23 @@ export function ExpertsPage() {
               ? <div key={i} className="xp-q">{t.text}</div>
               : (
                 <div key={i} className="xp-a">
-                  {t.reading?.weigh?.length ? (
-                    <div className="xp-reading" title="How the expert read your question before answering">
-                      <span className="xp-reading-head">Read as</span> {t.reading.reading}
-                      <div className="xp-weigh">{t.reading.weigh.map((w, j) => <span key={j}>{w}</span>)}</div>
+                  {t.reading?.weigh?.length || t.plan?.length ? (
+                    <div className="xp-reading" title="How the expert read your question, and its plan, before answering">
+                      {t.reading?.reading ? <><span className="xp-reading-head">Read as</span> {t.reading.reading}</> : null}
+                      {t.reading?.weigh?.length ? (
+                        <div className="xp-weigh">{t.reading.weigh.map((w, j) => <span key={j}>{w}</span>)}</div>
+                      ) : null}
+                      {t.plan?.length ? <><div className="xp-reading-head xp-plan-head">Its plan</div>
+                        <Plan turn={t} onCard={goToCard} /></> : null}
                     </div>
                   ) : null}
-                  {t.status === 'thinking' ? <div className="xp-note">Thinking…</div> : <Said turn={t} onCard={goToCard} />}
+                  {t.status === 'thinking' ? (
+                    <div className="xp-note">{(() => {
+                      const at = t.steps?.findIndex((r) => r.status === 'waiting' || r.status === 'running') ?? -1
+                      return t.plan?.length && at >= 0 ? `Working through step ${at + 1} of ${t.plan.length}…`
+                        : t.plan?.length ? 'Writing the answer…' : 'Thinking…'
+                    })()}</div>
+                  ) : <Said turn={t} onCard={goToCard} />}
                   {t.stopped ? <div className="xp-note">Stopped</div> : null}
                   {t.error ? <div className="xp-error">{t.error}</div> : null}
                   {adding === i ? (

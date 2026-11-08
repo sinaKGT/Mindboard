@@ -589,3 +589,27 @@ def test_pictures_are_described_only_while_the_model_is_loaded_and_free(dd, boar
     finally:
         indexer.stop()
         BoardIndex.drop(dd, board["id"])
+
+
+def test_a_run_holds_the_model_once_and_a_stop_holds_for_the_rest_of_it(model):
+    """An expert's plan, steps and answer are one run (DESIGN.md 47): the run
+    takes the slot, its calls (hold=False) neither take it again nor clear a
+    Stop given earlier in the run."""
+    m = llm.LocalModel(model, start_timeout=20)
+    hi = [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+    try:
+        assert m._asking.acquire(blocking=False)
+        m._cancel.clear()
+        first = list(m.stream(hi, hold=False))
+        assert first[-1]["type"] == "done" and not first[-1]["stopped"]
+        assert m._asking.locked(), "the run still holds the slot"
+        m.cancel()
+        after = list(m.stream(hi, hold=False))
+        assert after == [{"type": "done", "stopped": True, "tokens": 0, "tokens_per_second": None,
+                          "prompt_tokens": 0}], "nothing more is asked once stopped"
+        assert m.cancelled()
+        m._asking.release()
+        again = list(m.stream(hi))
+        assert again[-1]["type"] == "done" and not again[-1]["stopped"], "a new question starts afresh"
+    finally:
+        m.stop()

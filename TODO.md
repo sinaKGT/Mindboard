@@ -12,12 +12,14 @@ Chat bar, expand, Explain more, remembered cards and Add to board are built.
 Worth watching in daily use: whether the drafted card's link and relationship
 are usually right, and whether the bar's light feels calm rather than busy.
 
-## 2. Retrieval step 3 - measured, not adopted (DESIGN.md §37)
+## 2. Planning - for experts, done; for search, measured and not adopted (DESIGN.md §37, §47)
 
 Planning before searching made search worse on the test set (MRR 0.94 ->
-0.87) and 1.5 s slower; multi-hop questions gained nothing. Revisit only with
-a test set rich in multi-part questions, or a planner that leaves simple
-questions alone.
+0.87) and 1.5 s slower; multi-hop questions gained nothing. Experts now plan
+the other way (§47): simple questions are left alone, the steps search beside
+the question and work something out at each step, and the answer is written
+from their findings. Still open: measure the planned context on the test set
+as §37 did, and decide whether Ask your board should plan too.
 
 ## 3. Pictures that can be searched - done (DESIGN.md §38-39)
 

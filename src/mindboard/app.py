@@ -391,11 +391,11 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             return model, ctx, model.memory_note()
 
         model, ctx, warning = await run_in_threadpool(prepare)
-        return stream_answer(model, ctx, body.question, history, body.think, warning, request,
-                             after=lambda: indexer.want(bid))
+        return stream_answer(model, lambda: answer_events(model, ctx, body.question, history, body.think),
+                             warning, request, after=lambda: indexer.want(bid))
 
-    def stream_answer(model, ctx, question: str, history: list, think: bool, warning,
-                      request: Request, after=None) -> StreamingResponse:
+    def stream_answer(model, make, warning, request: Request, after=None,
+                      hold: bool = False) -> StreamingResponse:
         """An answer as server-sent events - for a board and for an expert alike.
 
         The answer is made on its own thread and handed over through a queue.
@@ -404,21 +404,31 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         connection waited forever, nothing pulled the next piece, and the model
         sat mid-answer holding the one slot, so every later question was told
         "still answering". Now the response can stall without stalling the
-        model, and Stop reaches the model directly (ask/stop)."""
-        from starlette.concurrency import run_in_threadpool
+        model, and Stop reaches the model directly (ask/stop).
 
-        from .ask import answer_events
+        `make` gives the events. hold=True: they are a run of model calls - an
+        expert's plan, its steps and the answer (DESIGN.md 47) - and the model
+        is held for the whole run, here, rather than call by call."""
+        from starlette.concurrency import run_in_threadpool
 
         loading = not model.running()
         pieces: "queue.Queue[Optional[dict]]" = queue.Queue()
 
         def produce() -> None:
+            held = False
             try:
-                for item in answer_events(model, ctx, question, history, think):
+                if hold:
+                    held = model._asking.acquire(timeout=10)
+                    if not held:
+                        raise RuntimeError("still answering the last question")
+                    model._cancel.clear()
+                for item in make():
                     pieces.put(item)
-            except Exception as exc:     # ModelError, ModelBusy: said, not thrown
+            except Exception as exc:     # ModelError, ModelBusy, ExpertError: said, not thrown
                 pieces.put({"event": "error", "message": str(exc)})
             finally:
+                if held:
+                    model._asking.release()
                 pieces.put(None)
                 if after is not None:
                     after()              # e.g. a moment to describe pictures, the model free
@@ -501,8 +511,6 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         Streams like a board's answer. Reads only."""
         from starlette.concurrency import run_in_threadpool
 
-        from .ask import AskError, check_fits
-
         expert = expert_or_404(eid)
         history = [t.model_dump() for t in body.history]
 
@@ -521,29 +529,26 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                     time.sleep(0.05)
                 else:
                     raise HTTPException(409, "still answering the last question")
-            # read the question first (DESIGN.md 46): what kind, the person's
-            # situation, what decides the answer - while the model is free
-            from .ask import analyse
-            reading: dict = {}
-            if model._asking.acquire(blocking=False):
-                try:
-                    reading = analyse(model, body.question, history)
-                finally:
-                    model._asking.release()
-            try:
-                emb = search_model("embed")
-                ctx, lib = experts_mod.context(dd, expert, body.question, history, emb,
-                                               emb.inst.embedder.name if emb else "",
-                                               search_model("rerank"), reading)
-                check_fits(ctx, body.question, history, body.think)
-            except (experts_mod.ExpertError, AskError) as exc:
-                raise HTTPException(400, str(exc))
+            emb = search_model("embed")
+            lib = experts_mod.library(dd, expert, emb, emb.inst.embedder.name if emb else "")
+            if not lib.nodes:
+                raise HTTPException(400, "this expert's boards have no cards yet")
+            return model, emb, lib, model.memory_note()
+
+        model, emb, lib, warning = await run_in_threadpool(prepare)
+        reranker = search_model("rerank")
+
+        def run():
+            # planned (DESIGN.md 47): the plan, its steps and the answer, streamed
+            # as they happen; anything that goes wrong on the way is said as an error
+            yield from experts_mod.answer(model, dd, expert, lib, body.question, history, emb,
+                                          emb.inst.embedder.name if emb else "", reranker, body.think)
+
+        def after():
             for bid in lib.indexes:
                 indexer.want(bid)
-            return model, ctx, model.memory_note()
 
-        model, ctx, warning = await run_in_threadpool(prepare)
-        return stream_answer(model, ctx, body.question, history, body.think, warning, request)
+        return stream_answer(model, run, warning, request, after=after, hold=True)
 
     # --------------------------------------------------------------- voice --
     @app.get("/api/voice")

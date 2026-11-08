@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import io
+import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -21,6 +22,8 @@ from .assets import resolve
 from .search_index import BoardIndex, PictureNotes
 from .ops import read_graph
 from .paths import DataDir
+
+log = logging.getLogger("mindboard.ask")
 
 MAX_SIDE = 1024            # pictures are shrunk to this; larger costs time, not insight
 CONTEXT_TOKENS = 32768     # what the model is started with (llm.LocalModel)
@@ -82,21 +85,29 @@ How to answer:
    to use, one on a neighbouring idea from the cards."""
 
 
-# ------------------------------------------------- reading the question --
+# ------------------------------------------------------ planning the answer --
 #
-# DESIGN.md 46. Asked "which architecture for a RAG system for a school,
+# DESIGN.md 46-47. Asked "which architecture for a RAG system for a school,
 # where students ask about their lectures?", an expert answered for "a school
-# project" and recommended the simplest thing, weighing nothing. It answered in
+# project" and recommended the simplest thing, weighing nothing: it answered in
 # one pass, its rules pushing it to summarise the cards that matched. Now it
-# first reads the question: what kind it is, the person's situation in their
-# own terms, and - when it asks for advice, a comparison or a design - the
-# points of that situation that decide the answer. The answer is then asked to
-# weigh the cards' options against each point. The reading is shown, so a
-# misreading is seen at once.
+# first plans. It reads the question - what kind it is, the person's situation
+# in their own terms, the points that decide the answer - and, when one search
+# cannot answer it, writes the steps to take first: what to find in the cards
+# and what to work out from it, one step per look. The steps are run in turn
+# (experts.run_plan), each seeing what the earlier ones found, and the answer is
+# written from their findings. The plan is shown as it runs, so a misreading is
+# seen at once.
+#
+# A question about one thing gets no steps and is answered as before: the
+# planner of DESIGN.md 37 split every question into phrases and made search
+# worse, so here the steps are added beside the question's own search, never
+# instead of it, and a single step - no better than that search - is dropped.
 
-ANALYSE = """You read a person's question closely before an expert answers it.
-Reply with JSON only, no other text:
-{"kind": "...", "reading": "...", "weigh": ["..."], "look_up": ["..."]}
+PLAN = """You plan how an expert will answer a person's question from their
+notes (the cards) before the answer is written. Reply with JSON only:
+{"kind": "...", "reading": "...", "weigh": ["..."],
+ "steps": [{"find": "...", "work_out": "...", "uses": 0}]}
 
 - kind: "fact" (what is, define, recall), "explain" (how or why), "advice"
   (what should they do or choose, for their situation), "compare" (which of
@@ -112,53 +123,145 @@ Reply with JSON only, no other text:
   left open, name it as an open point ("how many courses - unknown") rather
   than assume it. Never add a budget, deadline or limit they did not give.
   Short phrases. [] otherwise.
-- look_up: up to 2 short search phrases for things a good answer must cover
-  that the question's own words would not find. [] if none."""
+- steps: what must be looked up and worked out, in order, before the answer
+  can be written - one step for each separate look in the notes. Plan from
+  WHAT THE NOTES HOLD: an option worth checking is one the notes name, called
+  by the name they give it; never plan a step for something they do not hold.
+  Only when a single search cannot answer the question:
+    * several parts: one step per part;
+    * a chain - find one thing, then what it leads to: the later step names
+      the earlier one in "uses";
+    * advice, compare or design: one step for each option the notes name
+      that could fit (2 or 3 of them - never just one: an answer that checks
+      one option has weighed nothing), and a last step that weighs them
+      against the points above.
+  A fact or an explanation of one thing needs no steps: []. At most 4 steps.
+    find: a short search phrase for the notes that hold it - its specific
+      names and terms, not the whole question. "" for a step that only works
+      from the earlier steps, like the weighing.
+    work_out: what to work out, in one short sentence.
+    uses: the number of the earlier step whose result it needs (1 is the
+      first), or 0.
 
+For example, asked "which database should our clinic use for patient
+records?" (design) with notes titled "PostgreSQL", "MongoDB", "Backups" and
+"Indexes", the steps are one per option the notes hold - not one per topic -
+and then the weighing:
+  {"find": "PostgreSQL", "work_out": "Does PostgreSQL fit a clinic's patient records?", "uses": 0},
+  {"find": "MongoDB", "work_out": "Does MongoDB fit them?", "uses": 0},
+  {"find": "", "work_out": "Weigh the two against the deciding points.", "uses": 0}
+and "what is a foreign key?" (fact) gets "steps": []."""
+
+STEP_MARK = "STEP"
 KINDS = ("fact", "explain", "advice", "compare", "design")
 WEIGHED = ("advice", "compare", "design")
+MAX_STEPS = 4
 
 
-def analyse(model, question: str, history: Optional[list[dict]] = None) -> dict:
-    """The question, read before it is answered: {kind, reading, weigh,
-    look_up} - or {} if the model's reply cannot be used."""
+def collect(model, messages: list[dict], max_tokens: int, temperature: float) -> tuple[str, bool]:
+    """One reply, whole, inside a run that already holds the model (hold=False):
+    the reply's text, and whether it was stopped."""
+    text, stopped = [], False
+    for ev in model.stream(messages, max_tokens=max_tokens, think=False,
+                           temperature=temperature, hold=False):
+        if ev["type"] == "text":
+            text.append(ev["text"])
+        elif ev["type"] == "done":
+            stopped = bool(ev.get("stopped"))
+    return "".join(text), stopped
+
+
+def make_plan(model, question: str, history: Optional[list[dict]] = None,
+              titles: Optional[list[str]] = None) -> dict:
+    """The question, read and planned before it is answered: {kind, reading,
+    weigh, steps} - or {} if the model's reply cannot be used, and the
+    question is then answered as it stands. `titles`: the cards that best
+    match the question, so the plan is made from what the notes hold rather
+    than blind - planned blind, it asked for embedding models and vector
+    databases the notes never mention, and every step came back empty."""
     convo = "\n".join(f"{t.get('role')}: {str(t.get('text', ''))[:300]}"
                       for t in (history or [])[-4:] if str(t.get("text", "")).strip())
-    prompt = (f"CONVERSATION SO FAR\n{convo}\n\n" if convo else "") + f"QUESTION\n{question.strip()}"
+    held = "\n".join(f"- {t}" for t in dict.fromkeys(titles or []) if t.strip())
+    prompt = ((f"CONVERSATION SO FAR\n{convo}\n\n" if convo else "")
+              + (f"WHAT THE NOTES HOLD (titles of the cards that best match)\n{held}\n\n" if held else "")
+              + f"QUESTION\n{question.strip()}")
+    reply = ""
     try:
-        reply = model.chat([{"role": "system", "content": ANALYSE}, {"role": "user", "content": prompt}],
-                           max_tokens=350, think=False, temperature=0.2)["text"]
+        reply, stopped = collect(model, [{"role": "system", "content": PLAN},
+                                         {"role": "user", "content": prompt}],
+                                 max_tokens=600, temperature=0.1)
+        if stopped:
+            return {}
         got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
-    except Exception:
+    except Exception as exc:
+        # answered as it stands - but said, so a planner that keeps failing is seen
+        log.warning("the plan could not be read (%s): %r", exc.__class__.__name__, reply[:400])
         return {}
+    return clean_plan(got) if isinstance(got, dict) else {}
 
+
+def clean_plan(got: dict) -> dict:
+    """What the planner said, kept to what can be run."""
     def phrases(v, n):
         return [str(x).strip()[:120] for x in (v if isinstance(v, list) else []) if str(x).strip()][:n]
 
     kind = str(got.get("kind", "")).strip().lower()
     kind = kind if kind in KINDS else "explain"
+    steps: list[dict] = []
+    for s in got.get("steps") if isinstance(got.get("steps"), list) else []:
+        if not isinstance(s, dict):
+            continue
+        find = " ".join(str(s.get("find") or "").split())[:120]
+        work = " ".join(str(s.get("work_out") or "").split())[:200]
+        if not (find or work):
+            continue
+        try:
+            uses = int(s.get("uses") or 0)
+        except (TypeError, ValueError):
+            uses = 0
+        steps.append({"find": find, "work_out": work or f"What the cards say about {find}.",
+                      "uses": uses if 0 < uses <= len(steps) else 0})
+    steps = steps[:MAX_STEPS]
+    if len(steps) < 2 or not any(s["find"] for s in steps):
+        steps = []          # one look is the question's own search (DESIGN.md 37)
     return {"kind": kind, "reading": str(got.get("reading", "")).strip()[:300],
-            "weigh": phrases(got.get("weigh"), 6) if kind in WEIGHED else [],
-            "look_up": phrases(got.get("look_up"), 2)}
+            "weigh": phrases(got.get("weigh"), 6) if kind in WEIGHED else [], "steps": steps}
 
 
 LENGTH = {"fact": "Answer in one to three sentences, then the three NEXT: lines.",
           "explain": "Explain it clearly, with a short example if it helps, then the three NEXT: lines."}
 
 
+def findings_note(plan: dict) -> str:
+    """What the steps found, said with the question for the answer to build on."""
+    found = plan.get("findings") or []
+    if not found:
+        return ""
+    steps = plan.get("steps") or []
+    parts = [f"{f['i'] + 1}. {steps[f['i']]['work_out'] if f['i'] < len(steps) else ''}\n{f['text']}"
+             for f in found]
+    return ("\n\n(WHAT YOUR STEPS FOUND - you looked these up before answering:\n\n"
+            + "\n\n".join(parts)
+            + "\n\nBuild the answer on these findings and cite the cards they cite. Where a step "
+              "found nothing in the cards, say so rather than fill the gap silently. Do not list "
+              "the steps themselves.)")
+
+
 def weighing(reading: dict) -> str:
-    """What the answer is asked to do with the reading - said with the
-    question, so the cached start of the prompt stays put."""
+    """What the answer is asked to do with the plan - said with the question,
+    so the cached start of the prompt stays put."""
+    note = findings_note(reading)
     if not reading.get("weigh"):
-        return f"\n\n({LENGTH[reading['kind']]})" if reading.get("kind") in LENGTH else ""
+        return note + (f"\n\n({LENGTH[reading['kind']]})" if reading.get("kind") in LENGTH else "")
     points = "\n".join(f"- {w}" for w in reading["weigh"])
-    return (f"\n\n(You read this as: {reading.get('reading', '')}\n"
-            f"What decides the answer:\n{points}\n"
-            "Answer briefly, in this order: your recommendation, in one or two sentences; why - "
-            "one short line for each point above, saying how the recommended approach meets it; "
-            "for an approach that does not fit, one line on why not; then one line on what would "
-            "change this recommendation. Do not open by restating the question or mentioning the "
-            "cards. End with the three NEXT: lines as always.)")
+    return note + (
+        f"\n\n(You read this as: {reading.get('reading', '')}\n"
+        f"What decides the answer:\n{points}\n"
+        "Answer briefly, in this order: your recommendation, in one or two sentences; why - "
+        "one short line for each point above, saying how the recommended approach meets it; "
+        "for an approach that does not fit, one line on why not; then one line on what would "
+        "change this recommendation. Do not open by restating the question or mentioning the "
+        "cards. End with the three NEXT: lines as always.)")
 
 
 class AskError(ValueError):
@@ -187,7 +290,8 @@ class Context:
     persona: str = ""                      # an expert's name and brief (experts.py)
     # for an expert: each card's board and title, so a citation can open it
     where: dict = field(default_factory=dict)
-    # an expert's reading of the question before answering (DESIGN.md 46)
+    # an expert's plan for the question - its reading, steps and what they
+    # found - made before answering (DESIGN.md 46-47)
     reading: dict = field(default_factory=dict)
 
     @property
@@ -434,7 +538,7 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
 
 def check_fits(ctx: Context, question: str, history: list[dict], think: bool) -> int:
     """Refuse up front rather than let the model silently drop the start."""
-    used = (ctx.tokens + estimate(SYSTEM) + estimate(question)
+    used = (ctx.tokens + estimate(SYSTEM) + estimate(question) + estimate(weighing(ctx.reading))
             + sum(estimate(str(t.get("text", ""))) for t in history))
     room = CONTEXT_TOKENS - ANSWER_TOKENS - (THINKING_TOKENS if think else 0)
     if used > room:
@@ -524,9 +628,10 @@ def check_citations(answer: str, allowed: set[str]) -> dict:
 
 
 def answer_events(model, ctx: Context, question: str, history: list[dict],
-                  think: bool = False) -> Iterator[dict]:
+                  think: bool = False, hold: bool = True) -> Iterator[dict]:
     """Everything the person sees, in order: what went in, the thinking, the
-    words as they come, and finally the checked answer."""
+    words as they come, and finally the checked answer. hold=False inside a
+    run that already holds the model - an expert's plan and steps (47)."""
     used = check_fits(ctx, question, history, think)
     yield {"event": "context", "cards": ctx.cards, "pictures": len(ctx.pictures), "tokens": used,
            "whole": ctx.whole, "pictures_left_out": ctx.pictures_left_out,
@@ -536,7 +641,7 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     timings: dict = {}
     for ev in model.stream(messages(ctx, question, history),
                            max_tokens=ANSWER_TOKENS + (THINKING_TOKENS if think else 0),
-                           think=think):
+                           think=think, hold=hold):
         if ev["type"] == "progress":
             yield {"event": "progress", "total": ev["total"], "cached": ev["cached"],
                    "done": ev["done"]}

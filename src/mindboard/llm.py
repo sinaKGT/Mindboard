@@ -1158,19 +1158,33 @@ class LocalModel:
         before its next piece and hangs up on llama-server, which stops."""
         self._cancel.set()
 
+    def cancelled(self) -> bool:
+        """Whether a Stop came - between the calls of one run, a plan's steps."""
+        return self._cancel.is_set()
+
     def stream(self, messages: list[dict], *, max_tokens: int = 1024, think: bool = False,
-               temperature: float = 0.7) -> Iterator[dict]:
+               temperature: float = 0.7, hold: bool = True) -> Iterator[dict]:
         """The answer as it is written: {"type": "thinking"|"text", "text"} for
         each piece, then {"type": "done", ...timings}.
 
         Closing the generator part-way closes the connection, and llama-server
         stops generating for a question nobody is waiting on any more.
+
+        hold=False: the caller already holds the one question slot for a run of
+        calls - a plan, its steps and the answer (DESIGN.md 47) - so this
+        neither takes it nor clears a Stop given earlier in the run: once
+        stopped, every later call of the run ends at once.
         """
         import httpx
 
-        if not self._asking.acquire(blocking=False):
-            raise ModelBusy("still answering the last question")
-        self._cancel.clear()
+        if hold:
+            if not self._asking.acquire(blocking=False):
+                raise ModelBusy("still answering the last question")
+            self._cancel.clear()
+        elif self._cancel.is_set():
+            yield {"type": "done", "stopped": True, "tokens": 0, "tokens_per_second": None,
+                   "prompt_tokens": 0}
+            return
         try:
             self.start()
             with self._lock:
@@ -1228,7 +1242,8 @@ class LocalModel:
                     self.busy -= 1
                     self.last_used = time.time()
         finally:
-            self._asking.release()
+            if hold:
+                self._asking.release()
 
 
 class SearchModel(LocalModel):
