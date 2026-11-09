@@ -34,6 +34,32 @@ update_environment() {
   fi
 }
 
+# The interface is built from web/ into src/mindboard/web/, which git does not
+# carry (it is generated). So a fresh copy has none, and a pull can leave it
+# behind the code. Build it when it is missing or older than web/'s files.
+INTERFACE="src/mindboard/web/index.html"
+interface_stale() {
+  [ ! -f "$INTERFACE" ] && return 0
+  [ -n "$(find web/src web/index.html web/package.json -newer "$INTERFACE" -print -quit 2>/dev/null)" ]
+}
+build_interface() {
+  if ! interface_stale; then
+    say "interface     up to date"
+    return
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    if [ -f "$INTERFACE" ]; then
+      say "interface     older than the code - install Node.js to rebuild it (brew install node)"
+      return
+    fi
+    fail "The interface needs building, which needs Node.js. Install it (on a Mac: brew install node), then run this again."
+  fi
+  say "interface     building (a minute the first time)"
+  ./build.sh >/dev/null 2>&1 || fail "The interface did not build. Run ./build.sh to see why."
+  [ -f "$INTERFACE" ] || fail "The interface did not build. Run ./build.sh to see why."
+  say "interface     built"
+}
+
 # An install can look successful and still be unusable - a stale or half-written
 # environment leaves an empty `mindboard` folder in site-packages, and every
 # submodule disappears. Prove it runs before saying it worked.
@@ -49,7 +75,7 @@ for candidate in python3 python; do
     fi
   fi
 done
-[ -n "$PY" ] || fail "Python 3.10 or newer is required. Install it, then run this again."
+[ -n "$PY" ] || fail "Python 3.10 or newer is required (a Mac's own python3 is 3.9). Install it - on a Mac: brew install python@3.12 - then run this again."
 say "python        $($PY --version 2>&1)"
 
 if usable; then update_environment; else new_environment; fi
@@ -60,6 +86,7 @@ if ! usable; then
   usable || fail "Mindboard installed but will not run. Delete '$VENV' and run this again."
 fi
 say "packages      installed and verified"
+build_interface
 
 printf '\n'
 "$VENV/bin/mindboard" install || true

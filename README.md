@@ -48,7 +48,14 @@ practise next.
 Linux).
 
 The first run sets everything up: an isolated environment inside this folder,
-nothing installed system-wide. After that you get a menu:
+nothing installed system-wide. On a Mac it builds the interface too, so it
+needs Python 3.10+ and Node.js first (a Mac's own `python3` is 3.9):
+
+```bash
+brew install python@3.12 node
+```
+
+After that you get a menu:
 
 ```
   ● Mindboard 0.1.0
