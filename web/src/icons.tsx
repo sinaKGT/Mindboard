@@ -2,6 +2,13 @@ const P = (d: string, extra?: Record<string, any>) => ({ d, ...extra })
 
 const PATHS: Record<string, ReturnType<typeof P>[]> = {
   plus: [P('M8 3.5v9M3.5 8h9')],
+  // the ankh: the chat bar, as for the experts
+  ankh: [P('M8 7.3C6.2 6.1 5.5 5 5.5 3.9 5.5 2.5 6.6 1.5 8 1.5s2.5 1 2.5 2.4c0 1.1-.7 2.2-2.5 3.4Z'),
+         P('M3.8 8.4h8.4'), P('M8 7.3v7.2')],
+  // the chat panel along the left edge, or back in the middle
+  'dock-left': [P('M2.5 3.5h11v9h-11z'), P('M6.5 3.5v9')],
+  'dock-center': [P('M2.5 3.5h11v9h-11z'), P('M5.5 6.5h5v3h-5z')],
+  bulb: [P('M6.2 12.3h3.6M6.7 14h2.6'), P('M8 2.4a3.8 3.8 0 0 0-2.3 6.8c.5.4.8.9.8 1.5v.2h3v-.2c0-.6.3-1.1.8-1.5A3.8 3.8 0 0 0 8 2.4Z')],
   trash: [P('M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8.2a1 1 0 0 0 1 .8h2.8a1 1 0 0 0 1-.8L11 4.5')],
   branch: [P('M4 4v3.5a2 2 0 0 0 2 2h6'), P('M9.5 7l2.5 2.5-2.5 2.5')],
   enter: [P('M6 3.5h4.5A1.5 1.5 0 0 1 12 5v6a1.5 1.5 0 0 1-1.5 1.5H6'), P('M3.5 8h5M6.5 6l2 2-2 2')],

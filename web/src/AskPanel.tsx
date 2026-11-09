@@ -252,9 +252,17 @@ export function AskPanel() {
   const context = useAsk((s) => s.context)
   const turns = useAsk((s) => s.turns)
   const busy = useAsk((s) => s.busy)
+  const side = useAsk((s) => s.side)
+  // the bar rests as a small pill; under the pointer, focused, holding a draft,
+  // answering, or with the conversation open, it is the full bar
+  const [hot, setHot] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const cool = useRef(0)
   const think = useAsk((s) => s.think)
   const nodes = useStore((s) => s.nodes)
   const [draft, setDraft] = useState('')
+  const awake = hot || focused || !!draft.trim() || busy || open
+  useEffect(() => () => window.clearTimeout(cool.current), [])
   const box = useRef<HTMLTextAreaElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const ask = useAsk.getState()
@@ -272,13 +280,26 @@ export function AskPanel() {
     if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
   }
 
-  // grow the box with what is typed, up to a few lines
-  useEffect(() => {
+  // grow the box with what is typed, up to a few lines - and again whenever
+  // its width changes: the bar opens from a small pill, and text measured
+  // while it is narrow wraps into lines it no longer needs once it is wide
+  const fit = () => {
     const el = box.current
     if (!el) return
     el.style.height = '0px'
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`
-  }, [draft])
+  }
+  useEffect(fit, [draft])
+  useEffect(() => {
+    const el = box.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let width = el.clientWidth
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth !== width) { width = el.clientWidth; fit() }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const present = context.filter((id) => nodes[id])
   const everything = Object.keys(nodes).length
@@ -304,11 +325,23 @@ export function AskPanel() {
     <>
       {open && expanded ? <div className="ask-dim" onClick={() => ask.setExpanded(false)} /> : null}
       {open ? (
-        <aside className={`ask-sheet nodrag nopan ${expanded ? 'expanded' : ''}`}
+        <aside className={`ask-sheet nodrag nopan ${expanded ? 'expanded' : ''} ${side === 'left' && !expanded ? 'left' : ''}`}
           aria-label="Ask your board" onKeyDown={escape}>
           <header className="ask-head">
             <span className="ask-title"><Icon name="ask" size={14} /> Ask your board</span>
             <span className="ask-head-actions">
+              <button className="icon-btn" title="Clear the conversation" disabled={!turns.length}
+                onClick={() => {
+                  if (confirm('Clear this conversation? Its questions and answers are removed; your cards are not touched.')) ask.forget()
+                }}>
+                <Icon name="trash" size={14} />
+              </button>
+              {!expanded ? (
+                <button className="icon-btn" title={side === 'left' ? 'Move the chat to the middle' : 'Move the chat to the left'}
+                  onClick={() => ask.setSide(side === 'left' ? 'center' : 'left')}>
+                  <Icon name={side === 'left' ? 'dock-center' : 'dock-left'} size={14} />
+                </button>
+              ) : null}
               <button className="icon-btn" title={expanded ? 'Back to the board' : 'Expand the chat'}
                 onClick={() => ask.setExpanded(!expanded)}>
                 <Icon name={expanded ? 'shrink' : 'fit'} size={14} />
@@ -378,40 +411,50 @@ export function AskPanel() {
         </aside>
       ) : null}
 
-      {/* the one way in: always at the bottom of the board */}
-      <div className={`ask-bar nodrag nopan ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''}`}
-        onKeyDown={escape}>
+      {/* the one way in: always at the bottom of the board. At rest a small
+          "Ask me" pill; it opens to the full bar under the pointer, while you
+          type, and while a conversation or an answer is going */}
+      <div className={`ask-bar nodrag nopan ${awake ? 'awake' : 'rest'} ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''}`}
+        onKeyDown={escape}
+        onMouseEnter={() => { window.clearTimeout(cool.current); setHot(true) }}
+        onMouseLeave={() => { cool.current = window.setTimeout(() => setHot(false), 160) }}
+        onClick={() => box.current?.focus()}>
+        <span className="bar-mark" aria-hidden><Icon name="ankh" size={15} /></span>
         <textarea ref={box} rows={1} value={draft}
-          placeholder={explaining ? 'Ask for an explanation…'
+          placeholder={!awake ? (everything ? 'Ask me' : 'No cards yet')
+            : explaining ? 'Ask for an explanation…'
             : present.length ? 'Ask about these cards…'
-            : everything ? 'Ask your board…' : 'This board has no cards yet'}
+            : everything ? 'Ask your board anything…' : 'This board has no cards yet'}
           disabled={everything === 0}
-          onFocus={() => { if (turns.length && !open) ask.setOpen(true) }}
+          onFocus={() => { setFocused(true); if (turns.length && !open) ask.setOpen(true) }}
+          onBlur={() => setFocused(false)}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(draft) }
           }} />
-        {expanded && open ? (
-          <label className="bar-toggle"
-            title="Answer from this conversation, with examples, without searching the board">
-            <input type="checkbox" checked={explain} onChange={(e) => ask.setExplain(e.target.checked)} />
-            Explain more
+        <div className="bar-tools">
+          {expanded && open ? (
+            <label className={`bar-chip ${explain ? 'on' : ''}`}
+              title="Answer from this conversation, with examples, without searching the board">
+              <input type="checkbox" checked={explain} onChange={(e) => ask.setExplain(e.target.checked)} />
+              <Icon name="bullets" size={12} /> Explain more
+            </label>
+          ) : null}
+          <label className={`bar-chip ${think ? 'on' : ''}`} title="Slower, and deeper - worth it for what is missing">
+            <input type="checkbox" checked={think} onChange={(e) => ask.setThink(e.target.checked)} />
+            <Icon name="bulb" size={12} /> Think deeper
           </label>
-        ) : null}
-        <label className="bar-toggle" title="Slower, and deeper - worth it for what is missing">
-          <input type="checkbox" checked={think} onChange={(e) => ask.setThink(e.target.checked)} />
-          Think deeper
-        </label>
-        {busy ? (
-          <button className="send stop" title="Stop" onClick={() => ask.stop()}>
-            <Icon name="stop" size={13} />
-          </button>
-        ) : (
-          <button className="send" title="Ask  (Enter)" disabled={!canSend || !draft.trim()}
-            onClick={() => send(draft)}>
-            <Icon name="send" size={14} />
-          </button>
-        )}
+          {busy ? (
+            <button className="send stop" title="Stop" onClick={() => ask.stop()}>
+              <Icon name="stop" size={13} />
+            </button>
+          ) : (
+            <button className={`send ${canSend && draft.trim() ? 'ready' : ''}`} title="Ask  (Enter)"
+              disabled={!canSend || !draft.trim()} onClick={() => send(draft)}>
+              <Icon name="send" size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </>
   )

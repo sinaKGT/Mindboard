@@ -1,5 +1,6 @@
 """HTTP surface: auth, ops, media range requests, export/import."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from mindboard.app import create_app
@@ -113,3 +114,18 @@ def test_backup_and_restore_over_http(dd, tmp_path):
                     files={"file": ("backup.zip", blob.content, "application/zip")}).json()
     assert again["restored"] == [] and len(again["skipped"]) == 2
     assert len(c2.get("/api/boards", headers=auth()).json()["boards"]) == 2
+
+
+def test_the_page_is_never_kept_stale_after_an_update(dd):
+    """A browser must ask for the page again each time, or after an update it
+    runs the old interface until a hard refresh."""
+    from fastapi.testclient import TestClient
+
+    from mindboard.app import WEB_DIR, create_app
+
+    if not (WEB_DIR / "index.html").exists():
+        pytest.skip("the interface is not built here")
+    with TestClient(create_app(dd, "t")) as c:
+        for path in ("/", "/b/somewhere"):
+            res = c.get(path)
+            assert res.status_code == 200 and res.headers["cache-control"] == "no-cache"

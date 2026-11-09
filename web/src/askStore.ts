@@ -62,6 +62,11 @@ interface Ask {
   add(ids: string[]): void
   remove(id: string): void
   clear(): void
+  /** forget the conversation - its questions and answers - keeping the cards in context */
+  forget(): void
+  /** where the panel sits: in the middle above the bar, or along the left edge */
+  side: 'center' | 'left'
+  setSide(side: 'center' | 'left'): void
   setThink(on: boolean): void
   setExpanded(on: boolean): void
   setExplain(on: boolean): void
@@ -70,6 +75,11 @@ interface Ask {
 }
 
 const KEY = (b: string) => `mb_ask_${b}`
+/** the panel's side is a preference, the same on every board, kept across visits */
+const SIDE_KEY = 'mb_ask_side'
+const savedSide = (): 'center' | 'left' => {
+  try { return localStorage.getItem(SIDE_KEY) === 'left' ? 'left' : 'center' } catch { return 'center' }
+}
 const HISTORY_TURNS = 10
 
 function save(s: Ask) {
@@ -94,6 +104,7 @@ export const useAsk = create<Ask>()((set, get) => ({
   explain: false,
   busy: false,
   controller: null,
+  side: savedSide(),
 
   load(boardId) {
     get().controller?.abort()
@@ -120,6 +131,15 @@ export const useAsk = create<Ask>()((set, get) => ({
   },
   remove(id) { set({ context: get().context.filter((x) => x !== id) }); save(get()) },
   clear() { set({ context: [] }); save(get()) },
+  forget() {
+    get().controller?.abort()
+    set({ turns: [], busy: false, controller: null })
+    save(get())
+  },
+  setSide(side) {
+    set({ side })
+    try { localStorage.setItem(SIDE_KEY, side) } catch { /* private mode */ }
+  },
   setThink(on) { set({ think: on }); save(get()) },
   setExpanded(on) { set({ expanded: on, open: on || get().open }); save(get()) },
   setExplain(on) { set({ explain: on }); save(get()) },

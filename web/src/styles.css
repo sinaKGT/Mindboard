@@ -855,47 +855,44 @@ a.btn { text-decoration: none; }
 
 
 /* ------------------------------------------------------------- shortcuts -- */
-/* Not a menu - it only says what the canvas can already do. Folds to a chip
-   and remembers that you folded it. */
-/* The panel does not take the pointer: it sits over a corner of the canvas,
-   and a card you drag under it must still be draggable. Only its own button
-   is clickable. */
-.keys {
-  position: absolute; left: 16px; bottom: 16px; z-index: 6; width: 236px;
-  padding: 8px 10px 10px; pointer-events: none; user-select: none;
-  background: color-mix(in srgb, var(--mb-surface) 88%, transparent);
-  border: 1px solid var(--mb-border); border-radius: var(--mb-radius);
-  backdrop-filter: blur(10px); box-shadow: var(--mb-shadow);
-  font-size: 11px; line-height: 1.5; color: var(--mb-text-faint);
-  animation: pop 140ms var(--mb-ease);
+/* One round keyboard button in the bottom-left corner; the list opens above
+   it on a click. Not a menu - it only says what the canvas can already do. */
+.keys-corner { position: absolute; left: 16px; bottom: 16px; z-index: 23; }
+.keys-btn {
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--mb-text-dim);
+  background: color-mix(in srgb, var(--mb-surface) 86%, transparent);
+  border: 1px solid var(--mb-border); backdrop-filter: blur(10px); box-shadow: var(--mb-shadow);
+  transition: color 120ms, border-color 120ms, transform 120ms var(--mb-ease), background 120ms;
 }
+.keys-btn:hover { color: var(--mb-text); border-color: var(--mb-border-strong); transform: translateY(-1px); }
+.keys-btn.on { color: #e8b864; border-color: color-mix(in srgb, #e8b864 55%, transparent);
+  background: color-mix(in srgb, #e8b864 14%, var(--mb-surface)); }
+.keys {
+  position: absolute; left: 0; bottom: 50px; width: 248px;
+  padding: 10px 12px 12px; user-select: none;
+  background: color-mix(in srgb, var(--mb-surface) 94%, transparent);
+  border: 1px solid var(--mb-border-strong); border-radius: 12px;
+  backdrop-filter: blur(12px); box-shadow: var(--mb-shadow-lg);
+  font-size: 11px; line-height: 1.5; color: var(--mb-text-faint);
+  transform-origin: bottom left; animation: keysOpen 130ms cubic-bezier(.2, .9, .25, 1);
+}
+@keyframes keysOpen { from { opacity: 0; transform: translateY(6px) scale(.97); } }
 .keys-head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 7px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em;
+  margin-bottom: 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
   color: var(--mb-text-dim); text-transform: uppercase;
 }
-.keys-head button { display: flex; padding: 3px; border-radius: 5px;
-  color: var(--mb-text-faint); pointer-events: auto; }
-.keys-head button:hover { background: var(--mb-surface-3); color: var(--mb-text); }
-.keys dl { margin: 0; display: grid; gap: 4px; }
+.keys dl { margin: 0; display: grid; gap: 5px; }
 .keys .keys-row { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; }
 .keys dt { display: flex; gap: 3px; align-items: center; }
-.keys dd { margin: 0; }
+.keys dd { margin: 0; color: var(--mb-text-dim); }
 .keys kbd {
   font: inherit; font-size: 10.5px; padding: 1px 5px; border-radius: 5px;
   background: var(--mb-surface-3); border: 1px solid var(--mb-border);
-  color: var(--mb-text-dim); white-space: nowrap;
+  color: var(--mb-text); white-space: nowrap;
 }
-.keys-chip {
-  position: absolute; left: 16px; bottom: 16px; z-index: 6;
-  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px;
-  border-radius: 999px; font-size: 11.5px; color: var(--mb-text-faint);
-  background: color-mix(in srgb, var(--mb-surface) 88%, transparent);
-  border: 1px solid var(--mb-border); backdrop-filter: blur(10px);
-  transition: color 140ms var(--mb-ease), border-color 140ms var(--mb-ease);
-}
-.keys-chip:hover { color: var(--mb-text); border-color: var(--mb-border-strong); }
-.stage.exporting .keys, .stage.exporting .keys-chip { display: none; }
+@media (prefers-reduced-motion: reduce) { .keys { animation: none; } }
+.stage.exporting .keys-corner { display: none; }
 
 /* ---------------------------------------------------------------- viewer -- */
 /* A picture opened full screen (Viewer.tsx). Always dark, whatever the theme:
@@ -1007,55 +1004,109 @@ a.btn { text-decoration: none; }
   transition: width 220ms var(--mb-ease), height 220ms var(--mb-ease);
 }
 .ask-sheet.expanded { width: min(880px, calc(100% - 48px)); height: calc(100% - 100px); }
+/* along the left edge: full height, beside the board rather than over its middle */
+.ask-sheet.left {
+  left: 16px; top: 72px; bottom: 66px; transform: none; height: auto;
+  width: min(420px, calc(100% - 32px)); animation: askSlide 170ms cubic-bezier(.2, .9, .25, 1);
+}
+@keyframes askSlide { from { opacity: 0; transform: translateX(-12px); } }
+@media (max-width: 920px) { .ask-sheet.left { bottom: 110px; } }
 .ask-sheet.expanded .ask-turns { padding: 18px 26px; font-size: 13.5px; }
 @keyframes rise { from { opacity: 0; transform: translate(-50%, 10px); } }
 .ask-dim { position: absolute; inset: 0; z-index: 20; background: #0007; animation: fade 160ms ease; }
 @keyframes fade { from { opacity: 0; } }
 .ask-head-actions { display: inline-flex; gap: 2px; }
+.ask-head-actions .icon-btn:disabled { opacity: .35; cursor: default; pointer-events: none; }
 .stage.exporting .ask-sheet, .stage.exporting .ask-bar, .stage.exporting .ask-dim { display: none; }
 
-/* The chat bar: always there, the one way in. A slow light runs along its
-   edge so it is easy to find; it rests while you type, and stops for anyone
-   who asked their system for less motion. */
+/* The chat bar: always there, the one way in. At rest a compact "Ask me"
+   pill with the ankh; under the pointer, focused, holding a draft, answering,
+   or with the conversation open, it opens to the full bar. One colour, gold,
+   as the experts' ankh is. Its motion is short and plain - width and colour
+   only, no blur and no gradients repainted every frame, which made the old
+   bar stutter as it opened. */
 .ask-bar {
+  --ask: #e8b864;
+  --ask-ink: #1a1408;
+  --ask-soft: color-mix(in srgb, var(--ask) 14%, transparent);
+  --ask-line: color-mix(in srgb, var(--ask) 42%, var(--mb-border-strong));
+  --snap: cubic-bezier(.2, .9, .25, 1);
   position: absolute; left: 50%; bottom: 16px; z-index: 22; transform: translateX(-50%);
-  width: clamp(320px, calc(100% - 600px), 560px); min-height: 46px;
-  display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 18px;
-  border-radius: 23px; background: var(--mb-surface);
-  border: 1px solid transparent; box-shadow: var(--mb-shadow-lg);
-  background:
-    linear-gradient(var(--mb-surface), var(--mb-surface)) padding-box,
-    conic-gradient(from var(--bar-angle), var(--mb-border-strong) 0deg, var(--mb-accent) 60deg,
-      var(--mb-border-strong) 120deg, var(--mb-border-strong) 360deg) border-box;
-  animation: barLight 6s linear infinite;
-  transition: width 220ms var(--mb-ease);
+  display: flex; align-items: center; gap: 8px; overflow: hidden;
+  border-radius: 999px; cursor: text;
+  background: var(--mb-surface); border: 1px solid var(--ask-line);
+  box-shadow: var(--mb-shadow);
+  transition: width 170ms var(--snap), min-height 170ms var(--snap),
+    border-color 140ms ease, box-shadow 140ms ease;
+  will-change: width;
 }
-.ask-bar.expanded { width: min(880px, calc(100% - 48px)); }
-.ask-bar:focus-within, .ask-bar.busy {
-  animation-play-state: paused;
-  background:
-    linear-gradient(var(--mb-surface), var(--mb-surface)) padding-box,
-    linear-gradient(var(--mb-accent), var(--mb-accent)) border-box;
+.ask-bar.rest { width: 108px; min-height: 36px; padding: 3px 14px 3px 4px; gap: 7px; }
+.ask-bar.rest:hover { border-color: var(--ask); }
+.ask-bar.awake {
+  width: clamp(340px, calc(100% - 600px), 600px); min-height: 48px; padding: 5px 5px 5px 6px;
+  border-color: color-mix(in srgb, var(--ask) 60%, var(--mb-border-strong));
+  box-shadow: 0 0 0 3px var(--ask-soft), var(--mb-shadow-lg);
 }
-@property --bar-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
-@keyframes barLight { to { --bar-angle: 360deg; } }
-@media (prefers-reduced-motion: reduce) { .ask-bar { animation: none; } }
+.ask-bar.awake.expanded { width: min(880px, calc(100% - 48px)); }
+.ask-bar:focus-within { border-color: var(--ask); }
+@media (prefers-reduced-motion: reduce) { .ask-bar, .ask-bar * { transition: none !important; animation: none !important; } }
 /* between the shortcuts (left) and the board controls (right); on a narrow
    window there is no room between them, so the bar rises above the controls */
 @media (max-width: 920px) {
   .ask-bar { bottom: 60px; }
   .ask-sheet { bottom: 118px; }
 }
+
+/* the ankh, in a small gold-tinted disc; it glows gently while an answer is written */
+.bar-mark {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  color: var(--ask); background: var(--ask-soft);
+  transition: width 170ms var(--snap), height 170ms var(--snap), background 140ms ease, color 140ms ease;
+}
+.ask-bar.awake .bar-mark { width: 36px; height: 36px; }
+.ask-bar.busy .bar-mark { color: var(--ask-ink); background: var(--ask); animation: askPulse 1.2s ease-in-out infinite; }
+@keyframes askPulse { 50% { box-shadow: 0 0 0 5px var(--ask-soft); } }
+
 .ask-bar textarea {
-  flex: 1; resize: none; font-size: 13px; line-height: 1.5; max-height: 120px; padding: 4px 0;
+  flex: 1; min-width: 0; resize: none; font-size: 13.5px; line-height: 1.5; max-height: 120px;
+  padding: 4px 0; background: transparent;
 }
+.ask-bar textarea::placeholder {
+  color: var(--mb-text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;   /* one line: no scrollbar */
+}
+.ask-bar.rest textarea { cursor: pointer; overflow: hidden; white-space: nowrap; font-size: 13px; }
+.ask-bar.rest textarea::placeholder { color: var(--mb-text); font-weight: 500; }
 .ask-bar textarea:disabled { color: var(--mb-text-faint); }
-.bar-toggle {
-  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
-  font-size: 11.5px; color: var(--mb-text-dim); cursor: pointer;
+
+/* the tools: only on the open bar, appearing as it opens */
+.bar-tools {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  transition: opacity 120ms ease 60ms;
 }
-.bar-toggle input { accent-color: var(--mb-accent); }
-.ask-bar .send { width: 34px; height: 34px; border-radius: 50%; }
+.ask-bar.rest .bar-tools { display: none; }
+.ask-bar.awake .bar-tools { animation: askTools 160ms ease both; }
+@keyframes askTools { from { opacity: 0; } }
+.bar-chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px;
+  border-radius: 999px; white-space: nowrap; cursor: pointer; user-select: none;
+  font-size: 11.5px; color: var(--mb-text-dim);
+  border: 1px solid var(--mb-border); background: var(--mb-surface-2);
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.bar-chip input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.bar-chip:hover { color: var(--mb-text); border-color: var(--mb-border-strong); }
+.bar-chip:has(input:focus-visible) { outline: 2px solid var(--ask); outline-offset: 2px; }
+.bar-chip.on { color: var(--ask); border-color: color-mix(in srgb, var(--ask) 55%, transparent); background: var(--ask-soft); }
+.ask-bar .send {
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--mb-text-faint); background: var(--mb-surface-3);
+  transition: transform 120ms var(--snap), background 120ms, color 120ms;
+}
+.ask-bar .send.ready { color: var(--ask-ink); background: var(--ask); }
+.ask-bar .send.ready:hover { transform: scale(1.06); }
+.ask-bar .send.ready:active { transform: scale(.95); }
+.ask-bar .send.stop { color: var(--ask-ink); background: var(--ask); }
 
 /* Add to board: a small action under each answer, then the drafted card */
 .ask-add {

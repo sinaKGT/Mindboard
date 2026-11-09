@@ -1,9 +1,11 @@
-/** The keys, in the corner, so nobody has to remember them.
+/** The keys, behind one round button in the bottom-left corner.
  *
  *  Deliberately not a menu: it says what the canvas can do and does nothing
- *  itself. It folds away to a chip and remembers that you folded it.
+ *  itself. It used to sit open in the corner; now it is a single keyboard
+ *  button, and the list opens above it on a click and closes on another click,
+ *  a click anywhere else, or Esc.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Icon } from './icons'
 
@@ -27,37 +29,43 @@ const KEYS: { keys: string[]; what: string }[] = [
 ]
 
 export function Shortcuts() {
-  const [open, setOpen] = useState(() => {
-    try { return localStorage.getItem('mb_keys') !== 'off' } catch { return true }
-  })
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+
+  // a click anywhere else, or Esc, closes it
   useEffect(() => {
-    try { localStorage.setItem('mb_keys', open ? 'on' : 'off') } catch { /* private mode */ }
+    if (!open) return
+    const away = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('pointerdown', away, true)
+    window.addEventListener('keydown', esc)
+    return () => {
+      window.removeEventListener('pointerdown', away, true)
+      window.removeEventListener('keydown', esc)
+    }
   }, [open])
 
-  if (!open) {
-    return (
-      <button className="keys-chip" title="Show the shortcuts" onClick={() => setOpen(true)}>
-        <Icon name="keys" size={13} /> Keys
-      </button>
-    )
-  }
-
   return (
-    <div className="keys">
-      <div className="keys-head">
-        <span>Shortcuts</span>
-        <button title="Hide these" onClick={() => setOpen(false)}>
-          <Icon name="x" size={11} />
-        </button>
-      </div>
-      <dl>
-        {KEYS.map(({ keys, what }) => (
-          <div className="keys-row" key={what}>
-            <dt>{keys.map((k) => <kbd key={k}>{k}</kbd>)}</dt>
-            <dd>{what}</dd>
-          </div>
-        ))}
-      </dl>
+    <div ref={root} className="keys-corner">
+      {open ? (
+        <div className="keys" role="dialog" aria-label="Shortcuts">
+          <div className="keys-head"><span>Shortcuts</span></div>
+          <dl>
+            {KEYS.map(({ keys, what }) => (
+              <div className="keys-row" key={what}>
+                <dt>{keys.map((k) => <kbd key={k}>{k}</kbd>)}</dt>
+                <dd>{what}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+      <button className={`keys-btn ${open ? 'on' : ''}`} aria-expanded={open}
+        title={open ? 'Hide the shortcuts' : 'Shortcuts'} onClick={() => setOpen((o) => !o)}>
+        <Icon name={open ? 'x' : 'keys'} size={16} />
+      </button>
     </div>
   )
 }

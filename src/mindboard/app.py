@@ -782,7 +782,12 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             candidate = WEB_DIR / full_path
             if full_path and candidate.is_file() and WEB_DIR in candidate.resolve().parents:
                 return FileResponse(candidate)
-            return FileResponse(index, media_type="text/html")
+            # The page names this build's scripts. Sent without a caching rule, a
+            # browser kept an old copy after an update and ran the old interface
+            # until a hard refresh; "no-cache" makes it ask each time - a quick
+            # "not modified" when nothing changed. The scripts it names carry a
+            # hash in their names, so they can be cached for good.
+            return FileResponse(index, media_type="text/html", headers={"Cache-Control": "no-cache"})
     else:
         @app.get("/{full_path:path}")
         def no_ui(full_path: str):
