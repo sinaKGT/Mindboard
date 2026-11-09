@@ -460,6 +460,8 @@ def _setup_ai(dd) -> None:
         console.print("  [bold]The experts' voice[/bold] - they speak their answers, and you can")
         console.print(f"  speak to them. About 520 MB, once; everything stays on this computer.")
         console.print(f"  [{DIM}]Its pronunciation step uses espeak-ng (GPL-3.0).[/{DIM}]")
+        if voice.setup_note():
+            console.print(f"  [{DIM}]{voice.setup_note()}[/{DIM}]")
         if _yes("Set up the voice now?", True):
             def show(name, done, total):
                 console.print(f"\r  {name}: {100 * done // max(total, 1):3d}%", end="")

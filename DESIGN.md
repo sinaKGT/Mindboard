@@ -2891,3 +2891,35 @@ diagram and the PDF of §48), named all 49 missing ones in the terminal, in
 all" named the same 49 before downloading; cancelling downloaded nothing.
 
 230 tests.
+
+## 50. Listening on a Mac, through Homebrew (2026-11-09)
+
+On a Mac, everything ran except speaking to an expert: setting up the voice
+said "not available on this kind of computer yet". whisper.cpp publishes
+programs for Windows and Linux only; for macOS it ships a framework for
+apps, not a program. Homebrew builds it for Apple silicon, with Metal.
+
+- **A Mac listens through Homebrew's whisper-cpp** (`voice.py`). Setting up
+  the voice runs `brew install whisper-cpp` (with Homebrew's auto-update
+  off, which would add minutes), then downloads the same pinned, checked
+  model, Smart Turn and Silero VAD as everywhere else.
+- **Found where Homebrew puts it.** `whisper-cli`, or `whisper-cpp` (its name
+  before whisper.cpp 1.7), on PATH or in `/opt/homebrew/bin` and
+  `/usr/local/bin`: a double-clicked `Mindboard.command` may start with a
+  PATH that lacks them.
+- **Said before, and when it fails.** Setup says on a Mac that listening is
+  installed with Homebrew. Without Homebrew it says to install it (brew.sh)
+  or run `brew install whisper-cpp`; experts still speak, and nothing is
+  downloaded for a voice that cannot listen. A failed install says Homebrew's
+  own last line ("No space left on device").
+- **Not pinned here.** Homebrew checks its own downloads, but the program's
+  version is Homebrew's, not ours. Only its long-standing flags are used
+  (`-m -f -nt -np -l -t`), the same as the pinned Windows and Linux builds.
+- Windows and Linux are unchanged.
+
+Tested as a Mac would see it (the platform reported as darwin, a stand-in
+Homebrew): found on PATH or in Homebrew's folders, by either name; installed
+once, then not asked again; the right messages without Homebrew and when it
+fails. Not yet run on a real Mac.
+
+236 tests.

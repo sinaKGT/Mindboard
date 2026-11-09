@@ -317,6 +317,10 @@ conversation. Everything runs on this computer, and the audio is not kept.
 mindboard ai voice        # one-time, about 520 MB: speaking, listening, turn-taking
 ```
 
+On a Mac, listening uses Homebrew's whisper-cpp, which setting up the voice
+installs for you (`brew install whisper-cpp`). Without Homebrew, experts still
+speak; only listening waits for it.
+
 In the chat bar, the **1×** chip sets how fast the expert speaks, and the
 speaker button turns speaking off. The voice is optional: its pronunciation
 step uses espeak-ng, which is GPL-3.0.

@@ -517,6 +517,8 @@ def ai_voice():
     con.print("  listen, and Smart Turn (BSD-2) to know when you have finished - about 520 MB,")
     con.print("  once. Everything stays on this computer.")
     con.print("  Its pronunciation step uses espeak-ng (GPL-3.0); it runs only on this computer.")
+    if voice.setup_note():
+        con.print(f"  {voice.setup_note()}")
 
     def show(name, done, total):
         con.print(f"\r  {name}: {100 * done // max(total, 1):3d}%", end="")
