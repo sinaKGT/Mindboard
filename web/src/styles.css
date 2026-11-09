@@ -887,8 +887,8 @@ a.btn { text-decoration: none; }
   transition: color 120ms, border-color 120ms, transform 120ms var(--mb-ease), background 120ms;
 }
 .keys-btn:hover { color: var(--mb-text); border-color: var(--mb-border-strong); transform: translateY(-1px); }
-.keys-btn.on { color: #e8b864; border-color: color-mix(in srgb, #e8b864 55%, transparent);
-  background: color-mix(in srgb, #e8b864 14%, var(--mb-surface)); }
+.keys-btn.on { color: var(--mb-accent); border-color: color-mix(in srgb, var(--mb-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--mb-accent) 14%, var(--mb-surface)); }
 .keys {
   position: absolute; left: 0; bottom: 50px; width: 248px;
   padding: 10px 12px 12px; user-select: none;
@@ -1042,13 +1042,14 @@ a.btn { text-decoration: none; }
 
 /* The chat bar: always there, the one way in. At rest a compact "Ask me"
    pill with the ankh; under the pointer, focused, holding a draft, answering,
-   or with the conversation open, it opens to the full bar. One colour, gold,
-   as the experts' ankh is. Its motion is short and plain - width and colour
+   or with the conversation open, it opens to the full bar. One colour, the
+   board's own accent. Its motion is short and plain - width and colour
    only, no blur and no gradients repainted every frame, which made the old
    bar stutter as it opened. */
 .ask-bar {
-  --ask: #e8b864;
-  --ask-ink: #1a1408;
+  /* the board's own accent, so the bar matches its theme - built-in or yours */
+  --ask: var(--mb-accent);
+  --ask-ink: var(--mb-bg);
   --ask-soft: color-mix(in srgb, var(--ask) 14%, transparent);
   --ask-line: color-mix(in srgb, var(--ask) 70%, var(--mb-border-strong));
   /* a soft, steady gold glow round the border - still, so nothing repaints */
@@ -1064,7 +1065,8 @@ a.btn { text-decoration: none; }
     border-color 140ms ease, box-shadow 140ms ease;
   will-change: width;
 }
-.ask-bar.rest { width: 108px; min-height: 36px; padding: 3px 14px 3px 4px; gap: 7px; }
+/* at rest: only the ankh, in a small round button */
+.ask-bar.rest { width: 42px; min-height: 42px; padding: 0; gap: 0; justify-content: center; cursor: pointer; }
 .ask-bar.rest:hover {
   border-color: var(--ask);
   box-shadow: 0 0 20px -2px color-mix(in srgb, var(--ask) 65%, transparent), var(--mb-shadow);
@@ -1103,8 +1105,8 @@ a.btn { text-decoration: none; }
   color: var(--mb-text-dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;   /* one line: no scrollbar */
 }
-.ask-bar.rest textarea { cursor: pointer; overflow: hidden; white-space: nowrap; font-size: 13px; }
-.ask-bar.rest textarea::placeholder { color: var(--mb-text); font-weight: 500; }
+/* kept in place, but without room, so a click or Ctrl+J can still focus it - which opens the bar */
+.ask-bar.rest textarea { flex: 0 0 0; width: 0; padding: 0; opacity: 0; }
 .ask-bar textarea:disabled { color: var(--mb-text-faint); }
 
 /* the tools: only on the open bar, appearing as it opens */

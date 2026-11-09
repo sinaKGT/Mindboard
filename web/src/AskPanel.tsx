@@ -418,9 +418,10 @@ export function AskPanel() {
         onKeyDown={escape}
         onMouseEnter={() => { window.clearTimeout(cool.current); setHot(true) }}
         onMouseLeave={() => { cool.current = window.setTimeout(() => setHot(false), 160) }}
-        onClick={() => box.current?.focus()}>
+        onClick={() => box.current?.focus()}
+        title={awake ? undefined : `Ask your board  (${/mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+J)`}>
         <span className="bar-mark" aria-hidden><Icon name="ankh" size={15} /></span>
-        <textarea ref={box} rows={1} value={draft}
+        <textarea ref={box} rows={1} value={draft} aria-label="Ask your board"
           placeholder={!awake ? (everything ? 'Ask me' : 'No cards yet')
             : explaining ? 'Ask for an explanation…'
             : present.length ? 'Ask about these cards…'
