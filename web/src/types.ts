@@ -58,6 +58,8 @@ export interface MEdge {
 export interface BoardSettings {
   theme?: string
   palette?: Record<string, string>
+  /** the theme of your own this board uses, if any (DESIGN.md 52) */
+  custom?: string | null
   viewport?: { x: number; y: number; zoom: number }
 }
 

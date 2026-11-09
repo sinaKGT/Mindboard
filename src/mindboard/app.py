@@ -491,6 +491,25 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     def api_expert_delete(eid: str):
         return {"deleted": experts_mod.delete(dd, eid)}
 
+    # ------------------------------------------------------- your themes --
+    # named themes of your own, offered on every board (DESIGN.md 52)
+    from . import themes as themes_mod
+
+    @app.get("/api/themes")
+    def api_themes():
+        return {"themes": themes_mod.load(dd)}
+
+    @app.post("/api/themes")
+    def api_theme_save(body: dict):
+        try:
+            return themes_mod.save(dd, body)
+        except themes_mod.ThemeError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.delete("/api/themes/{tid}")
+    def api_theme_delete(tid: str):
+        return {"deleted": themes_mod.delete(dd, tid)}
+
     @app.post("/api/experts/guide")
     def api_experts_guide(body: GuideRequest):
         """Who can help with this question - the experts whose boards answer

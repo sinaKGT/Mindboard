@@ -89,8 +89,7 @@ export function Launcher({ onImport }: { onImport: () => void }) {
           <h1>Mindboard</h1>
         </div>
         <p className="launcher-sub">
-          Everything stays on this machine.
-          {boards?.length ? ` ${boards.length} board${boards.length === 1 ? '' : 's'}.` : ''}
+          Knowledge is not what you collect, but what you connect.
         </p>
 
         <div className="launcher-actions">

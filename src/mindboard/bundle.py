@@ -347,6 +347,10 @@ def create_backup(dd: DataDir, out_path: Path) -> dict[str, Any]:
             from .experts import load as load_experts
             if load_experts(dd):
                 z.writestr("experts.json", json.dumps(load_experts(dd), indent=2, ensure_ascii=False))
+            # and so do your own themes (DESIGN.md 52)
+            from .themes import load as load_themes
+            if load_themes(dd):
+                z.writestr("themes.json", json.dumps(load_themes(dd), indent=2, ensure_ascii=False))
             if missing:
                 z.writestr("MISSING-FILES.txt", missing_note(missing))
             z.writestr("manifest.json", json.dumps({
@@ -428,6 +432,10 @@ def restore_backup(dd: DataDir, zip_path: Path, mode: str = "skip") -> dict[str,
         if "experts.json" in names and mode != "copy":
             from .experts import restore as restore_experts
             restore_experts(dd, json.loads(z.read("experts.json").decode("utf-8")), replace=mode == "replace")
+        # your own themes belong to no board, so they come back in every mode
+        if "themes.json" in names:
+            from .themes import restore as restore_themes
+            restore_themes(dd, json.loads(z.read("themes.json").decode("utf-8")), replace=mode == "replace")
 
     return {"restored": restored, "skipped": skipped, "failed": failed,
             "backup_created_at": manifest.get("created_at")}

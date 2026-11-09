@@ -2980,3 +2980,32 @@ of 78 cards and the answer was right ("Kestrel-Embed-3 … Recall@5 of 0.93");
 the picture showed under it, cited or not.
 
 239 tests.
+
+## 52. Themes of your own (2026-11-09)
+
+A board could take one of ten built-in themes and have its colours changed
+with pickers, but those colours belonged to that board alone: liking a look
+meant setting the same nine colours again on every board.
+
+- **Name it and save it.** Under the colour pickers in the Theme panel: a
+  name and Save. It keeps the built-in theme the colours started from and
+  all nine colours as they are on screen, and the board then uses it.
+  Saving again under the same name (case aside) updates that theme, so
+  tweaking a colour and pressing Update keeps one theme, not two.
+- **Offered on every board**, under "Your themes", with a preview in its own
+  colours. Picking one copies its colours onto the board (its settings, with
+  `custom` naming the theme), so the board looks the same in an exported
+  bundle, or after the theme is deleted. Picking a built-in theme again
+  removes those colours.
+- **Kept by Mindboard, not the browser** (`themes.py`, `<data>/themes.json`,
+  `GET/POST /api/themes`, `DELETE /api/themes/{id}`), like the experts: they
+  survive a change of browser and travel in backups. A restore adds them in
+  every mode, and restoring twice does not double them.
+- Only the nine known colours, as `#rrggbb`, and a known base are kept; a
+  name is up to 40 characters; up to 50 themes.
+
+Tried in the app: "Desert night" saved on one board was offered on the other,
+applied, kept after a reload; Ocean replaced its colours; deleting it asked
+first and left the board in its colours.
+
+245 tests.

@@ -19,6 +19,9 @@ if (fromUrl) {
 let token = fromUrl || ''
 if (!token) { try { token = localStorage.getItem('mb_token') || '' } catch { token = '' } }
 
+/** a theme of your own: a name, the built-in theme it starts from, its colours */
+export interface CustomTheme { id: string; name: string; base: string; palette: Record<string, string> }
+
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as any) }
   if (token) headers['X-Mindboard-Token'] = token
@@ -90,6 +93,11 @@ const apiCore = {
   updateExpert: (id: string, body: Partial<ExpertDraft>) =>
     req<Expert>(`/experts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteExpert: (id: string) => req<{ deleted: boolean }>(`/experts/${id}`, { method: 'DELETE' }),
+  /** your own themes, offered on every board (DESIGN.md 52) */
+  themes: () => req<{ themes: CustomTheme[] }>('/themes'),
+  saveTheme: (body: { name: string; base: string; palette: Record<string, string> }) =>
+    req<CustomTheme>('/themes', { method: 'POST', body: JSON.stringify(body) }),
+  deleteTheme: (id: string) => req<{ deleted: boolean }>(`/themes/${id}`, { method: 'DELETE' }),
   /** is the experts' voice set up, and which voices there are */
   voice: () => req<{ installed: boolean; cast: string[]; listen: boolean; turn?: boolean; talk?: boolean }>('/voice'),
   /** words from a short recording, made on this computer (whisper.cpp) */
