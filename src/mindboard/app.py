@@ -333,8 +333,9 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     # each change - so a question never waits for it (indexer.py)
     from .indexer import Indexer
 
-    # it describes pictures with the chat model, but only while that is loaded
-    indexer = Indexer(dd, lambda: search_model("embed"), describer=lambda: held.get("model"))
+    # it describes pictures with the chat model - loading it for a picture
+    # never described (DESIGN.md 51), so a new picture is soon found by what it shows
+    indexer = Indexer(dd, lambda: search_model("embed"), describer=local_model)
     app.state.indexer = indexer
 
     @app.post("/api/boards/{bid}/ask/draft")

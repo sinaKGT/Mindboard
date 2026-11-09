@@ -2923,3 +2923,60 @@ once, then not asked again; the right messages without Homebrew and when it
 fails. Not yet run on a real Mac.
 
 236 tests.
+
+## 51. Pictures described sooner, with their text written out (2026-11-09)
+
+Asked about something inside a picture without naming it, Mindboard found the
+picture only through its description (§38), and two things limited that.
+Pictures were described only while the chat model was loaded anyway, so a
+picture added before the day's first question was found by its title alone.
+And a description was 1-3 sentences: a word in one table cell or a corner
+label was not in it, so a question about that detail could not find it.
+
+- **Sooner.** A picture never described now loads the model, a couple of
+  seconds after it is added (or when its board is opened), and is described
+  then. The load happens outside the question slot: a question asked while
+  it loads waits for the load and then goes first, as before. The model is
+  unloaded after 20 idle minutes, as always.
+- **Not onto a full graphics card.** When the card has less free memory than
+  the model needs (`llm.memory_shortfall`), it is not loaded for this: it
+  would load slowly and partly on the processor, for work nobody is waiting
+  on. Then pictures wait for the next question, as before. A Mac's shared
+  memory is never "short", so a Mac always describes soon.
+- **Not for files that are missing** (§49): a picture whose file is not on
+  this computer cannot be described, and must not load the model each round.
+- **Its text written out.** The description now has one or two sentences on
+  what the picture shows, then "Text:" and every word, number and label in
+  it, in reading order: headings, table cells, axis names, captions, code.
+  Up to 600 tokens, kept up to 3,000 characters, all searchable (keywords,
+  meaning, reranker). Where a picture does not fit into a question and goes
+  in as words, only the first 700 characters are read (`ask.seen_line`), so
+  a long description cannot crowd out other cards.
+- **Old descriptions are redone, not dropped.** New ones go in
+  `search/pictures-2.json`; the short ones in `pictures.json` stay in use
+  until each picture is described again, so nothing becomes harder to find
+  meanwhile. Redoing them never loads the model: only while it is loaded.
+
+- **A picture the answer drew on, shown even if not cited.** Asked a detail
+  from a table, the model answered from the picture and did not cite it, so
+  the picture strip (§48) stayed empty. The rules now say that anything taken
+  from a picture is cited like a card's text, and the strip also shows
+  pictures among the question's 3 best matches (`picturesToShow`), as files
+  are offered. Such a "likely" picture whose file is missing is hidden rather
+  than shown as missing.
+
+Tested with stand-in models: a new picture loads the model and is described
+once; a short graphics card, a busy model or a missing file does not load it;
+an old description keeps finding its picture until it is redone, and then a
+detail written in the picture ("scale 1:500") finds it.
+
+Tried in the app, with a table picture titled only "IMG_0423" added while the
+model was not loaded: opening its board loaded the model with no question
+asked, and about 15 s later both pictures were described with their text
+written out - "Kestrel-Embed-3 768 0.93 chosen for lectures" - the older
+diagram's short description redone too. Asked "Which embedding model did we
+choose for lectures, and what recall did it get?", search put IMG_0423 first
+of 78 cards and the answer was right ("Kestrel-Embed-3 … Recall@5 of 0.93");
+the picture showed under it, cited or not.
+
+239 tests.

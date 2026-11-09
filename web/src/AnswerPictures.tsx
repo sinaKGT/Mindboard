@@ -14,7 +14,25 @@ import { createPortal } from 'react-dom'
 import { api } from './api'
 import { Open } from './Viewer'
 
-export interface Pictured { card: string; board: string; sha: string; title: string }
+/** `likely`: not cited, shown as one of the best matches - and hidden if its file is missing */
+export interface Pictured { card: string; board: string; sha: string; title: string; likely?: boolean }
+
+/** the best matches looked at for a picture the answer used but did not cite */
+const TOP = 3
+
+/** Cited pictures first, in the order cited, then pictures among the question's
+ *  very best matches: the model reads those pictures themselves, and an answer
+ *  taken from one does not always cite it (DESIGN.md 51). */
+export function picturesToShow(cited: string[], ranked: string[],
+                               pictureOf: (card: string) => Pictured | null): Pictured[] {
+  const out: Pictured[] = []
+  const sure = new Set(cited)
+  for (const id of [...cited, ...ranked.slice(0, TOP)]) {
+    const p = pictureOf(id)
+    if (p && !out.some((o) => o.sha === p.sha)) out.push(sure.has(id) ? p : { ...p, likely: true })
+  }
+  return out
+}
 
 /** at most this many under one answer - beyond that it is a gallery, not an answer */
 const MOST = 6
@@ -28,7 +46,8 @@ export function AnswerPictures({ pictures, onShow, className = '' }: {
   const [open, setOpen] = useState<{ p: Pictured; at: number } | null>(null)
   /** pictures whose file is not on this computer - shown as such, not as a broken image */
   const [missing, setMissing] = useState<Set<string>>(new Set())
-  const shown = pictures.filter((p, i) => pictures.findIndex((q) => q.sha === p.sha) === i).slice(0, MOST)
+  const shown = pictures.filter((p, i) => pictures.findIndex((q) => q.sha === p.sha) === i)
+    .filter((p) => !(p.likely && missing.has(p.sha))).slice(0, MOST)
   if (!shown.length) return null
   return (
     <>

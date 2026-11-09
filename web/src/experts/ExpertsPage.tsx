@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { AnswerFiles, filesToOffer } from '../AnswerFiles'
-import { AnswerPictures } from '../AnswerPictures'
+import { AnswerPictures, picturesToShow } from '../AnswerPictures'
 import { api, type Expert, type ExpertDraft, type ShapeState } from '../api'
 import { Prose } from '../Prose'
 import type { BoardMeta } from '../types'
@@ -485,9 +485,9 @@ export function ExpertsPage() {
                   ) : <Said turn={t} onCard={goToCard} />}
                   {t.status === 'done' ? (
                     <AnswerPictures className="xp-pictures" onShow={(p) => goToCard(p.board, p.card)}
-                      pictures={(t.cited ?? []).flatMap((id) => {
+                      pictures={picturesToShow(t.cited ?? [], Object.keys(t.where ?? {}), (id) => {
                         const w = t.where?.[id]
-                        return w?.pic ? [{ card: id, board: w.board, sha: w.pic, title: w.title }] : []
+                        return w?.pic ? { card: id, board: w.board, sha: w.pic, title: w.title } : null
                       })} />
                   ) : null}
                   {t.status === 'done' ? (

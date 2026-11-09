@@ -101,19 +101,36 @@ class PictureNotes:
     """What each picture shows, in words, by the picture's hash (DESIGN.md 38):
     written once by the local model (indexer.py), so a picture is found by what
     is in it, not only by its title. Derived like the vectors - kept beside the
-    search indexes in `<data>/search/pictures.json`, never in a board, and
-    regenerated if deleted."""
+    search indexes in `<data>/search/`, never in a board, and regenerated if
+    deleted.
+
+    DESIGN.md 51: descriptions now write out all the text a picture holds, kept
+    in `pictures-2.json`. The short ones of §38 (`pictures.json`) are still used
+    until each picture is described again, so nothing becomes harder to find
+    meanwhile; `done(sha)` says whether a picture has the new kind."""
 
     _all: dict[str, "PictureNotes"] = {}
-    FILE = "pictures.json"
+    FILE = "pictures-2.json"
+    OLD: Optional[str] = "pictures.json"
 
     def __init__(self, path: Path):
         self.path = path
         self._lock = threading.Lock()
+        self._new: dict[str, str] = self._read(path)
+        old = self._read(path.with_name(self.OLD)) if self.OLD else {}
+        self.notes: dict[str, str] = {**old, **self._new}
+
+    @staticmethod
+    def _read(path: Path) -> dict[str, str]:
         try:
-            self.notes: dict[str, str] = json.loads(path.read_text(encoding="utf-8"))
+            got = json.loads(path.read_text(encoding="utf-8"))
+            return got if isinstance(got, dict) else {}
         except (OSError, ValueError):
-            self.notes = {}
+            return {}
+
+    def done(self, sha: str) -> bool:
+        """Described the current way - not only by an older, shorter description."""
+        return sha in self._new
 
     @classmethod
     def get(cls, dd: DataDir) -> "PictureNotes":
@@ -125,10 +142,11 @@ class PictureNotes:
 
     def put(self, sha: str, text: str) -> None:
         with self._lock:
+            self._new = {**self._new, sha: text}
             self.notes = {**self.notes, sha: text}
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.notes), encoding="utf-8")
+            tmp.write_text(json.dumps(self._new), encoding="utf-8")
             tmp.replace(self.path)
 
 
@@ -140,6 +158,7 @@ class FileNotes(PictureNotes):
 
     _all: dict[str, "PictureNotes"] = {}
     FILE = "files.json"
+    OLD = None
 
 
 def card_notes(dd: DataDir) -> dict[str, str]:

@@ -41,7 +41,7 @@ class Indexer:
                  describer: Optional[Callable[[], Optional[object]]] = None):
         self.dd = dd
         self.embedder = embedder
-        # the chat model, to describe pictures - only while it is loaded anyway
+        # the chat model, to describe pictures (DESIGN.md 38, 51)
         self.describer = describer
         self.quiet = quiet
         self.batch = batch
@@ -141,6 +141,16 @@ class Indexer:
         finally:
             index.flush()
 
+    @staticmethod
+    def _may_load(chat) -> bool:
+        """Whether to load the model just to describe pictures: only when it
+        would load whole, onto the graphics card (llm.memory_shortfall)."""
+        note = getattr(chat, "memory_note", None)
+        try:
+            return note is None or note() is None
+        except Exception:
+            return False
+
     def _read_files(self, bid: str, conn, nodes: dict) -> None:
         """Read the text of the board's PDFs not yet read (DESIGN.md 48). No
         model is needed - a few tenths of a second a file - so it is done first,
@@ -156,17 +166,39 @@ class Indexer:
                 files.put(sha, pdf_text(path))
 
     def _describe(self, bid: str, conn, nodes: dict, notes: PictureNotes) -> bool:
-        """Describe the board's pictures not yet described (DESIGN.md 38) -
-        only while the chat model is loaded anyway, so opening a board never
-        loads it, and never while it answers a question: then it stops, and
-        the next round carries on. True if any were described."""
+        """Describe the board's pictures (DESIGN.md 38, 51), never while the
+        model answers a question: then it stops, and the next round carries on.
+        True if any were described.
+
+        A picture never described is found by nothing but its title, so for
+        one the model is loaded if it is not already - soon after the picture
+        is added, not whenever a question happens to load it. Not when the
+        graphics card is short of memory: then the model would load slowly,
+        partly on the processor, for a task nobody is waiting on, so it waits
+        for the next question. A picture with only an older, shorter
+        description is redone only while the model is loaded anyway."""
         from .ask import describe_picture
 
         chat = self.describer() if self.describer else None
-        if chat is None or not chat.running():
+        if chat is None:
             return False
-        todo = list(dict.fromkeys(s for n in nodes.values()
-                                  if (s := picture_of(n)) and s not in notes.notes))
+        from .assets import resolve
+
+        # a picture whose file is not on this computer cannot be described, and
+        # must not load the model at every round (DESIGN.md 49)
+        pictures = dict.fromkeys(p for p in map(picture_of, nodes.values()) if p)
+        shas = [s for s in pictures if resolve(self.dd, conn, bid, s) is not None]
+        new = [s for s in shas if s not in notes.notes]
+        again = [s for s in shas if s in notes.notes and not notes.done(s)]
+        if not chat.running():
+            if not new or not self._may_load(chat):
+                return False
+            try:
+                chat.start()          # outside the question slot: a question asked
+            except Exception:         # meanwhile waits for the load, then goes first
+                log.exception("loading the model to describe pictures")
+                return False
+        todo = new + again
         done = False
         for sha in todo:
             if self._changed_again(bid) or not chat._asking.acquire(blocking=False):

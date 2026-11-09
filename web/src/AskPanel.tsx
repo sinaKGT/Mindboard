@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { api } from './api'
 import { AnswerFiles, filesToOffer } from './AnswerFiles'
-import { AnswerPictures } from './AnswerPictures'
+import { AnswerPictures, picturesToShow } from './AnswerPictures'
 import { cardsInside, revealCard, useAsk, type Turn } from './askStore'
 import { Icon } from './icons'
 import { Prose } from './Prose'
@@ -51,10 +51,10 @@ function CitedPictures({ turn }: { turn: Turn }) {
   const nodes = useStore((s) => s.nodes)
   const boardId = useStore((s) => s.boardId)
   if (!boardId) return null
-  const pictures = (turn.cited ?? []).flatMap((id) => {
+  const pictures = picturesToShow(turn.cited ?? [], turn.cards ?? [], (id) => {
     const n = nodes[id]
     const sha = !n ? undefined : (n.type === 'image' ? n.content.sha256 : n.type === 'video' ? n.content.poster : undefined)
-    return typeof sha === 'string' ? [{ card: id, board: boardId, sha, title: n.title || 'Untitled' }] : []
+    return typeof sha === 'string' ? { card: id, board: boardId, sha, title: n.title || 'Untitled' } : null
   })
   return <AnswerPictures pictures={pictures} onShow={(p) => revealCard(p.card)} />
 }

@@ -66,7 +66,8 @@ SYSTEM = f"""You help one person think, using their own mind map.
 CARDS are their notes. Each starts with its id in brackets, like [01ABC...]. A
 PICTURE belongs to the card named just before it. RELATIONSHIPS are claims the
 person made about how their cards connect - treat them as their judgement, not
-yours; "contradicts" means they think the two disagree. A picture card you cite
+yours; "contradicts" means they think the two disagree. Anything you take from
+a PICTURE is cited like a card's text: cite the card it belongs to. A picture card you cite
 is shown to the person beside your answer: when they ask to see, show or find a
 picture, diagram or screenshot, cite the cards whose pictures show it - never
 say you cannot show pictures, and never write an image or a link to one: the
@@ -496,7 +497,7 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
             left_out += 1             # its card's title and caption still go in -
             seen = PictureNotes.get(dd).notes.get(sha)
             if seen:                  # and what the picture shows, in words (DESIGN 39)
-                blocks[i] += f"\n    picture shows: {seen}"
+                blocks[i] += seen_line(seen)
             continue
         got = _picture(dd, conn, bid, sha)
         if got:
@@ -731,9 +732,22 @@ def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
 
 # ------------------------------------------------------------ pictures --
 
-DESCRIBE = ("Describe this picture for a search index, in 1-3 plain sentences: what it "
-            "shows, any words or numbers written in it, and what kind of picture it is "
-            "(photo, diagram, screenshot, chart). No preamble.")
+# DESIGN.md 51: the description now writes out the picture's text, so a word
+# that appears only in a corner of a slide or one cell of a table is found.
+DESCRIBE = ("Describe this picture for a search index. First, in one or two plain sentences: "
+            "what it shows and what kind of picture it is (photo, diagram, screenshot, chart, "
+            "table, slide). Then write \"Text:\" and every word, number and label you can read "
+            "in it, in reading order, exactly as written - headings, labels, table cells, axis "
+            "names, captions, code. Leave out the Text part if there is no text. No preamble.")
+DESCRIBE_TOKENS = 600
+DESCRIBE_CHARS = 3000        # kept for search; the prompt reads less (SEEN_CHARS)
+SEEN_CHARS = 700             # of a description, read in place of a picture left out
+
+
+def seen_line(text: str) -> str:
+    """A picture's description, under its card, where the picture itself did
+    not fit - shortened, as a long one would crowd out other cards."""
+    return f"\n    picture shows: {text[:SEEN_CHARS]}" if text else ""
 
 
 def describe_picture(model, dd: DataDir, conn: sqlite3.Connection, bid: str, sha: str) -> str:
@@ -745,5 +759,5 @@ def describe_picture(model, dd: DataDir, conn: sqlite3.Connection, bid: str, sha
     reply = model.chat([{"role": "user", "content": [
         {"type": "text", "text": DESCRIBE},
         {"type": "image_url", "image_url": {"url": got[0]}}]}],
-        max_tokens=160, think=False, temperature=0.2)
-    return " ".join(str(reply.get("text") or "").split())[:600]
+        max_tokens=DESCRIBE_TOKENS, think=False, temperature=0.2)
+    return " ".join(str(reply.get("text") or "").split())[:DESCRIBE_CHARS]

@@ -24,7 +24,7 @@ from typing import Any, Iterator, Optional
 
 from . import retrieve
 from .ask import (SEARCH_PICTURE_TOKENS, Context, Picture, _picture, board_index,
-                  card_text, file_excerpt)
+                  card_text, file_excerpt, seen_line)
 from .boards import conn_for, list_boards
 from .ids import ulid
 from .ops import read_graph
@@ -282,7 +282,7 @@ def context(dd: DataDir, expert: dict, question: str, history: Optional[list[dic
         if budget <= 0:
             left += 1                 # its title still goes in - and, as for a board,
             if seen.get(sha):         # what the picture shows, in words (DESIGN.md 39)
-                blocks[i] += f"\n    picture shows: {seen[sha]}"
+                blocks[i] += seen_line(seen[sha])
             continue
         bid = lib.board_of[i]
         got = _picture(dd, lib.conns[bid], bid, sha)
@@ -352,7 +352,7 @@ def run_plan(model, lib: Library, question: str, plan: dict, embedder=None,
         ids = search(lib, query, embedder, reranker, budget=STEP_BUDGET).ids if query else []
         def shown(c: str) -> str:
             pic = picture_of(lib.nodes[c])
-            return f"\n    picture shows: {seen[pic]}" if pic and seen and seen.get(pic) else ""
+            return seen_line(seen[pic]) if pic and seen and seen.get(pic) else ""
 
         cards = "\n\n".join(card_text(lib.nodes[c], lib.nodes) + shown(c)
                             + f"\n    (on the board {lib.titles[lib.board_of[c]]!r})" for c in ids)

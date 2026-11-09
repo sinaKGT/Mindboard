@@ -151,7 +151,8 @@ def test_a_search_brings_pictures_only_while_they_fit(dd, board, cards, monkeypa
                       "the site plan and the drone pass")
     assert {cards["plan"], cards["video"]} <= set(found.cards)
     assert len(found.pictures) == 1 and found.pictures_left_out == 1
-    assert "Drone pass" in found.text and "Site plan" in found.text,         "a left-out picture's card still goes in"
+    assert "Drone pass" in found.text and "Site plan" in found.text, \
+        "a left-out picture's card still goes in"
     chosen = ask.build(dd, conn_for(dd, board["id"]), board["id"],
                        [cards["plan"], cards["video"]])
     assert len(chosen.pictures) == 2, "cards chosen by hand always bring their pictures"
@@ -510,13 +511,19 @@ class Seeing:
     """The chat model as the indexer sees it: loaded, one question at a time,
     and a picture described as whatever it was told to say."""
 
-    def __init__(self, said="A site plan showing junction 4 and a red pole.", running=True):
+    def __init__(self, said="A site plan showing junction 4 and a red pole.", running=True, short=None):
         import threading as th
-        self.said, self._running, self.asked = said, running, 0
+        self.said, self._running, self.asked, self.started, self.short = said, running, 0, 0, short
         self._asking = th.Lock()
 
     def running(self):
         return self._running
+
+    def start(self):
+        self._running, self.started = True, self.started + 1
+
+    def memory_note(self):
+        return self.short
 
     def chat(self, messages, **kw):
         self.asked += 1
@@ -564,28 +571,31 @@ def test_a_picture_left_out_still_goes_in_as_words(dd, board, cards, monkeypatch
     BoardIndex.drop(dd, board["id"])
 
 
-def test_pictures_are_described_only_while_the_model_is_loaded_and_free(dd, board, cards):
+def test_a_new_picture_is_described_soon_but_never_ahead_of_a_question(dd, board, cards):
+    """DESIGN.md 51: a picture never described loads the model - unless the
+    graphics card is short of memory - and a question always goes first."""
     from mindboard.indexer import Indexer
     from mindboard.search_index import BoardIndex, PictureNotes
 
-    asleep = Seeing(running=False)
-    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: asleep)
+    short = Seeing(running=False, short="only 1.1 GB is free")
+    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: short)
     try:
         indexer.want(board["id"]); assert indexer.idle(20)
-        assert asleep.asked == 0, "opening a board never loads the chat model"
+        assert short.started == 0 and short.asked == 0, "not loaded onto a full graphics card"
         busy = Seeing()
         busy._asking.acquire()                      # answering a question
         indexer.describer = lambda: busy
         indexer.want(board["id"]); assert indexer.idle(20)
         assert busy.asked == 0, "a question is never kept waiting"
-        free = Seeing()
-        indexer.describer = lambda: free
+        asleep = Seeing(running=False)
+        indexer.describer = lambda: asleep
         indexer.want(board["id"]); assert indexer.idle(20)
-        assert free.asked == 2, "the site plan and the video's cover, once each"
+        assert asleep.started == 1, "loaded for pictures nobody has described"
+        assert asleep.asked == 2, "the site plan and the video's cover, once each"
         assert len(PictureNotes.get(dd).notes) == 2
         assert cards["plan"] in BoardIndex.get(dd, board["id"]).keyword("red pole")
         indexer.want(board["id"]); assert indexer.idle(20)
-        assert free.asked == 2, "never described twice"
+        assert asleep.asked == 2, "never described twice"
     finally:
         indexer.stop()
         BoardIndex.drop(dd, board["id"])
@@ -625,3 +635,69 @@ def test_an_image_the_model_writes_is_taken_out():
     assert "![" not in got["answer"] and "example.com" not in got["answer"]
     assert got["answer"].startswith("Here is the diagram:\n\nIt starts with the query")
     assert got["cited"] == [cid]
+
+
+def test_older_short_descriptions_are_redone_only_while_the_model_is_loaded(dd, board, cards):
+    """The short descriptions of DESIGN.md 38 stay in use until each picture is
+    described again with its text written out (51) - and the model is never
+    loaded just for that."""
+    import json
+
+    from mindboard.indexer import Indexer
+    from mindboard.search_index import BoardIndex, PictureNotes, picture_of
+
+    nodes = nodes_of(dd, board)
+    shas = [picture_of(nodes[cards[k]]) for k in ("plan", "video")]
+    old = dd.root / "search" / "pictures.json"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text(json.dumps({s: "an old short description" for s in shas}), encoding="utf-8")
+    PictureNotes._all.clear()
+    notes = PictureNotes.get(dd)
+    assert notes.notes[shas[0]] == "an old short description" and not notes.done(shas[0])
+
+    asleep = Seeing(running=False, said="A site plan. Text: JUNCTION 4, red pole, scale 1:500")
+    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: asleep)
+    try:
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert asleep.started == 0, "not loaded just to redo a description"
+        assert cards["plan"] in BoardIndex.get(dd, board["id"]).keyword("old short description"), \
+            "meanwhile the old one still finds it"
+        loaded = Seeing(said="A site plan. Text: JUNCTION 4, red pole, scale 1:500")
+        indexer.describer = lambda: loaded
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert loaded.asked == 2 and all(notes.done(s) for s in shas)
+        assert cards["plan"] in BoardIndex.get(dd, board["id"]).keyword("scale 1:500"), \
+            "a detail written in the picture is found"
+        assert json.loads(old.read_text(encoding="utf-8"))[shas[0]] == "an old short description", \
+            "the old file is left as it was"
+    finally:
+        indexer.stop()
+        BoardIndex.drop(dd, board["id"])
+        PictureNotes._all.clear()
+
+
+def test_a_long_description_is_kept_whole_for_search_but_shortened_in_the_prompt():
+    long = "Text: " + "word " * 500
+    assert len(ask.seen_line(long)) < len(long)
+    assert ask.seen_line(long).startswith("\n    picture shows: Text: word")
+    assert ask.seen_line("") == ""
+    assert "every word, number and label you can read" in ask.DESCRIBE
+
+
+def test_a_picture_whose_file_is_missing_never_loads_the_model(dd, board, cards):
+    from mindboard.assets import resolve
+    from mindboard.indexer import Indexer
+    from mindboard.search_index import BoardIndex, picture_of
+
+    nodes = nodes_of(dd, board)
+    c = conn_for(dd, board["id"])
+    for k in ("plan", "video"):
+        resolve(dd, c, board["id"], picture_of(nodes[cards[k]])).unlink()
+    asleep = Seeing(running=False)
+    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: asleep)
+    try:
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert asleep.started == 0 and asleep.asked == 0
+    finally:
+        indexer.stop()
+        BoardIndex.drop(dd, board["id"])
