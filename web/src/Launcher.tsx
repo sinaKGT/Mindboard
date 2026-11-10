@@ -1,13 +1,19 @@
 /** The only screen outside the canvas. Each card draws the board's actual
  *  top-level graph, so a shelf of boards reads as a shelf of distinct things. */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from './api'
 import { backUp } from './backup'
+import { Constellation } from './Constellation'
 import { Icon } from './icons'
 import { GraphMini, ago } from './Mini'
 import { useStore } from './store'
+import { NODE_COLOURS } from './theme'
 import type { BoardMeta } from './types'
+
+/** the colours a tile can take: the card colours, and the Experts' gold */
+const TILE_COLOURS = [...NODE_COLOURS, '#e8b864']
+type Summary = { summary: string; pending?: boolean; empty?: boolean; installed?: boolean; asked: number }
 
 const TYPE_ORDER = ['text', 'image', 'video', 'link', 'file', 'meta'] as const
 const TYPE_LABEL: Record<string, string> = {
@@ -37,6 +43,11 @@ export function Launcher({ onImport }: { onImport: () => void }) {
   const [, retick] = useState(0)
   const open = useStore((s) => s.open)
   const say = useStore((s) => s.say)
+  // the tile whose colour is being picked
+  const [colouring, setColouring] = useState<string | null>(null)
+  // tile summaries (DESIGN.md 54), asked for when the pointer rests on a tile
+  const [summaries, setSummaries] = useState<Record<string, Summary>>({})
+  const resting = useRef<number>(0)
 
   const refresh = useCallback(async () => {
     try { setBoards(await api.listBoards()) } catch (e: any) { say(e.message, true); setBoards([]) }
@@ -75,6 +86,29 @@ export function Launcher({ onImport }: { onImport: () => void }) {
     try { await api.deleteBoard(b.id); void refresh() } catch (e: any) { say(e.message, true) }
   }
 
+  /** A tile's colour, kept in the board's settings - merged in, as settings
+   *  are saved whole and also hold its theme */
+  const paint = async (b: BoardMeta, colour: string | null) => {
+    const { tile: _old, ...others } = b.settings ?? {}
+    try {
+      await api.patchBoard(b.id, { settings: colour ? { ...others, tile: colour } : others })
+      void refresh()
+    } catch (e: any) { say(e.message, true) }
+  }
+
+  /** The summary, asked for once the pointer has rested a moment: kept for
+   *  the session, asked again after a while if it was not written yet */
+  const rest = (b: BoardMeta) => {
+    window.clearTimeout(resting.current)
+    const have = summaries[b.id]
+    if (have && (!have.pending || Date.now() - have.asked < 30000)) return
+    resting.current = window.setTimeout(() => {
+      api.boardSummary(b.id)
+        .then((s) => setSummaries((m) => ({ ...m, [b.id]: { ...s, asked: Date.now() } })))
+        .catch(() => {})
+    }, 350)
+  }
+
   const spotlight = (e: React.MouseEvent<HTMLElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
     e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`)
@@ -82,8 +116,11 @@ export function Launcher({ onImport }: { onImport: () => void }) {
   }
 
   return (
-    <div className="launcher">
+    <div className="launcher" onMouseDown={(e) => {
+      if (colouring && !(e.target as HTMLElement).closest('.tile-colours, .tile-colour-btn')) setColouring(null)
+    }}>
       <div className="launcher-inner">
+        <Constellation />
         <div className="launcher-head">
           <span className="dot" />
           <h1>Mindboard</h1>
@@ -121,14 +158,27 @@ export function Launcher({ onImport }: { onImport: () => void }) {
           </div>
         ) : (
           <div className="board-grid">
-            {boards.map((b, i) => (
-              <button key={b.id} className="board-card" style={{ ['--i' as string]: i }}
-                onMouseMove={spotlight} onClick={() => void open(b.id)}>
+            {boards.map((b, i) => {
+              const tile = b.settings?.tile
+              const s = summaries[b.id]
+              return (
+              <button key={b.id} className={`board-card${tile ? ' coloured' : ''}${colouring === b.id ? ' picking' : ''}`}
+                style={{ ['--i' as string]: i, ...(tile ? { ['--tile' as string]: tile } : {}) }}
+                onMouseMove={spotlight} onMouseEnter={() => rest(b)}
+                onMouseLeave={() => window.clearTimeout(resting.current)}
+                onClick={() => { if (!colouring) void open(b.id) }}>
                 <span className="card-glow" aria-hidden="true" />
                 <span className="card-canvas">
                   {b.preview?.nodes?.length
                     ? <GraphMini nodes={b.preview.nodes} edges={b.preview.edges} />
                     : <span className="card-canvas-empty">empty board</span>}
+                  {s && !s.empty ? (
+                    <span className={`card-summary${s.summary ? '' : ' waiting'}`}>
+                      {s.summary || (s.installed === false
+                        ? 'Set up the AI to have this board summarised.'
+                        : 'Not summarised yet - it is written while the AI is running.')}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="card-body">
                   <h3>{b.title}</h3>
@@ -139,6 +189,10 @@ export function Launcher({ onImport }: { onImport: () => void }) {
                   <span className="when">{ago(b.updated_at)}</span>
                 </span>
                 <span className="card-tools" onClick={(e) => e.stopPropagation()}>
+                  <span className="icon-btn tile-colour-btn" title="Colour" role="button"
+                    onClick={() => setColouring(colouring === b.id ? null : b.id)}>
+                    <span className="tile-swatch" style={{ background: tile || 'transparent' }} />
+                  </span>
                   <a className="icon-btn" href={api.exportUrl(b.id)} title="Export"
                     onClick={(e) => e.stopPropagation()}>
                     <Icon name="download" size={13} />
@@ -152,8 +206,26 @@ export function Launcher({ onImport }: { onImport: () => void }) {
                     <Icon name="trash" size={13} />
                   </span>
                 </span>
+                {colouring === b.id ? (
+                  <span className="tile-colours" onClick={(e) => e.stopPropagation()}>
+                    {TILE_COLOURS.map((c) => (
+                      <span key={c} role="button" className={`tile-pick${tile === c ? ' on' : ''}`}
+                        style={{ background: c }} title={c}
+                        onClick={() => { void paint(b, c); setColouring(null) }} />
+                    ))}
+                    <label className="tile-pick custom" title="Any colour">
+                      <input type="color" value={tile || '#6ea8fe'}
+                        onChange={(e) => void paint(b, e.target.value)} />
+                    </label>
+                    <span role="button" className="tile-pick none" title="No colour"
+                      onClick={() => { void paint(b, null); setColouring(null) }}>
+                      <Icon name="x" size={10} />
+                    </span>
+                  </span>
+                ) : null}
               </button>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

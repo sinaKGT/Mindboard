@@ -124,7 +124,8 @@ class Indexer:
         row = conn.execute("SELECT revision FROM board WHERE id=?", (bid,)).fetchone()
         if row is None:
             return                                  # the board is gone
-        nodes = {n["id"]: n for n in read_graph(conn, bid)["nodes"]}
+        graph = read_graph(conn, bid)
+        nodes = {n["id"]: n for n in graph["nodes"]}
         index = BoardIndex.get(self.dd, bid)
         notes = PictureNotes.get(self.dd)
         self._read_files(bid, conn, nodes)
@@ -138,8 +139,31 @@ class Indexer:
                 index.sync_text(nodes, row["revision"], model.inst.embedder.name, card_notes(self.dd))
                 while index.pending() and not self._changed_again(bid):
                     index.embed_some(model, self.batch)
+            self._summarise(bid, graph)
         finally:
             index.flush()
+
+    def _summarise(self, bid: str, graph: dict) -> None:
+        """The board's tile summary (DESIGN.md 54), when it is missing or the
+        board has changed a lot - only while the chat model is loaded and free,
+        never loaded for this."""
+        from . import summaries
+        from .boards import board_meta
+
+        chat = self.describer() if self.describer else None
+        if chat is None or not chat.running() or self._changed_again(bid):
+            return
+        meta = board_meta(self.dd, bid) or {}
+        if summaries.fresh(summaries.load(self.dd).get(bid), meta.get("title", ""), len(graph["nodes"])):
+            return
+        if not graph["nodes"] or not chat._asking.acquire(blocking=False):
+            return
+        try:
+            summaries.write(chat, self.dd, bid, meta, graph["nodes"], graph["edges"])
+        except Exception:
+            log.exception("summarising board %s", bid)
+        finally:
+            chat._asking.release()
 
     @staticmethod
     def _may_load(chat) -> bool:

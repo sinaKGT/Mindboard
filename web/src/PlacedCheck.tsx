@@ -8,7 +8,9 @@
  *  the card as the board is panned or zoomed.
  */
 import { ViewportPortal } from '@xyflow/react'
+import { useEffect, useRef } from 'react'
 
+import { useAsk } from './askStore'
 import { Icon } from './icons'
 import { useStore } from './store'
 import { useUI } from './ui'
@@ -20,6 +22,19 @@ export function PlacedCheck() {
   const edgeThere = useStore((s) => (placed?.edgeId ? !!s.edges[placed.edgeId] : false))
   const path = useStore((s) => s.path)
   const setUI = useUI((s) => s.set)
+  // the board has to be seen to answer: its own chat steps aside, unless it
+  // sits along the left edge - as when arriving from the Experts (DESIGN.md 55)
+  // once the board's chat has loaded its saved state, and once per card - a
+  // chat you open again yourself stays open
+  const askBoard = useAsk((s) => s.boardId)
+  const boardId = useStore((s) => s.boardId)
+  const steppedAside = useRef<string | null>(null)
+  useEffect(() => {
+    if (!placed || !card || !boardId || askBoard !== boardId || steppedAside.current === placed.cardId) return
+    steppedAside.current = placed.cardId
+    const ask = useAsk.getState()
+    if (ask.open && (ask.expanded || ask.side !== 'left')) ask.setOpen(false)
+  }, [placed?.cardId, !!card, askBoard, boardId])  // eslint-disable-line react-hooks/exhaustive-deps
   if (!placed || !card) return null
   // only on the level the card is on
   if ((card.parent ?? null) !== (path[path.length - 1] ?? null)) return null

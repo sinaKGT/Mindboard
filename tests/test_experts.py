@@ -262,3 +262,46 @@ def test_a_video_shows_its_cover():
     assert experts.picture_of({"type": "video", "content": {"sha256": "v", "poster": "p"}}) == "p"
     assert experts.picture_of({"type": "image", "content": {"sha256": "i"}}) == "i"
     assert experts.picture_of({"type": "text", "content": {"text": "x"}}) is None
+
+
+def test_an_expert_draft_links_across_its_boards_and_says_which(dd, library):
+    """DESIGN.md 55: the card it belongs with may be on any of the expert's
+    boards; the route says which, for the card to go there."""
+    import threading
+    from types import SimpleNamespace
+
+    e = experts.create(dd, {"name": "Both", "boards": [library["RAG notes"]["board"], library["Garden"]["board"]]})
+    compost = library["Garden"]["Compost"]
+
+    class Drafter:
+        def __init__(self):
+            self._asking, self.inst, self.asked = threading.Lock(), SimpleNamespace(model="m"), []
+
+        def running(self):
+            return True
+
+        def stop(self):
+            pass
+
+        def chat(self, messages, **kw):
+            self.asked.append(messages)
+            return {"text": json.dumps({"title": "Worms help", "text": "Worms speed up compost.",
+                                        "link_to": compost, "kind": "supports", "label": "speeds up",
+                                        "why": "It is about the heap."})}
+
+    app = create_app(dd, "t")
+    h = {"X-Mindboard-Token": "t"}
+    with TestClient(app) as c:
+        app.state.ask["model"] = Drafter()
+        from mindboard import llm
+        real = llm.find_install
+        llm.find_install = lambda home=None: SimpleNamespace(model="m")
+        try:
+            got = c.post(f"/api/experts/{e['id']}/draft", headers=h, json={
+                "question": "explain more", "answer": "Worms make compost faster.", "cited": [],
+                "candidates": [library["RAG notes"]["Chunking"], compost],
+                "history": [{"role": "user", "text": "how do I compost?"}]}).json()
+        finally:
+            llm.find_install = real
+    assert got["link_to"] == compost and got["board"] == library["Garden"]["board"]
+    assert got["kind"] == "supports" and got["label"] == "speeds up"

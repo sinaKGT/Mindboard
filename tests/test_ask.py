@@ -526,6 +526,10 @@ class Seeing:
         return self.short
 
     def chat(self, messages, **kw):
+        # while loaded it also writes the board's tile summary (DESIGN.md 54):
+        # answered, but not counted as a picture described
+        if isinstance(messages[-1]["content"], str):
+            return {"text": "A board about a junction site."}
         self.asked += 1
         assert any(p.get("type") == "image_url" for p in messages[-1]["content"]), "it is shown the picture"
         return {"text": self.said}

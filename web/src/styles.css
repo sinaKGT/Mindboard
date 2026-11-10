@@ -1333,3 +1333,82 @@ a.btn { text-decoration: none; }
 .placed-yes:hover { color: var(--mb-bg); background: var(--mb-accent); border-color: var(--mb-accent); }
 .placed-no:hover { color: var(--mb-danger); border-color: var(--mb-danger); }
 @media (prefers-reduced-motion: reduce) { .placed-check { animation: none; } }
+
+/* ------------------------------------------------- the first page (DESIGN.md 54) */
+/* a gold constellation drawing itself above a desert horizon, behind the header */
+.launcher-inner { position: relative; }
+.launcher-head, .launcher-sub, .launcher-actions, .board-grid { position: relative; z-index: 1; }
+.constellation {
+  position: absolute; right: 0; top: -40px; width: 520px; height: 190px; z-index: 0;
+  pointer-events: none; overflow: visible; --gold: #e8b864;
+  transition: opacity 1.2s ease;
+}
+.constellation.fading g { opacity: 0; transition: opacity 1.2s ease; }
+.constellation .dune { fill: none; stroke: var(--gold); stroke-width: 1; opacity: .16; }
+.constellation .dune.far { opacity: .08; }
+.constellation .c-line {
+  stroke: var(--gold); stroke-width: 1; stroke-linecap: round; opacity: .55;
+  animation: cDraw .9s cubic-bezier(.4, .1, .2, 1) forwards;
+}
+.constellation .c-star {
+  fill: var(--gold); opacity: 0;
+  animation: cStar .5s ease forwards, cTwinkle 3.6s ease-in-out infinite;
+}
+@keyframes cDraw { to { stroke-dashoffset: 0; } }
+@keyframes cStar { to { opacity: .95; } }
+@keyframes cTwinkle { 0%, 100% { opacity: .95; } 50% { opacity: .45; } }
+.constellation.still .c-line, .constellation.still .c-star { animation: none; opacity: .7; }
+@media (max-width: 900px) { .constellation { display: none; } }
+@media (prefers-reduced-motion: reduce) { .constellation .c-line, .constellation .c-star { animation: none; opacity: .7; stroke-dashoffset: 0 !important; } }
+
+/* a tile's own colour: its edge, a strip along the top, its glow and preview */
+.board-card.coloured { border-color: color-mix(in srgb, var(--tile) 45%, var(--mb-border)); }
+.board-card.coloured::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 2;
+  background: var(--tile);
+}
+.board-card.coloured:hover { border-color: var(--tile); }
+.board-card.coloured .card-glow {
+  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 0%),
+    color-mix(in srgb, var(--tile) 16%, transparent), transparent 65%);
+}
+.board-card.coloured .card-canvas {
+  background:
+    radial-gradient(circle at 1px 1px, var(--mb-grid) 1px, transparent 0) 0 0 / 14px 14px,
+    linear-gradient(160deg, color-mix(in srgb, var(--tile) 14%, var(--mb-bg)), var(--mb-bg));
+}
+.board-card.coloured:hover .mini-edges path { stroke: color-mix(in srgb, var(--tile) 60%, var(--mb-edge)); }
+.board-card.picking .card-tools { opacity: 1; transform: none; }
+.tile-swatch {
+  width: 12px; height: 12px; border-radius: 50%; display: block;
+  border: 1.5px solid var(--mb-text-dim); box-sizing: border-box;
+}
+.tile-colours {
+  position: absolute; top: 42px; right: 9px; z-index: 3; display: flex; gap: 6px; align-items: center;
+  padding: 7px 8px; border-radius: 10px; background: var(--mb-surface);
+  border: 1px solid var(--mb-border-strong); box-shadow: var(--mb-shadow-lg);
+  animation: pop 120ms var(--mb-ease);
+}
+.tile-pick {
+  width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  border: 2px solid transparent; transition: transform 120ms var(--mb-spring);
+}
+.tile-pick:hover { transform: scale(1.15); }
+.tile-pick.on { border-color: var(--mb-text); }
+.tile-pick.custom {
+  background: conic-gradient(#f97583, #e6b95c, #6fd7a4, #6ea8fe, #cf8ce8, #f97583); overflow: hidden; position: relative;
+}
+.tile-pick.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.tile-pick.none { background: var(--mb-surface-3); color: var(--mb-text-dim); border-color: var(--mb-border); }
+
+/* the summary, over the tile's preview while the pointer rests on it */
+.card-summary {
+  /* below the tile's tool buttons, at most four lines */
+  position: absolute; inset: 0; z-index: 2; padding: 36px 15px 8px;
+  font-size: 12px; line-height: 1.4; color: var(--mb-text);
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+  background: color-mix(in srgb, var(--mb-surface) 90%, transparent); backdrop-filter: blur(3px);
+  opacity: 0; transition: opacity 180ms var(--mb-ease);
+}
+.card-summary.waiting { color: var(--mb-text-faint); font-size: 11.5px; font-style: italic; }
+.board-card:hover .card-summary { opacity: 1; transition-delay: 250ms; }

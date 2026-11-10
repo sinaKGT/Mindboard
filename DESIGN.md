@@ -3051,3 +3051,66 @@ title and description were written by double-clicking them, and a
 double-click on its count opened it. Not yet tried with the real model.
 
 247 tests.
+
+## 54. The first page: a constellation, tile colours, summaries on hover (2026-11-10)
+
+- **A constellation that draws itself** (`Constellation.tsx`), top right,
+  behind the header, in the Experts' gold above two faint dune lines - their
+  night desert without its sand. Each round places 12 stars at least 42 apart,
+  then joins them one line every 0.42 s into a spanning tree, nearest first,
+  plus two short links that close small loops; holds 4.5 s, fades, and draws a
+  new one. Lines and stars only, all CSS - no particles, nothing per frame in
+  script. Less motion asked for: one constellation, drawn, still. Hidden on
+  windows narrower than 900 px.
+- **A colour per tile.** A swatch button on each tile: the seven card colours,
+  the Experts' gold, any colour, or none. It colours the tile's edge, a strip
+  along its top, its glow and its preview. Kept in the board's settings as
+  `tile`, merged in, as settings are saved whole and also hold the theme.
+  Like any change to a board it moves the tile to the front of the list.
+- **A summary on hover** (`summaries.py`, `GET /api/boards/{id}/summary`).
+  One or two sentences, at most 40 words, written by the local model from the
+  board's title, description, top-level groups and its 30 most connected
+  cards, starting with the subjects, never "This board". Shown over the tile's
+  preview after the pointer rests a moment. Kept in
+  `<data>/search/summaries.json` (derived, not backed up) and written again
+  only when the board is renamed or changes by 15%, and by at least 5 cards.
+  Written only while the model is loaded and free - by the tile's request, or
+  by the background indexer after a board's round - and never loaded for a
+  hover; until then the tile says it is not summarised yet.
+
+Tried in the app: the constellation drew, held and redrew in a new shape; two
+tiles took gold and pink, the boards' themes and colours untouched; a summary
+showed on hover below the tile's buttons, and a board without one said it was
+not summarised yet. A summary has not yet been written by the real model: it
+was in use by another copy of Mindboard.
+
+251 tests.
+
+## 55. Add to board from the Experts, the same way (2026-11-10)
+
+The Experts kept their own form: draft, choose a board and a card, press Add.
+Now they work as board chat does (§53).
+
+- **Across the expert's boards** (`POST /api/experts/{id}/draft`). The
+  drafter reads the cards of all the expert's boards, is given every card the
+  conversation brought up (what answers cited and what their searches found)
+  and the conversation, and the route says which board the chosen card is on.
+- **Placed there, then asked there.** The card goes on that board beside its
+  card, linked with the kind and label, marked as made by AI; then you are
+  taken to it, and the canvas shows "Right place?" (`PlacedCheck`). With no
+  card to link to, it goes on the board the answer cited most, to the right.
+  The conversation is kept, as when opening a cited card, and is there when
+  you come back.
+- **The board's own chat steps aside** for the prompt, once that chat has
+  loaded its saved state, and once per card: a chat you reopen stays open.
+  Docked on the left, it stays.
+- Cards added from the Experts go in through the board's op-log on the
+  server, so the canvas's undo does not reach them; ✗ and deleting the card
+  work as usual.
+
+Tried in the app with a stand-in reply from the model: an answer citing
+nothing sent the conversation's two cards, the card landed on the board beside
+the table picture, the prompt showed with the board's chat out of the way, ✓
+kept it, and the Experts page brought the conversation back.
+
+252 tests.

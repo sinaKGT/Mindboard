@@ -338,6 +338,33 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     indexer = Indexer(dd, lambda: search_model("embed"), describer=local_model)
     app.state.indexer = indexer
 
+    @app.get("/api/boards/{bid}/summary")
+    def api_board_summary(bid: str):
+        """The board's tile summary (DESIGN.md 54): kept if still true of the
+        board; otherwise written now if the model is loaded and free - never
+        loaded for a hover. `pending` while it cannot be written yet."""
+        from . import summaries
+
+        meta = board_or_404(bid)
+        graph = read_graph(conn_for(dd, bid), bid)
+        if not graph["nodes"]:
+            return {"summary": "", "empty": True}
+        kept = summaries.load(dd).get(bid)
+        if summaries.fresh(kept, meta["title"], len(graph["nodes"])):
+            return {"summary": kept["text"]}
+        model = held.get("model")
+        if model is not None and model.running() and model._asking.acquire(blocking=False):
+            try:
+                text = summaries.write(model, dd, bid, meta, graph["nodes"], graph["edges"])
+                if text:
+                    return {"summary": text}
+            except Exception:
+                pass
+            finally:
+                model._asking.release()
+        return {"summary": (kept or {}).get("text", ""), "pending": True,
+                "installed": local_model() is not None}
+
     @app.post("/api/boards/{bid}/ask/draft")
     def api_ask_draft(bid: str, body: DraftRequest):
         """A card drafted from an answer, for the person to check. Writes
@@ -468,6 +495,33 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             return experts_mod.get(dd, eid)
         except experts_mod.ExpertError:
             raise HTTPException(404, "no such expert")
+
+    @app.post("/api/experts/{eid}/draft")
+    def api_expert_draft(eid: str, body: DraftRequest):
+        """A card drafted from an expert's answer (DESIGN.md 53, 55): as on a
+        board, but across all of the expert's boards - the card it belongs
+        with may be on any of them, and `board` says which. Writes nothing."""
+        from .ask import draft_card
+
+        expert = expert_or_404(eid)
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Ask your board is not set up yet")
+        nodes: dict[str, dict] = {}
+        board_of: dict[str, str] = {}
+        for bid in expert.get("boards", []):
+            if board_meta(dd, bid) is None:
+                continue
+            for n in read_graph(conn_for(dd, bid), bid)["nodes"]:
+                nodes[n["id"]], board_of[n["id"]] = n, bid
+        if not model._asking.acquire(blocking=False):
+            raise HTTPException(409, "still answering the last question")
+        try:
+            got = draft_card(model, nodes, body.question, body.answer, body.cited,
+                             body.candidates, [t.model_dump() for t in body.history])
+        finally:
+            model._asking.release()
+        return {**got, "board": board_of.get(got["link_to"], "")}
 
     @app.get("/api/experts")
     def api_experts():

@@ -500,7 +500,7 @@ export function ExpertsPage() {
                   {t.stopped ? <div className="xp-note">Stopped</div> : null}
                   {t.error ? <div className="xp-error">{t.error}</div> : null}
                   {adding === i ? (
-                    <AddCard boards={e.boards} question={turns[i - 1]?.text ?? ''} answer={t.text} where={t.where ?? {}}
+                    <AddCard expertId={e.id} boards={e.boards} turns={turns} at={i}
                       onDone={() => setAdding(null)} onOpen={goToCard} />
                   ) : t.status === 'done' && t.text.trim() && !t.error && !(busy && i === turns.length - 1) ? (
                     <button className="xp-add" onClick={() => setAdding(i)}>+ Add to board</button>

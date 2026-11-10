@@ -60,6 +60,8 @@ export interface BoardSettings {
   palette?: Record<string, string>
   /** the theme of your own this board uses, if any (DESIGN.md 52) */
   custom?: string | null
+  /** its tile's colour on the first page (DESIGN.md 54) */
+  tile?: string
   viewport?: { x: number; y: number; zoom: number }
 }
 

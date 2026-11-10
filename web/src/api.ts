@@ -43,6 +43,9 @@ const apiCore = {
   patchBoard: (id: string, patch: Partial<Pick<BoardMeta, 'title' | 'description' | 'settings'>>) =>
     req<BoardMeta>(`/boards/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteBoard: (id: string) => req<{ deleted: boolean }>(`/boards/${id}`, { method: 'DELETE' }),
+  /** the board's tile summary, written by the local model and kept (DESIGN.md 54) */
+  boardSummary: (id: string) =>
+    req<{ summary: string; pending?: boolean; empty?: boolean; installed?: boolean }>(`/boards/${id}/summary`),
 
   graph: (id: string) =>
     req<{ board: BoardMeta; revision: number; nodes: MNode[]; edges: MEdge[] }>(`/boards/${id}/graph`),
@@ -88,6 +91,11 @@ const apiCore = {
               onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> =>
     streamEvents(`/experts/${expertId}/ask`, { ...body, cards: [], think: false }, onEvent, signal),
   experts: () => req<{ experts: Expert[]; shapes: ShapeState[] }>('/experts'),
+  /** a card drafted from an expert's answer, across all its boards (DESIGN.md 55) */
+  expertDraft: (expertId: string, body: { question: string; answer: string; cited: string[];
+                                          candidates: string[]; history: { role: string; text: string }[] }) =>
+    req<{ title: string; text: string; link_to: string; kind: string; label: string; why: string; board: string }>(
+      `/experts/${expertId}/draft`, { method: 'POST', body: JSON.stringify(body) }),
   createExpert: (body: Partial<ExpertDraft>) =>
     req<Expert>('/experts', { method: 'POST', body: JSON.stringify(body) }),
   updateExpert: (id: string, body: Partial<ExpertDraft>) =>
