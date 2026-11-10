@@ -13,7 +13,7 @@ fail() { printf '\n  \033[31m%s\033[0m\n' "$1"; exit 1; }
 new_environment() {
   if command -v uv >/dev/null 2>&1; then
     say "environment   uv -> $VENV"
-    uv venv --clear "$VENV" >/dev/null
+    uv venv --clear --python "$PY" "$VENV" >/dev/null
     uv pip install --quiet --python "$VENV/bin/python" -e .
   else
     say "environment   venv -> $VENV  (install uv for a faster setup)"
@@ -67,11 +67,19 @@ usable() { [ -x "$VENV/bin/mindboard" ] && "$VENV/bin/mindboard" version >/dev/n
 
 printf '\n\033[1m  Installing Mindboard\033[0m\n\n'
 
+# A new enough Python. Homebrew installs it under its version - python3.12 -
+# and a Mac's own python3 is 3.9, so the versioned names come first, and
+# Homebrew's folders are looked in too, for a shell that does not have them
+# on its PATH yet.
 PY=""
-for candidate in python3 python; do
+for candidate in python3.13 python3.12 python3.11 python3.10 python3 python \
+                 /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 \
+                 /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.10 \
+                 /usr/local/bin/python3.13 /usr/local/bin/python3.12 \
+                 /usr/local/bin/python3.11 /usr/local/bin/python3.10; do
   if command -v "$candidate" >/dev/null 2>&1; then
-    if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)'; then
-      PY="$candidate"; break
+    if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+      PY="$(command -v "$candidate")"; break
     fi
   fi
 done
