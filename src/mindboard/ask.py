@@ -688,36 +688,69 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
 # ------------------------------------------------------------ to a card --
 
 DRAFT_KINDS = ("relates", "supports", "example-of", "part-of", "causes", "contradicts")
-DRAFT_SYSTEM = """You turn one answer from a conversation into a card for a person's mind map.
+DRAFT_SYSTEM = """You add one new card to a person's mind map, from a conversation about it.
 
 Reply with JSON only, no other text:
-{"title": "...", "text": "...", "link_to": "...", "kind": "..."}
+{"title": "...", "text": "...", "link_to": "...", "kind": "...", "label": "...", "why": "..."}
 
-- title: a short name for the idea, at most 8 words.
-- text: the knowledge itself in 1-4 plain sentences - not the conversation, no
-  citations, no "Beyond your board".
-- link_to: the id of the one card below it belongs with most, or "" if none.
+The card holds what the LAST ANSWER adds that the CARDS do not already say:
+new knowledge - what the answer explained, added from general knowledge, or
+put together. Never repeat what a card already holds, and never write about
+the conversation itself.
+
+- title: a short name for that new idea, at most 8 words.
+- text: the new knowledge in 1-4 plain sentences, with no citations and no
+  "Beyond your board".
+- link_to: the id of the ONE card below this new knowledge belongs with most -
+  the card it explains, extends, gives an example of or argues with. The
+  cards are the ones this conversation found; read their words, not only
+  their titles. "" only if none of them is related.
 - kind: how the new card relates to that card: relates, supports, example-of,
-  part-of, causes or contradicts. A new example of an idea is example-of."""
+  part-of, causes or contradicts.
+- label: "" when the kind says it well enough; otherwise a few words naming
+  the relation more exactly, read as "new card <label> that card" - such as
+  "is a faster variant of" or "explains why". At most 5 words.
+- why: one short sentence on why it belongs with that card."""
+
+DRAFT_CARDS = 40          # cards from the conversation the drafter may link to
+DRAFT_EXCERPT = 160       # characters of each card's words it reads
+LABEL_WORDS = 5
 
 
 def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
-               cited: list[str]) -> dict:
-    """A card made from an answer, for the person to check before it is added
-    (DESIGN 34): title, text, the card to link it to and how. Nothing is
-    written here - the board only changes when the person presses Add, through
-    the op-log like any edit."""
-    cards = [i for i in dict.fromkeys(cited) if i in nodes]
-    listing = "\n".join(f"{i}: {nodes[i].get('title') or 'Untitled'}" for i in cards) or "(none)"
+               cited: list[str], candidates: Optional[list[str]] = None,
+               history: Optional[list[dict]] = None) -> dict:
+    """A card made from an answer (DESIGN 34, 53): the NEW knowledge it adds,
+    the card from this conversation it belongs with, and how they relate - a
+    kind, and a label of its own where the kind is too coarse - with the
+    reason. Nothing is written here: the interface places it, then asks the
+    person whether it is in the right place.
+
+    `cited`: the cards the answer drew on; `candidates`: every card the
+    conversation brought up - an Explain more answer cites none, so without
+    them it had nothing to link to; `history`: the conversation before it."""
+    cards = [i for i in dict.fromkeys([*cited, *(candidates or [])]) if i in nodes][:DRAFT_CARDS]
+
+    def words(n: dict) -> str:
+        c = n.get("content") or {}
+        said = " ".join(str(c.get(k) or "") for k in ("text", "summary", "excerpt")).split()
+        return " ".join(said)[:DRAFT_EXCERPT]
+
+    marked = set(cited)
+    listing = "\n".join(f"{i}{' *' if i in marked else ''}: {nodes[i].get('title') or 'Untitled'}"
+                         + (f" - {words(nodes[i])}" if words(nodes[i]) else "") for i in cards) or "(none)"
     clean = CITE.sub("", BEYOND_MARK.sub(BEYOND, answer)).replace(BEYOND, "\nFrom general knowledge:")
+    convo = "\n".join(f"{t.get('role')}: {CITE.sub('', str(t.get('text', '')))[:400].strip()}"
+                       for t in (history or [])[-6:] if str(t.get("text", "")).strip())
     fallback = {"title": question.strip()[:70], "text": clean.strip()[:500],
-                "link_to": cards[0] if cards else "", "kind": "relates"}
+                "link_to": cards[0] if cards else "", "kind": "relates", "label": "", "why": ""}
     try:
         reply = model.chat([{"role": "system", "content": DRAFT_SYSTEM},
                             {"role": "user", "content":
-                             f"QUESTION\n{question.strip()}\n\nANSWER\n{clean.strip()[:6000]}"
-                             f"\n\nCARDS IT DREW ON\n{listing}"}],
-                           max_tokens=400, think=False, temperature=0.3)["text"]
+                             (f"CONVERSATION BEFORE\n{convo}\n\n" if convo else "")
+                             + f"LAST QUESTION\n{question.strip()}\n\nLAST ANSWER\n{clean.strip()[:6000]}"
+                             f"\n\nCARDS (* = the last answer drew on it)\n{listing}"}],
+                           max_tokens=500, think=False, temperature=0.3)["text"]
         got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
     except Exception:
         return fallback                      # a model that strays still gives a usable card
@@ -725,9 +758,12 @@ def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
     text = CITE.sub("", str(got.get("text") or "")).strip()[:800] or fallback["text"]
     link = str(got.get("link_to") or "").strip()
     kind = str(got.get("kind") or "").strip()
-    return {"title": title, "text": text,
-            "link_to": link if link in cards else (cards[0] if cards else ""),
-            "kind": kind if kind in DRAFT_KINDS else "relates"}
+    label = " ".join(str(got.get("label") or "").split()[:LABEL_WORDS]).strip(" .")[:40]
+    link = link if link in cards else (cards[0] if cards else "")
+    return {"title": title, "text": text, "link_to": link,
+            "kind": kind if kind in DRAFT_KINDS else "relates",
+            "label": label if link else "",
+            "why": str(got.get("why") or "").strip()[:200] if link else ""}
 
 
 # ------------------------------------------------------------ pictures --

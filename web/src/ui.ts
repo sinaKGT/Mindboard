@@ -24,6 +24,10 @@ interface UI {
   /** The image card open full screen. While it is set the canvas behind it
    *  takes no keys, clipboard or drops - see Viewer.tsx. */
   viewing: { nodeId: string; openedAt: number } | null
+  /** A card Add to board just placed, waiting for "Right place?" (PlacedCheck,
+   *  DESIGN.md 53): the card, the link the model chose, and why. */
+  placed: { cardId: string; edgeId: string | null; targetId: string | null;
+            relation: string; why: string } | null
   set<K extends keyof UI>(key: K, value: UI[K]): void
 }
 
@@ -42,5 +46,6 @@ export const useUI = create<UI>()((set) => ({
   sparkIds: [],
   foundId: null,
   viewing: null,
+  placed: null,
   set:(key, value) => set({ [key]: value } as any),
 }))

@@ -178,8 +178,10 @@ async function streamEvents(path: string, body: unknown, onEvent: (name: string,
 
 const apiMore = {
   /** A card drafted from an answer, to check before adding (nothing is written) */
-  askDraft: (boardId: string, body: { question: string; answer: string; cited: string[] }) =>
-    req<{ title: string; text: string; link_to: string; kind: string }>(
+  /** a card drafted from an answer: the new knowledge, where it belongs and how (DESIGN.md 53) */
+  askDraft: (boardId: string, body: { question: string; answer: string; cited: string[];
+                                      candidates?: string[]; history?: { role: string; text: string }[] }) =>
+    req<{ title: string; text: string; link_to: string; kind: string; label: string; why: string }>(
       `/boards/${boardId}/ask/draft`, { method: 'POST', body: JSON.stringify(body) }),
   askStop: (boardId: string) =>
     req<{ stopped: boolean }>(`/boards/${boardId}/ask/stop`, { method: 'POST' }),

@@ -500,7 +500,7 @@ def test_drafting_writes_nothing_to_the_board(client, board, cards, model):
     res = client.post(f"/api/boards/{board['id']}/ask/draft", headers={"X-Mindboard-Token": TOKEN},
                       json={"question": "where?", "answer": "On the corner.", "cited": [cards["mount"]]})
     assert res.status_code == 200, res.text
-    assert set(res.json()) == {"title", "text", "link_to", "kind"}
+    assert set(res.json()) == {"title", "text", "link_to", "kind", "label", "why"}
     after = client.get(f"/api/boards/{board['id']}/graph", headers={"X-Mindboard-Token": TOKEN}).json()
     assert after["revision"] == before["revision"]
 
@@ -701,3 +701,34 @@ def test_a_picture_whose_file_is_missing_never_loads_the_model(dd, board, cards)
     finally:
         indexer.stop()
         BoardIndex.drop(dd, board["id"])
+
+
+def test_an_explain_more_answer_links_to_a_card_the_conversation_found(dd, board, cards):
+    """DESIGN.md 53: Explain more cites nothing of its own, so the drafter is
+    given every card the conversation brought up, and the conversation, and
+    names the relation - a kind, and a label of its own where it is too coarse."""
+    import json as js
+
+    model = DraftModel(js.dumps({"title": "Ice loads the pole", "text": "Ice adds weight [[" + "A" * 26 + "]].",
+                                 "link_to": cards["link"], "kind": "causes",
+                                 "label": "adds stress to the mount, really a lot", "why": "Ice is another load."}))
+    got = ask.draft_card(model, nodes_of(dd, board), "explain more", "In winter, ice also loads the pole.",
+                         [], candidates=[cards["mount"], cards["link"]],
+                         history=[{"role": "user", "text": "where should it go?"},
+                                  {"role": "assistant", "text": f"On the corner [[{cards['mount']}]]."}])
+    assert got["link_to"] == cards["link"], "a card from earlier in the conversation, though not cited"
+    assert got["kind"] == "causes" and got["label"] == "adds stress to the mount,", "five words at most"
+    assert got["why"] == "Ice is another load." and "[[" not in got["text"]
+    prompt = model.asked[0][1]["content"]
+    assert "CONVERSATION BEFORE" in prompt and "where should it go?" in prompt and "[[" not in prompt.split("LAST QUESTION")[0]
+    assert "gusts to 30 m/s" in prompt, "it reads a card's words, not only its title"
+    assert "never write about" in ask.DRAFT_SYSTEM.lower() or "never repeat" in ask.DRAFT_SYSTEM.lower()
+
+
+def test_with_nothing_to_link_to_a_draft_stands_alone(dd, board, cards):
+    import json as js
+
+    got = ask.draft_card(DraftModel(js.dumps({"title": "T", "text": "x", "link_to": "nowhere",
+                                              "label": "explains", "why": "because"})),
+                         nodes_of(dd, board), "q", "a", [])
+    assert got["link_to"] == "" and got["label"] == "" and got["why"] == ""

@@ -166,7 +166,9 @@ export const useAsk = create<Ask>()((set, get) => ({
     // the cards earlier answers drew on stay in the conversation (DESIGN 34)
     const keep = [...new Set(s.turns.flatMap((t) => (t.status === 'done' && t.cited) || []))]
       .filter((id) => nodes[id]).slice(-40)
-    const explain = s.expanded && s.explain
+    // Explain more holds in either view - the header icon in the small one,
+    // the chip in the full screen one
+    const explain = s.explain
     const controller = new AbortController()
     set({
       busy: true, controller, open: true,

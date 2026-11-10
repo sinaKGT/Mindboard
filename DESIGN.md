@@ -3009,3 +3009,45 @@ applied, kept after a reload; Ocean replaced its colours; deleting it asked
 first and left the board in its colours.
 
 245 tests.
+
+## 53. Two fixes: writing on a group, and Add to board that finds its place (2026-11-10)
+
+**Writing on a group.** Double-clicking a group always opened it, wherever
+the click landed, so its title and description could not be written that
+way. Now, as on a picture card, double-clicking the words edits them;
+double-clicking the rest of the group card (its count, its little map) opens
+it, as does its Open button. Enter on a selected group still edits.
+
+**Add to board finds what is new, and where it goes.** It drafted from the
+one answer and could link only to the cards that answer cited. Explain more
+answers from the conversation and cites nothing, so the mode it is most used
+with had nothing to link to; the relation was one of six fixed words; and the
+card was added from a form, with no way to say afterwards it was misplaced.
+
+- **What is new** (`ask.draft_card`). The drafter is given the conversation
+  before the answer and every card the conversation brought up - what earlier
+  answers cited and what their searches found, the latest first, up to 40 -
+  each with its title and its first 160 characters, so it judges by their
+  words. It writes only what the answer adds that those cards do not already
+  say, most often what came from general knowledge.
+- **Where, and how.** It picks the one card it belongs with, a kind (the six
+  built-in ones), and where a kind is too coarse a label of its own of up to
+  5 words ("sets the bar for"), with a one-line reason. A link it names that
+  the conversation did not bring up falls back to the first one.
+- **Placed, then asked** (`PlacedCheck.tsx`). The card goes on the board at
+  once beside its card, linked, in one undoable step marked as made by AI;
+  the view goes to it, and the chat steps aside unless docked on the left.
+  Above the card: "Right place? <relation> <card>" with ✓ and ✗. ✓ keeps it.
+  ✗ removes the suggested link, keeps the card, and starts a connection from
+  it: the next click on a card links it there (Esc leaves it alone).
+- The Experts' own add-card form is unchanged.
+
+Tried in the app with a stand-in reply from the model (the real model was in
+use by another copy of Mindboard): an Explain more answer citing nothing sent
+the three cards its conversation had found; the card landed beside the table
+picture, linked "supports · sets the bar for", with the prompt above it; ✗
+removed the link, and a click on another card linked it there. A group's
+title and description were written by double-clicking them, and a
+double-click on its count opened it. Not yet tried with the real model.
+
+247 tests.

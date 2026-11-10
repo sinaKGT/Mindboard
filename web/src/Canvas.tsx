@@ -18,6 +18,7 @@ import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
 import { CLICK_SLOP, nodeTypes } from './nodes'
 import { ancestorAtLevel, currentParent, useStore } from './store'
+import { PlacedCheck } from './PlacedCheck'
 import { Shortcuts } from './Shortcuts'
 import { ThemeSheet } from './ThemeSheet'
 import type { MEdge, MNode } from './types'
@@ -826,6 +827,7 @@ function CanvasInner() {
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}>
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.9} color="var(--mb-grid)" />
+        <PlacedCheck />
         {linkPath && (
           <ViewportPortal>
             <svg className="link-ghost" width={1} height={1}

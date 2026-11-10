@@ -1311,3 +1311,25 @@ a.btn { text-decoration: none; }
 .answer-file-btn { flex: none; font-size: 11.5px; padding: 2px 9px; border-radius: 999px; color: var(--mb-accent); border: 1px solid var(--mb-border); }
 .answer-file-btn:hover { border-color: var(--mb-accent); }
 .answer-files-said { font-size: 11.5px; color: var(--mb-text-dim); }
+
+/* "Right place?" beside a card Add to board just placed (PlacedCheck, DESIGN.md 53) */
+.placed-check {
+  position: absolute; left: 0; top: 0; z-index: 10; pointer-events: auto;
+  display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; white-space: nowrap;
+  border-radius: 12px; background: var(--mb-surface); border: 1px solid var(--mb-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mb-accent) 16%, transparent), var(--mb-shadow-lg);
+  animation: placedIn 160ms cubic-bezier(.2, .9, .25, 1);
+}
+@keyframes placedIn { from { opacity: 0; transform-origin: left bottom; scale: .96; } }
+.placed-words { display: flex; flex-direction: column; line-height: 1.3; }
+.placed-q { font-size: 12px; font-weight: 600; color: var(--mb-text); }
+.placed-where { font-size: 11.5px; color: var(--mb-text-dim); max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.placed-where b { color: var(--mb-text); font-weight: 600; }
+.placed-yes, .placed-no {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  border: 1px solid var(--mb-border-strong); color: var(--mb-text-dim); background: var(--mb-surface-2);
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.placed-yes:hover { color: var(--mb-bg); background: var(--mb-accent); border-color: var(--mb-accent); }
+.placed-no:hover { color: var(--mb-danger); border-color: var(--mb-danger); }
+@media (prefers-reduced-motion: reduce) { .placed-check { animation: none; } }

@@ -2,6 +2,9 @@ const P = (d: string, extra?: Record<string, any>) => ({ d, ...extra })
 
 const PATHS: Record<string, ReturnType<typeof P>[]> = {
   plus: [P('M8 3.5v9M3.5 8h9')],
+  check: [P('M3.5 8.5l3 3 6-7')],
+  // an open book: Explain more
+  explain: [P('M8 4.6C6.6 3.6 4.6 3.3 2.5 3.6v8.6c2.1-.3 4.1 0 5.5 1 1.4-1 3.4-1.3 5.5-1V3.6c-2.1-.3-4.1 0-5.5 1Z'), P('M8 4.6v8.6')],
   // the ankh: the chat bar, as for the experts
   ankh: [P('M8 7.3C6.2 6.1 5.5 5 5.5 3.9 5.5 2.5 6.6 1.5 8 1.5s2.5 1 2.5 2.4c0 1.1-.7 2.2-2.5 3.4Z'),
          P('M3.8 8.4h8.4'), P('M8 7.3v7.2')],

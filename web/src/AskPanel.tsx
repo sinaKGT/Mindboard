@@ -14,6 +14,7 @@ import { cardsInside, revealCard, useAsk, type Turn } from './askStore'
 import { Icon } from './icons'
 import { Prose } from './Prose'
 import { useStore } from './store'
+import { useUI } from './ui'
 import { newEdge, newNode, type MEdge, type Op } from './types'
 
 const BEYOND = 'Beyond your board:'
@@ -100,27 +101,41 @@ const KIND_WORDS: Record<string, string> = {
   'part-of': 'is part of', causes: 'causes', contradicts: 'contradicts',
 }
 
-/** Add to board: the model drafts a card from the answer - the knowledge, not
- *  the chat - and proposes the card it belongs with. Nothing changes until
- *  Add: then one undoable step through the op-log, marked as made by AI, and
- *  the background indexer makes it searchable (DESIGN 34). */
+/** Add to board (DESIGN.md 34, 53): the model writes what this answer adds
+ *  that the conversation's cards do not already say - most often what Explain
+ *  more brought in from general knowledge - picks the card it belongs with
+ *  among every card this conversation found, and how they relate: a kind, and
+ *  a label of its own where a kind is too coarse. The card goes on the board
+ *  at once, one undoable step through the op-log, marked as made by AI, and
+ *  the canvas asks "Right place?" beside it (PlacedCheck): keep it, or link
+ *  it to another card yourself. */
 function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; onDone: () => void }) {
   const boardId = useStore((s) => s.boardId)
-  const nodes = useStore((s) => s.nodes)
-  const [draft, setDraft] = useState<{ title: string; text: string; link_to: string; kind: string } | null>(null)
+  const turns = useAsk((s) => s.turns)
   const [error, setError] = useState('')
-  const cited = (turn.cited ?? []).filter((id) => nodes[id])
 
   useEffect(() => {
     if (!boardId) return
-    api.askDraft(boardId, { question, answer: turn.text, cited })
-      .then(setDraft).catch((e) => setError(e.message || 'could not draft the card'))
-    // drafted once, when opened
+    const nodes = useStore.getState().nodes
+    const at = turns.indexOf(turn)
+    const before = turns.slice(0, Math.max(at - 1, 0))
+    // every card this conversation brought up - what answers cited and what
+    // searches found - the latest first: Explain more cites none of its own
+    const seen = [turn, ...before.slice().reverse()]
+      .flatMap((t) => [...(t.cited ?? []), ...(t.cards ?? [])])
+    const candidates = [...new Set(seen)].filter((id) => nodes[id]).slice(0, 60)
+    const history = before
+      .filter((t) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done'))
+      .slice(-6).map((t) => ({ role: t.role, text: t.text }))
+    const cited = (turn.cited ?? []).filter((id) => nodes[id])
+    api.askDraft(boardId, { question, answer: turn.text, cited, candidates, history })
+      .then((draft) => place(draft))
+      .catch((e) => setError(e.message || 'could not draft the card'))
+    // drafted once, when asked for
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const add = () => {
-    if (!draft || !draft.title.trim()) return
+  const place = (draft: { title: string; text: string; link_to: string; kind: string; label: string; why: string }) => {
     const store = useStore.getState()
     const target = draft.link_to ? store.nodes[draft.link_to] : undefined
     // beside the card it belongs with, in its group; else on the level in view
@@ -128,46 +143,30 @@ function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; 
       ? [target.pos[0] + (target.size[0] ?? 240) + 90, target.pos[1] + 30]
       : [0, 0]
     const parent = target ? target.parent : (store.path[store.path.length - 1] ?? null)
-    const card = newNode({ pos, parent, title: draft.title.trim(),
+    const card = newNode({ pos, parent, title: draft.title.trim() || question.slice(0, 70),
                            content: { text: draft.text.trim() }, provenance: 'ai' })
     const ops: Op[] = [{ kind: 'node.create', node: card }]
+    let edgeId: string | null = null
     if (target) {
-      ops.push({ kind: 'edge.create',
-                 edge: newEdge(card.id, target.id, { kind: draft.kind as MEdge['kind'], provenance: 'ai' }) })
+      const edge = newEdge(card.id, target.id, { kind: draft.kind as MEdge['kind'], label: draft.label,
+                                                provenance: 'ai' })
+      edgeId = edge.id
+      ops.push({ kind: 'edge.create', edge })
     }
     store.run(ops)
-    store.say('Added to your board')
+    useUI.getState().set('placed', {
+      cardId: card.id, edgeId, targetId: target?.id ?? null, why: draft.why,
+      relation: draft.label || KIND_WORDS[draft.kind] || 'relates to' })
+    // the board has to be seen to answer "Right place?": the chat steps aside
+    // unless it sits along the left edge, out of the way
+    const ask = useAsk.getState()
+    if (ask.expanded || ask.side !== 'left') ask.setOpen(false)
     onDone()
     revealCard(card.id)
   }
 
   if (error) return <div className="ask-error">{error}</div>
-  if (!draft) return <div className="ask-note">Drafting a card from this answer…</div>
-  return (
-    <div className="ask-draft">
-      <input className="draft-title" value={draft.title} placeholder="Title"
-        onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-      <textarea className="draft-text" rows={3} value={draft.text}
-        onChange={(e) => setDraft({ ...draft, text: e.target.value })} />
-      <div className="draft-link">
-        {cited.length ? (
-          <>
-            <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-              {Object.entries(KIND_WORDS).map(([k, w]) => <option key={k} value={k}>{w}</option>)}
-            </select>
-            <select value={draft.link_to} onChange={(e) => setDraft({ ...draft, link_to: e.target.value })}>
-              {cited.map((id) => <option key={id} value={id}>{nodes[id].title || 'Untitled'}</option>)}
-              <option value="">no card - on its own</option>
-            </select>
-          </>
-        ) : <span>On its own, on the level you are looking at</span>}
-      </div>
-      <div className="draft-actions">
-        <button className="starter" onClick={add} disabled={!draft.title.trim()}>Add</button>
-        <button className="ctx-clear" onClick={onDone}>Cancel</button>
-      </div>
-    </div>
-  )
+  return <div className="ask-note">Finding what is new here, and where it belongs on your board…</div>
 }
 
 function Answer({ turn, offer, question }: {
@@ -304,7 +303,7 @@ export function AskPanel() {
   const present = context.filter((id) => nodes[id])
   const everything = Object.keys(nodes).length
   const canSend = !busy && everything > 0
-  const explaining = expanded && explain
+  const explaining = explain
 
   const send = (text: string) => {
     if (!canSend || !text.trim()) return
@@ -330,6 +329,14 @@ export function AskPanel() {
           <header className="ask-head">
             <span className="ask-title"><Icon name="ask" size={14} /> Ask your board</span>
             <span className="ask-head-actions">
+              {!expanded ? (
+                <button className={`icon-btn ${explain ? 'on' : ''}`} aria-pressed={explain}
+                  title={explain ? 'Explain more is on - answers come from this conversation and the model’s own knowledge, without searching the board. Click to turn it off'
+                    : 'Explain more - answer from this conversation and the model’s own knowledge, with examples, without searching the board'}
+                  onClick={() => ask.setExplain(!explain)}>
+                  <Icon name="explain" size={14} />
+                </button>
+              ) : null}
               <button className="icon-btn" title="Clear the conversation" disabled={!turns.length}
                 onClick={() => {
                   if (confirm('Clear this conversation? Its questions and answers are removed; your cards are not touched.')) ask.forget()

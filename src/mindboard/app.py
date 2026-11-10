@@ -353,7 +353,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             raise HTTPException(409, "still answering the last question")
         try:
             nodes = {n["id"]: n for n in read_graph(conn_for(dd, bid), bid)["nodes"]}
-            return draft_card(model, nodes, body.question, body.answer, body.cited)
+            return draft_card(model, nodes, body.question, body.answer, body.cited,
+                              body.candidates, [t.model_dump() for t in body.history])
         finally:
             model._asking.release()
 

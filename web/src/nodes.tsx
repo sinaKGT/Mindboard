@@ -608,11 +608,18 @@ export function MetaNode({ id, data, selected }: NodeProps) {
     return out
   }, [allEdges, kids])
   const count = kids.length
+  const setUI = useUI((s) => s.set)
 
+  // Double-clicking a group used to open it wherever you clicked, so its title
+  // and description could not be written that way. Now, as on a picture card,
+  // double-clicking the words edits them; double-clicking the rest of the card
+  // - its count, its little map - opens the group, as does its Open button.
   return (
     <Shell node={node} selected={selected}>
-      <NodeText node={node} placeholder="Group" bodyPlaceholder="What is this group for?" />
-      <div className="badge-row">
+      <div onDoubleClick={(e) => { e.stopPropagation(); setUI('editingId', id) }}>
+        <NodeText node={node} placeholder="Group" bodyPlaceholder="What is this group for?" />
+      </div>
+      <div className="badge-row" title="Double-click to open the group">
         <span className="badge">
           <Icon name="layers" size={11} />
           {count === 0 ? 'empty' : `${count} ${count === 1 ? 'node' : 'nodes'}`}

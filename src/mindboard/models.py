@@ -88,6 +88,10 @@ class DraftRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     answer: str = Field(min_length=1, max_length=20000)
     cited: list[str] = Field(default_factory=list, max_length=100)
+    # every card the conversation brought up, and the conversation itself
+    # (DESIGN.md 53): an Explain more answer cites nothing to link to
+    candidates: list[str] = Field(default_factory=list, max_length=200)
+    history: list[AskTurn] = Field(default_factory=list, max_length=40)
 
 
 class GuideRequest(BaseModel):
