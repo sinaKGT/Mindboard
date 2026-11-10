@@ -60,6 +60,53 @@ build_interface() {
   say "interface     built"
 }
 
+# A "mindboard" command in the terminal: plain "mindboard" starts the app,
+# "mindboard <command>" runs that command. Offered once, only when someone is
+# at the terminal to answer (MINDBOARD_SHORTCUT=yes|no answers for them), and
+# pointed at this copy of Mindboard, wherever its folder is.
+MARK_START='# >>> mindboard shortcut >>>'
+MARK_END='# <<< mindboard shortcut <<<'
+SHORTCUT=""
+add_shortcut() {
+  case "$(basename "${SHELL:-}")" in
+    zsh)  RC="$HOME/.zshrc" ;;
+    bash) if [ "$(uname)" = Darwin ]; then RC="$HOME/.bash_profile"; else RC="$HOME/.bashrc"; fi ;;
+    *)    return 0 ;;
+  esac
+  case "$VENV" in
+    /*) MB_BIN="$VENV/bin/mindboard" ;;
+    *)  MB_BIN="$(pwd)/$VENV/bin/mindboard" ;;
+  esac
+  if [ -f "$RC" ] && grep -qF "$MARK_START" "$RC"; then
+    if grep -qF "\"$MB_BIN\"" "$RC"; then
+      say "shortcut      the mindboard command is already in $RC"
+      SHORTCUT=yes
+      return 0
+    fi
+    # it points at a copy that has moved: take the old one out, add it again
+    sed -i.bak "/$MARK_START/,/$MARK_END/d" "$RC" && rm -f "$RC.bak"
+    ANSWER=yes
+  else
+    ANSWER="${MINDBOARD_SHORTCUT:-}"
+    if [ -z "$ANSWER" ]; then
+      [ -t 0 ] && [ -t 1 ] || return 0
+      printf '\n  Add a "mindboard" command to your terminal, to start Mindboard from anywhere? [Y/n] '
+      read -r ANSWER || return 0
+    fi
+  fi
+  case "$ANSWER" in
+    [nN]*) say "shortcut      skipped - add it later by running this again"; return 0 ;;
+  esac
+  {
+    printf '\n%s\n' "$MARK_START"
+    printf '# "mindboard" starts the app; "mindboard <command>" runs that command\n'
+    printf 'mindboard() {\n  if [ $# -eq 0 ]; then\n    "%s" run\n  else\n    "%s" "$@"\n  fi\n}\n' "$MB_BIN" "$MB_BIN"
+    printf '%s\n' "$MARK_END"
+  } >> "$RC"
+  say "shortcut      added to $RC"
+  SHORTCUT=yes
+}
+
 # An install can look successful and still be unusable - a stale or half-written
 # environment leaves an empty `mindboard` folder in site-packages, and every
 # submodule disappears. Prove it runs before saying it worked.
@@ -98,7 +145,11 @@ build_interface
 
 printf '\n'
 "$VENV/bin/mindboard" install || true
+add_shortcut
 
 printf '\n\033[1m  Run it with\033[0m\n'
+if [ -n "$SHORTCUT" ]; then
+  printf '    mindboard          (in a new terminal window)\n'
+fi
 printf '    %s run\n' "$VENV/bin/mindboard"
 printf '    or just run ./Mindboard.command\n\n'

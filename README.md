@@ -96,6 +96,19 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1   # Windows
 then `.venv\Scripts\mindboard run` (or `.venv/bin/mindboard run`). Every menu
 option has a command behind it; see [Commands](#commands).
 
+On macOS and Linux, `install.sh` offers to add a `mindboard` command to your
+terminal. Say yes, open a new terminal window, and from any folder:
+
+```bash
+mindboard          # starts Mindboard and opens it in your browser (Ctrl+C stops it)
+mindboard menu     # the menu
+```
+
+Any other command works the same way, such as `mindboard backup`. It is a short
+function in `~/.zshrc` (or your bash profile), between `# >>> mindboard shortcut >>>`
+and `# <<< mindboard shortcut <<<`; delete those lines to remove it. Said no?
+Run `./install.sh` again to be asked again.
+
 </details>
 
 ## Use
