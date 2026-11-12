@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Mindboard's mark: an ankh drawn as a small graph (DESIGN.md 59) -->
+  <rect width="32" height="32" rx="8" fill="#14110c"/>
+  <g fill="none" stroke="#e8b864" stroke-width="2.6" stroke-linecap="round">
+    <path d="M16 16.2C10.6 12.6 10.8 4 16 4s5.4 8.6 0 12.2Z" stroke-linejoin="round"/>
+    <path d="M7 19.5H25M16 16.2v9.3"/>
+  </g>
+  <g fill="#e8b864">
+    <circle cx="7" cy="19.5" r="2.9"/>
+    <circle cx="25" cy="19.5" r="2.9"/>
+    <circle cx="16" cy="26.5" r="2.9"/>
+  </g>
+</svg>

@@ -13,6 +13,7 @@ import { api, type BoardGroup, type Home } from './api'
 import { backUp } from './backup'
 import { Constellation } from './Constellation'
 import { Icon } from './icons'
+import { Logo } from './Logo'
 import { GraphMini, ago } from './Mini'
 import { useStore } from './store'
 import { NODE_COLOURS, THEMES, THEME_LOOK, applyTheme } from './theme'
@@ -316,7 +317,7 @@ export function Launcher({ onImport }: { onImport: () => void }) {
       <div className="launcher-inner">
         <Constellation />
         <div className="launcher-head">
-          <span className="dot" />
+          <Logo size={28} />
           <h1>Mindboard</h1>
         </div>
         <p className="launcher-sub">

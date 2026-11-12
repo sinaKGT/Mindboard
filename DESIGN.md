@@ -3190,3 +3190,25 @@ or no git, says what to do. Already up to date, it asks (menu) or stops
 touched: they live in the data folder.
 
 260 tests.
+
+## 59. A mark for Mindboard, and dates read with their words (2026-11-12)
+
+- **The mark** (`Logo.tsx`, `public/favicon.svg`): an ankh drawn as a small
+  graph. Its teardrop loop is the mind; its arms and foot end in round nodes,
+  cards linked on a board - the Experts' ankh and the boards' graphs in one
+  sign. A round loop read as the ♀ symbol; the teardrop of a real ankh does
+  not. It replaces the blinking dot before "Mindboard" on the first page, in
+  the page's accent: the loop draws itself once, then the three nodes breathe.
+  The browser tab shows it in the Experts' gold on a dark square; it reads at
+  16 px.
+- **Dates with their words.** On the SWIFT board the top card says "Updated
+  12 Nov 2026", and the date list (§56) gave the model only the date and the
+  card, so a plain answer took 12 Nov for a visit. Each date now comes with
+  the words around where it is written - "...with role and email. Updated 12
+  Nov 2026." beside "Visit: Lab visit on 11 Nov 2026" - and the model is told
+  an updated or reported date is not a visit. With the real model, Think
+  deeper answered "The most recent specific lab visit recorded is 11 November
+  2026... The master visitor list was updated on 12 November 2026", in 49 s
+  and without looping; the plain answer named 11 Nov as the latest visit too.
+
+260 tests.

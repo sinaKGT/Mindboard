@@ -553,14 +553,16 @@ TIME_WORDS = re.compile(
     r"tomorrow|ago|timeline|order|chronolog\w*|schedule|soon)\b|" + _MON, re.I)
 CARD_HEAD = re.compile(r"^\[([0-9A-Z]{26})\]\s*(.*)$")
 MAX_DATES = 20            # dates listed, newest first
+DATE_QUOTE = 70           # characters of the words around a date, quoted with it
 
 
-def found_dates(text: str, today) -> list:
+def found_dates(text: str, today, year: Optional[int] = None) -> list:
     """The dates written in a piece of text, as dates. A date without a year
-    takes the year written after it in the same text, else this year."""
+    takes the year written after it in the same text, else `year`, else this
+    year."""
     import datetime as dt
 
-    years = [int(m.group(0)) for m in YEAR.finditer(text)]
+    years = [int(m.group(0)) for m in YEAR.finditer(text)] or ([year] if year else [])
     out = []
 
     def add(y, m, d):
@@ -579,6 +581,23 @@ def found_dates(text: str, today) -> list:
                 year = years[-1] if years else today.year
             add(int(year), MONTHS[mon[:3].lower()], int(day))
     return sorted(set(out))
+
+
+def around(text: str, d, today) -> str:
+    """The words around where a date is written: a short window on it, so a
+    long line still shows what the date is for - "...Updated 12 Nov 2026."."""
+    at = 0
+    for rx in (ISO, DAY_MONTH, MONTH_DAY):
+        for m in rx.finditer(text):
+            if d in found_dates(text[m.start():m.end()] + " " + str(d.year), today):
+                at = m.start()
+                break
+        else:
+            continue
+        break
+    start = max(0, min(at - 30, len(text) - DATE_QUOTE))
+    piece = text[start:start + DATE_QUOTE].strip()
+    return ("…" if start else "") + piece + ("…" if start + DATE_QUOTE < len(text) else "")
 
 
 def say_date(d) -> str:
@@ -604,16 +623,29 @@ def dates_note(ctx: "Context", question: str, today=None) -> str:
         block = "\n".join(lines[at:])
         head = CARD_HEAD.match(lines[at])
         title = re.sub(r"^\(\w[\w-]*\)\s*", "", head.group(2)).strip()[:70] or "Untitled"
-        for d in found_dates(block, today):
-            on.setdefault(d, []).append(f"{title} [{head.group(1)}]")
+        block_years = [int(m.group(0)) for m in YEAR.finditer(block)]
+        seen_here: set = set()
+        # each date with the words around it, so "Updated 12 Nov 2026" is not
+        # read as a visit beside "Meeting at the lab on 11 Nov 2026" (DESIGN.md 56)
+        for i, line in enumerate(lines[at:]):
+            for d in found_dates(line, today, block_years[-1] if block_years else None):
+                if d in seen_here:
+                    continue
+                seen_here.add(d)
+                said = line if i else head.group(2)
+                said = " ".join(re.sub(r"^\(\w[\w-]*\)\s*", "", said).split())
+                quote = f' - "{around(said, d, today)}"' if said and said != title else ""
+                on.setdefault(d, []).append(f"{title}{quote} [{head.group(1)}]")
     if not on:
         return note
     lines = [f"- {say_date(d)}{' (after today)' if d > today else ''}: " + "; ".join(cards[:6])
              + (f"; and {len(cards) - 6} more" if len(cards) > 6 else "")
              for d, cards in sorted(on.items(), reverse=True)[:MAX_DATES]]
     return note[:-1] + (
-        " The dates written in these cards, newest first - use this order for latest, "
-        "most recent, next or earliest, and cite the cards:\n" + "\n".join(lines) + ")")
+        " The dates written in these cards, newest first, each with the words around it - "
+        "use this order for latest, most recent, next or earliest, and cite the cards. Read "
+        "what each date is for before using it: a date a list was updated or a report written "
+        "is not a visit or a meeting.\n" + "\n".join(lines) + ")")
 
 
 def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
