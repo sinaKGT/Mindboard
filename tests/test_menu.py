@@ -9,7 +9,7 @@ def test_the_menu_opens_the_first_page_or_the_experts():
     labels = {key: label for key, label, _ in menu.OPTIONS}
     assert labels["1"] == "Open Mindboard" and labels["2"] == "Talk to my experts"
     assert labels["6"] == "Set up the AI", "no 'Ask your board' beside the way in"
-    assert labels["9"] == "Reinstall / update"
+    assert labels["9"] == "Update"
     assert len(labels) == len(menu.OPTIONS), "every key once"
 
 

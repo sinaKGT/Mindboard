@@ -96,7 +96,7 @@ OPTIONS = [
     ("6", "Set up the AI", "the local model and the experts' voice"),
     ("7", "Check the install", ""),
     ("8", "Open the data folder", ""),
-    ("9", "Reinstall / update", "get the latest version"),
+    ("9", "Update", "get the latest version from GitHub"),
     ("q", "Quit", ""),
 ]
 
@@ -132,7 +132,7 @@ def _open_app(dd, page: str = "") -> None:
 
     if not ui_built():
         console.print("\n  [red]The interface has not been built yet.[/red]")
-        console.print(f"  [{DIM}]Choose 9 (Reinstall / update) to finish setting up.[/{DIM}]")
+        console.print(f"  [{DIM}]Choose 9 (Update) to finish setting up.[/{DIM}]")
         _pause()
         return
 
@@ -379,23 +379,50 @@ def _check(dd) -> None:
 
 
 def _reinstall(dd) -> None:
+    update_and_reinstall(interactive=True)
+
+
+def update_and_reinstall(interactive: bool = True, force: bool = False) -> bool:
+    """Get the latest version from GitHub, then run the installer (DESIGN.md
+    58) - menu option 9, and `mindboard update`. False if it did not."""
+    from .updater import pull
+
+    def stop() -> bool:
+        if interactive:
+            _pause()
+        return False
+
     root = source_root()
     console.print()
     if root is None:
         console.print("  This copy was installed as a package. Update it with:")
         console.print(f"    [{ACCENT}]uv tool install --force mindboard[/{ACCENT}]")
-        _pause()
-        return
+        return stop()
     script = root / ("install.ps1" if sys.platform.startswith("win") else "install.sh")
     if not script.exists():
         console.print(f"  [red]Cannot find {script.name}[/red]")
-        _pause()
-        return
+        return stop()
     if running_instance(DEFAULT_PORT):
         console.print(f"  Mindboard is still running on port {DEFAULT_PORT} - in another window.")
-        console.print(f"  [{DIM}]Stop it there first (press Enter in that window), then choose 9 again.[/{DIM}]")
-        _pause()
-        return
+        console.print(f"  [{DIM}]Stop it there first (press Enter in that window), then update again.[/{DIM}]")
+        return stop()
+
+    console.print("  Getting the latest version from GitHub ...")
+    got = pull(root)
+    if got["ok"] and got["new"]:
+        console.print(f"  [green]{got['said'].capitalize()}:[/green]")
+        for t in got["titles"]:
+            console.print(f"    [{DIM}]- {t}[/{DIM}]")
+    elif got["ok"]:
+        console.print(f"  Mindboard is {got['said']}.")
+        if not force and not (interactive and _yes("Reinstall anyway?", False)):
+            stop()
+            return True                      # nothing to do is not a failure
+    else:
+        console.print(f"  [yellow]Not updated: {got['said']}.[/yellow]")
+        if not (interactive and _yes("Reinstall this version anyway?", False)):
+            return stop()
+    console.print()
     if sys.platform.startswith("win"):
         # This menu runs from the environment the installer updates, and Windows
         # will not replace a program that is running. Run inside it, the
@@ -408,8 +435,7 @@ def _reinstall(dd) -> None:
                 cwd=root, creationflags=subprocess.CREATE_NEW_CONSOLE)
         except Exception as exc:
             console.print(f"  [red]Could not start the installer: {exc}[/red]")
-            _pause()
-            return
+            return stop()
         console.print("  The installer has opened in its own window.")
         console.print(f"  [{DIM}]This window closes now so it can update Mindboard. If anything"
                       f" else from Mindboard is still open, the installer says what and offers"
@@ -417,10 +443,13 @@ def _reinstall(dd) -> None:
         raise SystemExit(0)
     console.print(f"  Running [bold]{script.name}[/bold] ...\n")
     try:
-        subprocess.run(["bash", str(script)], cwd=root, check=False)
+        done = subprocess.run(["bash", str(script)], cwd=root, check=False)
     except Exception as exc:
         console.print(f"\n  [red]Could not run the installer: {exc}[/red]")
-    _pause()
+        return stop()
+    if interactive:
+        _pause()
+    return done.returncode == 0
 
 
 # --------------------------------------------------------------------------- #

@@ -33,7 +33,8 @@ export default function App() {
   // which page without a board: the welcome (''), your boards, or your experts
   const [page, setPage] = useState(location.hash)
 
-  useEffect(() => { applyTheme(settings) }, [settings])
+  // a board's own theme while it is open; the first page sets its own (DESIGN.md 57)
+  useEffect(() => { if (boardId) applyTheme(settings) }, [settings, boardId])
 
   // The open board lives in the URL, so a refresh keeps your place and the
   // browser's back button walks out of a board the way you'd expect.

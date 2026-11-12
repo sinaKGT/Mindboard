@@ -293,6 +293,7 @@ function Tools({ node }: { node: MNode }) {
             <span className="sep" />
           </>
         )}
+        <FixButton node={node} />
         <AskButton id={node.id} group={node.type === 'meta'} />
         <button className="icon-btn" title="Connect to another node — then click it  (c)"
           onClick={() => useUI.getState().set('linking', { sourceId: node.id })}>
@@ -321,6 +322,39 @@ function Tools({ node }: { node: MNode }) {
 }
 
 /** Put this card in what Ask your board reads - or take it out again. */
+/** Fix spelling and grammar (DESIGN.md 56): the local model corrects the
+ *  card's title and text - the person's words, not a rewrite - and the card
+ *  changes in one undoable step. */
+function FixButton({ node }: { node: MNode }) {
+  const [busy, setBusy] = useState(false)
+  const boardId = useStore((s) => s.boardId)
+  const text = String(node.content.text ?? '')
+  if (!node.title.trim() && !text.trim()) return null
+  const fix = async () => {
+    if (!boardId || busy) return
+    setBusy(true)
+    const store = useStore.getState()
+    try {
+      const got = await api.proofread(boardId, { title: node.title, text })
+      const now = useStore.getState().nodes[node.id]
+      if (!now) return
+      if (!got.changed) { store.say('Nothing to fix - it reads well'); return }
+      store.run([{ kind: 'node.update', id: node.id,
+                   patch: { title: got.title, content: { ...now.content, text: got.text } } }])
+      store.say('Fixed spelling and grammar - Ctrl+Z to undo')
+    } catch (e: any) {
+      store.say(e.message || 'Could not fix the writing', true)
+    } finally { setBusy(false) }
+  }
+  return (
+    <button className={`icon-btn fix-btn ${busy ? 'busy' : ''}`} disabled={busy}
+      title={busy ? 'Fixing spelling and grammar…' : 'Fix spelling and grammar with AI'}
+      onClick={() => void fix()}>
+      <Icon name="wand" size={15} />
+    </button>
+  )
+}
+
 function AskButton({ id, group }: { id: string; group: boolean }) {
   const inside = useAsk((s) => s.context.includes(id))
   return (

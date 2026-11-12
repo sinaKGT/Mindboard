@@ -347,6 +347,10 @@ def create_backup(dd: DataDir, out_path: Path) -> dict[str, Any]:
             from .experts import load as load_experts
             if load_experts(dd):
                 z.writestr("experts.json", json.dumps(load_experts(dd), indent=2, ensure_ascii=False))
+            # and the first page's groups and look (DESIGN.md 57)
+            from .home import _path as home_path, load as load_home
+            if home_path(dd).exists():
+                z.writestr("home.json", json.dumps(load_home(dd), indent=2, ensure_ascii=False))
             # and so do your own themes (DESIGN.md 52)
             from .themes import load as load_themes
             if load_themes(dd):
@@ -432,6 +436,10 @@ def restore_backup(dd: DataDir, zip_path: Path, mode: str = "skip") -> dict[str,
         if "experts.json" in names and mode != "copy":
             from .experts import restore as restore_experts
             restore_experts(dd, json.loads(z.read("experts.json").decode("utf-8")), replace=mode == "replace")
+        # groups name boards by id: not in "copy" mode, where boards get new ids
+        if "home.json" in names and mode != "copy":
+            from .home import restore as restore_home
+            restore_home(dd, json.loads(z.read("home.json").decode("utf-8")), replace=mode == "replace")
         # your own themes belong to no board, so they come back in every mode
         if "themes.json" in names:
             from .themes import restore as restore_themes

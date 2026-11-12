@@ -528,6 +528,94 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
 READY = "I have read these cards. Ask away."
 
 
+# ------------------------------------------------------------- dates --
+#
+# DESIGN.md 56. Asked when the latest visit was, the model kept naming 3 Nov
+# on a board whose newest date was 11 Nov: it was never told today's date, and
+# a 9B model compares dates written in words unreliably. A question about time
+# now comes with today's date and the dates found in its cards, newest first -
+# worked out here, not left to the model.
+
+MONTHS = {m: i + 1 for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+MONTH_NAMES = ("January February March April May June July August September October "
+               "November December").split()
+_MON = r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+# "3 Nov 2026", "22 Sep and 29 Oct 2026", "3-5 Nov 2026" (a day before its month)
+DAY_MONTH = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+{_MON}\b\.?(?:\s*,?\s*(\d{{4}}))?", re.I)
+# "Nov 3, 2026", "November 3rd 2026"
+MONTH_DAY = re.compile(rf"\b{_MON}\.?\s+(\d{{1,2}})(?!\d)(?:st|nd|rd|th)?(?:\s*,?\s*(\d{{4}}))?", re.I)
+ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+YEAR = re.compile(r"\b(19|20)\d{2}\b")
+TIME_WORDS = re.compile(
+    r"\b(when|date|dates|dated|day|days|latest|last|recent(?:ly)?|newest|oldest|earliest|first|next|"
+    r"upcoming|previous|before|after|since|until|week|weeks|month|months|year|years|today|yesterday|"
+    r"tomorrow|ago|timeline|order|chronolog\w*|schedule|soon)\b|" + _MON, re.I)
+CARD_HEAD = re.compile(r"^\[([0-9A-Z]{26})\]\s*(.*)$")
+MAX_DATES = 20            # dates listed, newest first
+
+
+def found_dates(text: str, today) -> list:
+    """The dates written in a piece of text, as dates. A date without a year
+    takes the year written after it in the same text, else this year."""
+    import datetime as dt
+
+    years = [int(m.group(0)) for m in YEAR.finditer(text)]
+    out = []
+
+    def add(y, m, d):
+        try:
+            out.append(dt.date(y, m, d))
+        except ValueError:
+            pass
+
+    for m in ISO.finditer(text):
+        add(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    for rx, day_first in ((DAY_MONTH, True), (MONTH_DAY, False)):
+        for m in rx.finditer(text):
+            day, mon = (m.group(1), m.group(2)) if day_first else (m.group(2), m.group(1))
+            year = m.group(3)
+            if not year:                     # "22 Sep and 29 Oct 2026": the year that follows
+                year = years[-1] if years else today.year
+            add(int(year), MONTHS[mon[:3].lower()], int(day))
+    return sorted(set(out))
+
+
+def say_date(d) -> str:
+    return f"{d.day} {MONTH_NAMES[d.month - 1]} {d.year}"
+
+
+def dates_note(ctx: "Context", question: str, today=None) -> str:
+    """Today's date, and - for a question about time - the dates in the cards,
+    newest first, each with the card it is on."""
+    import datetime as dt
+
+    today = today or dt.date.today()
+    note = f"\n\n(Today is {dt.date.strftime(today, '%A')} {say_date(today)}.)"
+    if not TIME_WORDS.search(question):
+        return note
+    on: dict = {}                            # date -> the cards it is written on
+    for block in ctx.text.split("\n\n"):
+        # a block is one card - the first one sits under the CARDS heading line
+        lines = block.strip().split("\n")
+        at = next((i for i, ln in enumerate(lines[:2]) if CARD_HEAD.match(ln)), None)
+        if at is None:
+            continue
+        block = "\n".join(lines[at:])
+        head = CARD_HEAD.match(lines[at])
+        title = re.sub(r"^\(\w[\w-]*\)\s*", "", head.group(2)).strip()[:70] or "Untitled"
+        for d in found_dates(block, today):
+            on.setdefault(d, []).append(f"{title} [{head.group(1)}]")
+    if not on:
+        return note
+    lines = [f"- {say_date(d)}{' (after today)' if d > today else ''}: " + "; ".join(cards[:6])
+             + (f"; and {len(cards) - 6} more" if len(cards) > 6 else "")
+             for d, cards in sorted(on.items(), reverse=True)[:MAX_DATES]]
+    return note[:-1] + (
+        " The dates written in these cards, newest first - use this order for latest, "
+        "most recent, next or earliest, and cite the cards:\n" + "\n".join(lines) + ")")
+
+
 def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     """The cards come first and stay put; the conversation follows them; the
     newest question comes last.
@@ -556,7 +644,7 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     # the system prompt, so the start of the prompt - and its cache - stay put
     msgs.append({"role": "user", "content": question.strip()
                  + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")
-                 + weighing(ctx.reading)})
+                 + weighing(ctx.reading) + dates_note(ctx, question)})
     return msgs
 
 
@@ -652,6 +740,30 @@ def check_citations(answer: str, allowed: set[str]) -> dict:
             "cited": cited, "dropped": dropped}
 
 
+class LoopGuard:
+    """Notices thinking that repeats itself (DESIGN.md 56): the same line - a
+    real line, not "Yes." - a third time."""
+
+    REPEATS = 3
+    LINE = 14          # characters a line needs to count
+
+    def __init__(self):
+        self.seen: dict[str, int] = {}
+        self.buf = ""
+
+    def feed(self, piece: str) -> bool:
+        self.buf += piece
+        while "\n" in self.buf:
+            line, self.buf = self.buf.split("\n", 1)
+            key = re.sub(r"[^a-z0-9 ]", "", line.lower())
+            key = " ".join(key.split())
+            if len(key) >= self.LINE:
+                self.seen[key] = self.seen.get(key, 0) + 1
+                if self.seen[key] >= self.REPEATS:
+                    return True
+        return False
+
+
 def answer_events(model, ctx: Context, question: str, history: list[dict],
                   think: bool = False, hold: bool = True) -> Iterator[dict]:
     """Everything the person sees, in order: what went in, the thinking, the
@@ -664,9 +776,12 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
            "reading": ctx.reading, "offer": ctx.offer}
     text: list[str] = []
     timings: dict = {}
-    for ev in model.stream(messages(ctx, question, history),
-                           max_tokens=ANSWER_TOKENS + (THINKING_TOKENS if think else 0),
-                           think=think, hold=hold):
+    looped = False
+    loop = LoopGuard()
+    asked = messages(ctx, question, history)
+    stream = model.stream(asked, max_tokens=ANSWER_TOKENS + (THINKING_TOKENS if think else 0),
+                          think=think, hold=hold)
+    for ev in stream:
         if ev["type"] == "progress":
             yield {"event": "progress", "total": ev["total"], "cached": ev["cached"],
                    "done": ev["done"]}
@@ -675,14 +790,71 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
             yield {"event": "text", "text": ev["text"]}
         elif ev["type"] == "thinking":
             yield {"event": "thinking", "text": ev["text"]}
+            if loop.feed(ev["text"]):
+                looped = True
+                break
         elif ev["type"] == "done":
             timings = ev
+    if looped:
+        # DESIGN.md 56: thinking that goes round in circles never ends on its
+        # own - hang up on it, and answer without thinking
+        stream.close()
+        yield {"event": "thinking", "text": "\n\n(The thinking went round in circles - answering without it.)"}
+        for ev in model.stream(asked, max_tokens=ANSWER_TOKENS, think=False, hold=hold):
+            if ev["type"] == "text":
+                text.append(ev["text"])
+                yield {"event": "text", "text": ev["text"]}
+            elif ev["type"] == "done":
+                timings = ev
     answer, questions = split_nexts("".join(text))
     next_question = questions[0] if questions else ""
     result = check_citations(answer, set(ctx.cards))
     yield {"event": "done", **result, "next": next_question, "nexts": questions,
            "stopped": bool(timings.get("stopped")),
            "tokens_per_second": timings.get("tokens_per_second")}
+
+
+# ------------------------------------------------------- fix the writing --
+#
+# DESIGN.md 56: a small AI button on a card fixes its spelling, grammar and
+# punctuation - the person's words, corrected, not rewritten - and the card is
+# changed in one undoable step.
+
+PROOFREAD = """You correct spelling, grammar and punctuation in a note from a person's mind map.
+
+Reply with JSON only, no other text: {"title": "...", "text": "..."}
+
+- Fix only real mistakes: misspellings, wrong words, grammar, punctuation,
+  capital letters. Keep the person's wording, tone, language and meaning.
+- Do not add, remove, shorten or explain anything. Do not translate.
+- Keep line breaks, list markers ("- ", "1. "), links, emails, numbers, names
+  and technical terms exactly as they are.
+- If something is already right, return it unchanged."""
+
+PROOF_CHARS = 6000
+
+
+def proofread(model, title: str, text: str) -> dict:
+    """The card's title and text with their mistakes fixed - or as they were,
+    if the model's reply cannot be used. `changed` says whether anything did."""
+    title, text = title or "", text or ""
+    if not (title.strip() or text.strip()):
+        return {"title": title, "text": text, "changed": False}
+    try:
+        reply = model.chat([{"role": "system", "content": PROOFREAD},
+                            {"role": "user", "content": json.dumps({"title": title, "text": text[:PROOF_CHARS]},
+                                                                   ensure_ascii=False)}],
+                           max_tokens=min(4000, 200 + len(text) // 2), think=False, temperature=0.1)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        return {"title": title, "text": text, "changed": False}
+    fixed_title = str(got.get("title", title))
+    fixed_text = str(got.get("text", text)) + text[PROOF_CHARS:]
+    # an answer that is no longer the same note is not a correction
+    if (title.strip() and not fixed_title.strip()) or (text.strip() and len(fixed_text) < len(text) * 0.6):
+        return {"title": title, "text": text, "changed": False}
+    return {"title": fixed_title, "text": fixed_text,
+            "changed": fixed_title != title or fixed_text != text}
 
 
 # ------------------------------------------------------------ to a card --

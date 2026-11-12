@@ -104,12 +104,28 @@ mindboard          # starts Mindboard and opens it in your browser (Ctrl+C stops
 mindboard menu     # the menu
 ```
 
-Any other command works the same way, such as `mindboard backup`. It is a short
+Any other command works the same way, such as `mindboard backup`, or `mindboard update`
+to get the latest version. It is a short
 function in `~/.zshrc` (or your bash profile), between `# >>> mindboard shortcut >>>`
 and `# <<< mindboard shortcut <<<`; delete those lines to remove it. Said no?
 Run `./install.sh` again to be asked again.
 
 </details>
+
+## Updating
+
+Mindboard updates itself from GitHub - your boards are never touched:
+
+```bash
+mindboard update                 # macOS / Linux, with the mindboard command
+.venv/bin/mindboard update       # macOS / Linux, from the Mindboard folder
+.venv\Scripts\mindboard update   # Windows, from the Mindboard folder
+```
+
+or choose **9 Update** in the menu. It gets the latest version, says what
+changed, and reinstalls (new packages, the interface rebuilt). Close
+Mindboard first. If you have changed Mindboard's own files it stops and names
+them; keep them with `git stash`, then update again.
 
 ## Use
 

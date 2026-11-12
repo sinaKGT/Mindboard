@@ -1383,32 +1383,212 @@ a.btn { text-decoration: none; }
   width: 12px; height: 12px; border-radius: 50%; display: block;
   border: 1.5px solid var(--mb-text-dim); box-sizing: border-box;
 }
-.tile-colours {
-  position: absolute; top: 42px; right: 9px; z-index: 3; display: flex; gap: 6px; align-items: center;
-  padding: 7px 8px; border-radius: 10px; background: var(--mb-surface);
-  border: 1px solid var(--mb-border-strong); box-shadow: var(--mb-shadow-lg);
-  animation: pop 120ms var(--mb-ease);
-}
-.tile-pick {
-  width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
-  border: 2px solid transparent; transition: transform 120ms var(--mb-spring);
-}
-.tile-pick:hover { transform: scale(1.15); }
-.tile-pick.on { border-color: var(--mb-text); }
-.tile-pick.custom {
-  background: conic-gradient(#f97583, #e6b95c, #6fd7a4, #6ea8fe, #cf8ce8, #f97583); overflow: hidden; position: relative;
-}
-.tile-pick.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-.tile-pick.none { background: var(--mb-surface-3); color: var(--mb-text-dim); border-color: var(--mb-border); }
 
-/* the summary, over the tile's preview while the pointer rests on it */
-.card-summary {
-  /* below the tile's tool buttons, at most four lines */
-  position: absolute; inset: 0; z-index: 2; padding: 36px 15px 8px;
-  font-size: 12px; line-height: 1.4; color: var(--mb-text);
-  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
-  background: color-mix(in srgb, var(--mb-surface) 90%, transparent); backdrop-filter: blur(3px);
-  opacity: 0; transition: opacity 180ms var(--mb-ease);
+
+
+/* "Clear this conversation?" above the chat bar, in Mindboard's own style -
+   the browser's own dialog looked like another program */
+.ask-confirm {
+  position: absolute; left: 50%; bottom: 76px; z-index: 24; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; max-width: calc(100% - 32px);
+  border-radius: 14px; background: var(--mb-surface); color: var(--mb-text-dim);
+  border: 1px solid color-mix(in srgb, var(--mb-danger) 45%, var(--mb-border-strong));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mb-danger) 10%, transparent), var(--mb-shadow-lg);
+  animation: askConfirmIn 150ms cubic-bezier(.2, .9, .25, 1);
 }
-.card-summary.waiting { color: var(--mb-text-faint); font-size: 11.5px; font-style: italic; }
-.board-card:hover .card-summary { opacity: 1; transition-delay: 250ms; }
+@keyframes askConfirmIn { from { opacity: 0; transform: translate(-50%, 6px); } }
+.ask-confirm > svg { flex: none; color: var(--mb-danger); }
+.ask-confirm-words { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
+.ask-confirm-words b { color: var(--mb-text); font-size: 12.5px; font-weight: 600; }
+.ask-confirm-words span { font-size: 11.5px; }
+.ask-confirm-keep, .ask-confirm-go {
+  flex: none; height: 30px; padding: 0 14px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--mb-border-strong); color: var(--mb-text); background: var(--mb-surface-2);
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+.ask-confirm-keep:hover { border-color: var(--mb-text-dim); }
+.ask-confirm-go { color: #fff; border-color: transparent; background: color-mix(in srgb, var(--mb-danger) 80%, #000); }
+.ask-confirm-go:hover { background: var(--mb-danger); }
+@media (max-width: 920px) { .ask-confirm { bottom: 120px; } }
+@media (prefers-reduced-motion: reduce) { .ask-confirm { animation: none; } }
+
+/* the fix-the-writing button, working (DESIGN.md 56) */
+.fix-btn.busy svg { animation: fixWave .9s ease-in-out infinite; color: var(--mb-accent); }
+@keyframes fixWave { 50% { transform: rotate(-14deg); } }
+@media (prefers-reduced-motion: reduce) { .fix-btn.busy svg { animation: none; } }
+
+/* ------------------------------------------- the first page (DESIGN.md 57) */
+/* small panels: a tile's or a group's colour, putting a board in a group, the
+   page's look - all in one style */
+.pop {
+  position: absolute; z-index: 30; min-width: 200px; padding: 10px; cursor: default; text-align: left;
+  border-radius: 12px; background: var(--mb-surface); border: 1px solid var(--mb-border-strong);
+  box-shadow: var(--mb-shadow-lg); animation: popIn 130ms cubic-bezier(.2, .9, .25, 1);
+}
+@keyframes popIn { from { opacity: 0; transform: translateY(-4px); } }
+.pop-head {
+  margin: 2px 2px 8px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--mb-text-faint);
+}
+.pop-head:not(:first-child) { margin-top: 12px; }
+.pop-row { display: flex; gap: 6px; margin-top: 10px; }
+.pop-btn {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; position: relative;
+  height: 28px; padding: 0 10px; border-radius: 8px; font-size: 11.5px; cursor: pointer;
+  color: var(--mb-text-dim); background: var(--mb-surface-2); border: 1px solid var(--mb-border);
+}
+.pop-btn:hover { color: var(--mb-text); border-color: var(--mb-border-strong); }
+.pop-btn input[type=color] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.pop-item {
+  width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px;
+  font-size: 12.5px; color: var(--mb-text); text-align: left;
+}
+.pop-item:hover { background: var(--mb-surface-2); }
+.pop-item.on { color: var(--mb-accent); }
+.pop-item.quiet { color: var(--mb-text-dim); }
+.pop-item svg:last-child:not(:first-child) { margin-left: auto; }
+.pop-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+.colour-pop, .group-pop { top: 42px; right: 9px; }
+.colour-pop { width: 210px; }
+.colour-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.colour-dot {
+  aspect-ratio: 1; border-radius: 9px; display: grid; place-items: center; color: #fff;
+  background: var(--c); border: 2px solid transparent; box-shadow: inset 0 0 0 1px #0002;
+  transition: transform 120ms var(--mb-spring), border-color 120ms;
+}
+.colour-dot:hover { transform: scale(1.08); }
+.colour-dot.on { border-color: var(--mb-text); }
+.colour-any { width: 12px; height: 12px; border-radius: 50%;
+  background: conic-gradient(#f97583, #e6b95c, #6fd7a4, #6ea8fe, #cf8ce8, #f97583); }
+
+.board-card.picking .card-tools, .group-card.picking .card-tools { opacity: 1; transform: none; }
+
+/* a question, asked in the page's own style */
+.confirm-modal p { margin: 0 0 4px; color: var(--mb-text-dim); font-size: 13px; line-height: 1.5; }
+.btn.danger-btn { color: #fff; border-color: transparent; background: color-mix(in srgb, var(--mb-danger) 80%, #000); }
+.btn.danger-btn:hover { background: var(--mb-danger); }
+
+/* shelves: groups, then boards; or inside a group */
+.shelf-title {
+  margin: 4px 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--mb-text-faint);
+}
+.group-grid { margin-bottom: 30px; }
+.shelf-head { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; font-size: 14px; }
+.crumb-back { display: inline-flex; align-items: center; gap: 5px; color: var(--mb-text-dim); font-size: 13px; }
+.crumb-back svg { transform: rotate(-90deg); }
+.crumb-back:hover { color: var(--mb-text); }
+.crumb-sep { color: var(--mb-text-faint); }
+.crumb-here { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; color: var(--mb-text); }
+.crumb-here svg { color: var(--tile); }
+
+/* a group: its boards as a fanned stack, its name, how many */
+.group-card {
+  position: relative; isolation: isolate; cursor: pointer; text-align: left; overflow: visible;
+  display: flex; flex-direction: column; border-radius: 12px;
+  background: var(--mb-surface); border: 1px solid color-mix(in srgb, var(--tile) 35%, var(--mb-border));
+  animation: cardIn 420ms var(--mb-ease) backwards; animation-delay: calc(var(--i, 0) * 45ms);
+  transition: border-color 180ms var(--mb-ease), transform 200ms var(--mb-spring), box-shadow 200ms var(--mb-ease);
+}
+.group-card::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; border-radius: 12px 12px 0 0;
+  background: var(--tile);
+}
+.group-card:hover { transform: translateY(-3px); box-shadow: var(--mb-shadow-lg); border-color: var(--tile); }
+.group-card.drop {
+  border-color: var(--tile); transform: translateY(-3px) scale(1.01);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tile) 22%, transparent), var(--mb-shadow-lg);
+}
+.group-stack {
+  position: relative; height: 108px; overflow: hidden; border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--mb-border);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tile) 12%, var(--mb-bg)), var(--mb-bg));
+}
+.group-sheet {
+  position: absolute; left: 50%; top: 18px; width: 62%; height: 78px; border-radius: 8px; overflow: hidden;
+  background: var(--mb-surface); box-shadow: 0 6px 18px -8px #000a;
+  border: 1px solid color-mix(in srgb, var(--sheet, var(--tile)) 40%, var(--mb-border));
+  transform: translateX(calc(-50% + (var(--k) - 1) * 24px)) rotate(calc((var(--k) - 1) * 5deg));
+  z-index: calc(3 - var(--k)); transition: transform 260ms var(--mb-spring);
+}
+.group-card:hover .group-sheet { transform: translateX(calc(-50% + (var(--k) - 1) * 34px)) rotate(calc((var(--k) - 1) * 8deg)); }
+.group-sheet .mini { opacity: .85; }
+.group-empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--mb-text-faint); font-size: 11.5px; border: 1px dashed var(--mb-border-strong); margin: 14px; border-radius: 8px;
+}
+.group-body { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 15px 14px; }
+.group-body h3 { margin: 0; display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; }
+.group-body h3 svg { color: var(--tile); flex: none; }
+.group-count {
+  flex: none; font-size: 11px; padding: 2px 9px; border-radius: 999px; font-variant-numeric: tabular-nums;
+  color: var(--tile); background: color-mix(in srgb, var(--tile) 14%, transparent);
+}
+.group-card .card-tools {
+  position: absolute; top: 9px; right: 9px; z-index: 2; display: flex; gap: 2px; padding: 2px; border-radius: 8px;
+  background: color-mix(in srgb, var(--mb-surface) 82%, transparent); backdrop-filter: blur(8px);
+  opacity: 0; transform: translateY(-4px); transition: opacity 180ms var(--mb-ease), transform 180ms var(--mb-ease);
+}
+.group-card:hover .card-tools { opacity: 1; transform: none; }
+.board-card[draggable=true] { cursor: pointer; }
+
+/* the page's look: a theme and a background */
+.launcher-actions { align-items: center; }
+.look-wrap { position: relative; margin-left: auto; }
+.look-pop { top: 42px; right: 0; width: 300px; }
+.look-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.look-theme, .look-pattern {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; font-size: 12px;
+  text-transform: capitalize; color: var(--mb-text-dim); border: 1px solid var(--mb-border); background: var(--mb-surface-2);
+}
+.look-theme:hover, .look-pattern:hover { color: var(--mb-text); border-color: var(--mb-border-strong); }
+.look-theme.on, .look-pattern.on { color: var(--mb-text); border-color: var(--mb-accent); }
+.look-theme .theme-swatch { width: 26px; height: 20px; flex: none; }
+.look-patterns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.look-pattern { flex-direction: column; gap: 5px; padding: 6px; }
+.pattern-swatch { display: block; width: 100%; height: 34px; border-radius: 5px; border: 1px solid var(--mb-border); background-color: var(--mb-bg); }
+
+/* the patterns, on the page and in their swatches */
+.launcher.pattern-dots, .pattern-swatch.pattern-dots {
+  background-image: radial-gradient(circle at 1px 1px, var(--mb-grid) 1.1px, transparent 0);
+  background-size: 22px 22px;
+}
+.launcher.pattern-grid, .pattern-swatch.pattern-grid {
+  background-image: linear-gradient(var(--mb-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mb-grid) 1px, transparent 1px);
+  background-size: 32px 32px; background-position: -1px -1px;
+}
+.launcher.pattern-grid { background-image: linear-gradient(color-mix(in srgb, var(--mb-grid) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--mb-grid) 55%, transparent) 1px, transparent 1px); }
+.launcher.pattern-lines, .pattern-swatch.pattern-lines {
+  background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--mb-grid) 60%, transparent) 0 1px, transparent 1px 18px);
+}
+.launcher.pattern-dunes, .pattern-swatch.pattern-dunes {
+  background-image:
+    radial-gradient(120% 60% at 20% 110%, color-mix(in srgb, var(--mb-accent) 9%, transparent) 0 40%, transparent 41%),
+    radial-gradient(110% 55% at 80% 115%, color-mix(in srgb, var(--mb-accent) 7%, transparent) 0 42%, transparent 43%),
+    radial-gradient(130% 50% at 50% 120%, color-mix(in srgb, var(--mb-grid) 70%, transparent) 0 45%, transparent 46%);
+  background-attachment: fixed;
+}
+.pattern-swatch.pattern-dunes { background-attachment: scroll; }
+.launcher.pattern-stars, .pattern-swatch.pattern-stars {
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, var(--mb-text-faint) 50%, transparent 51%),
+    radial-gradient(1px 1px at 63% 12%, var(--mb-text-faint) 50%, transparent 51%),
+    radial-gradient(1.3px 1.3px at 38% 64%, var(--mb-text-dim) 50%, transparent 51%),
+    radial-gradient(1px 1px at 82% 48%, var(--mb-text-faint) 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 24% 86%, var(--mb-text-faint) 50%, transparent 51%),
+    radial-gradient(1px 1px at 92% 82%, var(--mb-text-dim) 50%, transparent 51%);
+  background-size: 260px 260px;
+}
+.launcher.pattern-plain { background-image: none; }
+/* a tile's panel is not cut off by the tile: the tile lets it out while open */
+.board-card.picking, .group-card.picking { overflow: visible; z-index: 6; }
+.card-canvas { border-radius: 12px 12px 0 0; }
+.board-card.coloured::before { border-radius: 12px 12px 0 0; }
+.colour-pop { width: 224px; }
+.pop-btn { white-space: nowrap; }
+/* the action row and its panels above the shelves - the board grid, empty
+   where the Look panel opens, otherwise took the panel's clicks */
+.launcher-actions { z-index: 5; }

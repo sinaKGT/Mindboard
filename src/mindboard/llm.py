@@ -1195,7 +1195,12 @@ class LocalModel:
                     headers={"Authorization": f"Bearer {self.key}"},
                     json={
                         "messages": messages, "max_tokens": max_tokens, "stream": True,
-                        "temperature": temperature, "top_p": 0.8, "top_k": 20,
+                        # Qwen's settings for thinking (DESIGN.md 56): the
+                        # answering ones let it loop on one line until the
+                        # limit; a presence penalty is its own advice for that
+                        **({"temperature": min(temperature, 0.6), "top_p": 0.95, "top_k": 20,
+                            "presence_penalty": 1.5} if think else
+                           {"temperature": temperature, "top_p": 0.8, "top_k": 20}),
                         "chat_template_kwargs": {"enable_thinking": think},
                         "timings_per_token": False,
                         # reading a long context can take minutes on a card that

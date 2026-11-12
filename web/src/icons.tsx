@@ -3,6 +3,9 @@ const P = (d: string, extra?: Record<string, any>) => ({ d, ...extra })
 const PATHS: Record<string, ReturnType<typeof P>[]> = {
   plus: [P('M8 3.5v9M3.5 8h9')],
   check: [P('M3.5 8.5l3 3 6-7')],
+  folder: [P('M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z')],
+  // a magic wand: fix spelling and grammar
+  wand: [P('M3 13l7.5-7.5'), P('M9.5 4.5l2 2'), P('M12 2.5v1.6M12.8 3.3h-1.6M14 6.5v1.2M14.6 7.1h-1.2M7 2v1.2M7.6 2.6H6.4')],
   // an open book: Explain more
   explain: [P('M8 4.6C6.6 3.6 4.6 3.3 2.5 3.6v8.6c2.1-.3 4.1 0 5.5 1 1.4-1 3.4-1.3 5.5-1V3.6c-2.1-.3-4.1 0-5.5 1Z'), P('M8 4.6v8.6')],
   // the ankh: the chat bar, as for the experts

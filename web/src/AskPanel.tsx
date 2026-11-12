@@ -257,6 +257,8 @@ export function AskPanel() {
   const [hot, setHot] = useState(false)
   const [focused, setFocused] = useState(false)
   const cool = useRef(0)
+  // "Clear this conversation?", asked above the bar in Mindboard's own style
+  const [clearing, setClearing] = useState(false)
   const think = useAsk((s) => s.think)
   const nodes = useStore((s) => s.nodes)
   const [draft, setDraft] = useState('')
@@ -338,9 +340,7 @@ export function AskPanel() {
                 </button>
               ) : null}
               <button className="icon-btn" title="Clear the conversation" disabled={!turns.length}
-                onClick={() => {
-                  if (confirm('Clear this conversation? Its questions and answers are removed; your cards are not touched.')) ask.forget()
-                }}>
+                onClick={() => setClearing(true)}>
                 <Icon name="trash" size={14} />
               </button>
               {!expanded ? (
@@ -416,6 +416,19 @@ export function AskPanel() {
             ))}
           </div>
         </aside>
+      ) : null}
+
+      {clearing ? (
+        <div className="ask-confirm nodrag nopan" role="alertdialog" aria-label="Clear this conversation?"
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setClearing(false) } }}>
+          <Icon name="trash" size={15} />
+          <div className="ask-confirm-words">
+            <b>Clear this conversation?</b>
+            <span>Its questions and answers are removed. Your cards are not touched.</span>
+          </div>
+          <button className="ask-confirm-keep" onClick={() => setClearing(false)}>Keep</button>
+          <button className="ask-confirm-go" autoFocus onClick={() => { ask.forget(); setClearing(false) }}>Clear</button>
+        </div>
       ) : null}
 
       {/* the one way in: always at the bottom of the board. At rest a small

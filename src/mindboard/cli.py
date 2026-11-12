@@ -531,6 +531,15 @@ def ai_voice():
     con.print("\n  Done. Experts now speak their answers - and you can speak to them.")
 
 
+@app.command("update")
+def update(force: bool = typer.Option(False, "--force", help="Reinstall even when already up to date.")):
+    """Get the latest version from GitHub and reinstall (your boards are not touched)."""
+    from .menu import update_and_reinstall
+
+    if not update_and_reinstall(interactive=False, force=force):
+        raise typer.Exit(1)
+
+
 @ai_app.command("status")
 def ai_status():
     """Say whether Ask your board is set up, and where."""

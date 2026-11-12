@@ -338,32 +338,22 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     indexer = Indexer(dd, lambda: search_model("embed"), describer=local_model)
     app.state.indexer = indexer
 
-    @app.get("/api/boards/{bid}/summary")
-    def api_board_summary(bid: str):
-        """The board's tile summary (DESIGN.md 54): kept if still true of the
-        board; otherwise written now if the model is loaded and free - never
-        loaded for a hover. `pending` while it cannot be written yet."""
-        from . import summaries
+    @app.post("/api/boards/{bid}/proofread")
+    def api_proofread(bid: str, body: dict):
+        """A card's title and text with spelling and grammar fixed (DESIGN.md
+        56). Writes nothing: the interface changes the card, undoably."""
+        from .ask import proofread
 
-        meta = board_or_404(bid)
-        graph = read_graph(conn_for(dd, bid), bid)
-        if not graph["nodes"]:
-            return {"summary": "", "empty": True}
-        kept = summaries.load(dd).get(bid)
-        if summaries.fresh(kept, meta["title"], len(graph["nodes"])):
-            return {"summary": kept["text"]}
-        model = held.get("model")
-        if model is not None and model.running() and model._asking.acquire(blocking=False):
-            try:
-                text = summaries.write(model, dd, bid, meta, graph["nodes"], graph["edges"])
-                if text:
-                    return {"summary": text}
-            except Exception:
-                pass
-            finally:
-                model._asking.release()
-        return {"summary": (kept or {}).get("text", ""), "pending": True,
-                "installed": local_model() is not None}
+        board_or_404(bid)
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Set up the AI first - choose 6 in the Mindboard menu")
+        if not model._asking.acquire(blocking=False):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
+        try:
+            return proofread(model, str(body.get("title") or "")[:300], str(body.get("text") or "")[:20000])
+        finally:
+            model._asking.release()
 
     @app.post("/api/boards/{bid}/ask/draft")
     def api_ask_draft(bid: str, body: DraftRequest):
@@ -545,6 +535,46 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     @app.delete("/api/experts/{eid}")
     def api_expert_delete(eid: str):
         return {"deleted": experts_mod.delete(dd, eid)}
+
+    # ------------------------------------------------------ the first page --
+    # groups of boards, and the page's own theme and pattern (DESIGN.md 57)
+    from . import home as home_mod
+
+    def home_call(fn, *a):
+        try:
+            return fn(dd, *a)
+        except home_mod.HomeError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.get("/api/home")
+    def api_home():
+        present = {b["id"] for b in list_boards(dd)}
+        home = home_mod.load(dd)
+        for g in home["groups"]:                 # a board deleted since is no longer counted
+            g["boards"] = [b for b in g.get("boards", []) if b in present]
+        return home
+
+    @app.patch("/api/home/look")
+    def api_home_look(body: dict):
+        return home_mod.set_look(dd, body)
+
+    @app.post("/api/home/groups")
+    def api_home_group_add(body: dict):
+        return home_call(home_mod.add_group, body)
+
+    @app.patch("/api/home/groups/{gid}")
+    def api_home_group_update(gid: str, body: dict):
+        return home_call(home_mod.update_group, gid, body)
+
+    @app.delete("/api/home/groups/{gid}")
+    def api_home_group_delete(gid: str):
+        return {"deleted": home_mod.delete_group(dd, gid)}
+
+    @app.post("/api/home/place")
+    def api_home_place(body: dict):
+        board = str(body.get("board") or "")
+        board_or_404(board)
+        return home_call(home_mod.place, board, body.get("group") or None)
 
     # ------------------------------------------------------- your themes --
     # named themes of your own, offered on every board (DESIGN.md 52)

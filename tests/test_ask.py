@@ -171,7 +171,7 @@ def test_the_cards_come_first_so_follow_ups_are_not_read_again(dd, board, cards)
     assert [m["role"] for m in second] == ["system", "user", "assistant", "user", "assistant", "user"], \
         "history cannot smuggle in a system message"
     assert second[1]["content"][0]["text"].startswith("CARDS")
-    assert second[-1] == {"role": "user", "content": "and now?"}
+    assert second[-1]["role"] == "user" and second[-1]["content"].startswith("and now?\n\n(Today is ")
 
 
 def test_too_much_is_refused_up_front_not_cut_off(dd, board, cards, monkeypatch):
@@ -526,10 +526,9 @@ class Seeing:
         return self.short
 
     def chat(self, messages, **kw):
-        # while loaded it also writes the board's tile summary (DESIGN.md 54):
-        # answered, but not counted as a picture described
+        # a request with no picture in it is not a picture being described
         if isinstance(messages[-1]["content"], str):
-            return {"text": "A board about a junction site."}
+            return {"text": "fine"}
         self.asked += 1
         assert any(p.get("type") == "image_url" for p in messages[-1]["content"]), "it is shown the picture"
         return {"text": self.said}
@@ -736,3 +735,76 @@ def test_with_nothing_to_link_to_a_draft_stands_alone(dd, board, cards):
                                               "label": "explains", "why": "because"})),
                          nodes_of(dd, board), "q", "a", [])
     assert got["link_to"] == "" and got["label"] == "" and got["why"] == ""
+
+
+# ------------------------------------------------------- dates and loops --
+
+def test_dates_are_read_as_dates_and_listed_newest_first():
+    """DESIGN.md 56: "latest" was answered with 3 Nov on a board whose newest
+    date was 11 Nov; the dates are now worked out and handed over, newest first."""
+    import datetime as dt
+
+    today = dt.date(2026, 11, 12)
+    got = ask.found_dates("Visit 22 Sep and 29 Oct 2026; Nov 3, 2026; 2026-11-05; on 19 Oct 2026", today)
+    assert [str(d) for d in got] == ["2026-09-22", "2026-10-19", "2026-10-29", "2026-11-03", "2026-11-05"]
+    assert ask.found_dates("Oct 2026 and 3rd Nov", today) == [dt.date(2026, 11, 3)], "no day out of a year"
+    a, b = "A" * 26, "B" * 26
+    ctx = ask.Context([a, b], f"CARDS\n[{a}] (text) IP meeting - 3 Nov 2026\n    notes\n\n"
+                              f"[{b}] (text) Business School - 11 Nov 2026", [])
+    note = ask.dates_note(ctx, "when was the latest visit?", today)
+    assert "Today is Thursday 12 November 2026." in note
+    assert note.index("11 November 2026: Business School") < note.index("3 November 2026: IP meeting")
+    assert f"[{b}]" in note and "(text)" not in note
+    plain = ask.dates_note(ctx, "who works on diversions?", today)
+    assert plain.strip() == "(Today is Thursday 12 November 2026.)", "only today's date when time is not asked"
+    assert "Today is" in ask.messages(ctx, "when?", [])[-1]["content"], "said with the question, after the cards"
+
+
+def test_thinking_that_goes_round_in_circles_is_cut_short():
+    guard = ask.LoopGuard()
+    line = "* Wait, I need to check if I should mention the 3 Nov meeting in the NEXT section.\n"
+    assert not guard.feed(line + "* Yes.\n* Okay.\n" + line)
+    assert guard.feed("* Yes.\n" + line), "the same line a third time"
+    assert not ask.LoopGuard().feed("Yes.\nYes.\nYes.\nYes.\n"), "short lines do not count"
+
+
+def test_an_answer_whose_thinking_loops_is_answered_without_it():
+    loop = "Wait, I need to check the NEXT section again.\n"
+
+    class Looping:
+        def __init__(self):
+            self.calls, self.closed = [], False
+
+        def stream(self, messages, *, think=False, **kw):
+            self.calls.append(think)
+            if think:
+                try:
+                    for _ in range(50):
+                        yield {"type": "thinking", "text": loop}
+                finally:
+                    self.closed = True
+                return
+            yield {"type": "text", "text": "The latest visit was on 11 Nov.\nNEXT: a\nNEXT: b\nNEXT: c"}
+            yield {"type": "done"}
+
+    model = Looping()
+    ctx = ask.Context(["A" * 26], f"CARDS\n[{'A' * 26}] visit 11 Nov 2026", [])
+    evs = list(ask.answer_events(model, ctx, "when was the latest visit?", [], think=True))
+    thinking = "".join(e["text"] for e in evs if e["event"] == "thinking")
+    assert thinking.count(loop) == 3 and "went round in circles" in thinking, "stopped at the third repeat"
+    assert model.calls == [True, False] and model.closed, "hung up, then answered without thinking"
+    assert evs[-1]["event"] == "done" and evs[-1]["answer"].startswith("The latest visit was on 11 Nov.")
+
+
+def test_fixing_the_writing_keeps_the_note_and_says_if_anything_changed():
+    import json as js
+
+    model = DraftModel(js.dumps({"title": "Meeting with Sarah", "text": "We discussed the budget.\n- next step"}))
+    got = ask.proofread(model, "Meting with Sarah", "We discused the budjet.\n- next step")
+    assert got == {"title": "Meeting with Sarah", "text": "We discussed the budget.\n- next step", "changed": True}
+    assert "Do not add, remove, shorten" in model.asked[0][0]["content"]
+    same = ask.proofread(DraftModel(js.dumps({"title": "Fine", "text": "Already right."})), "Fine", "Already right.")
+    assert not same["changed"]
+    cut = ask.proofread(DraftModel(js.dumps({"title": "T", "text": "short"})), "T", "a long note " * 20)
+    assert cut["text"] == "a long note " * 20 and not cut["changed"], "a reply that drops the note is not a fix"
+    assert ask.proofread(DraftModel("no json here"), "T", "x")["changed"] is False

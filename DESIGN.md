@@ -3114,3 +3114,79 @@ the table picture, the prompt showed with the board's chat out of the way, ✓
 kept it, and the Experts page brought the conversation back.
 
 252 tests.
+
+## 56. Dates, a loop in Think deeper, fixing the writing; summaries removed (2026-11-12)
+
+- **Dates.** On the SWIFT Lab Visitors board, asked for the latest visit, the
+  model kept naming 3 Nov though the newest date was 11 Nov: it was never told
+  today's date, and a 9B model compares dates written in words unreliably.
+  Every question now carries today's date, said with the question so the
+  cached start of the prompt stays put. A question about time (when, latest,
+  next, month names...) also carries the dates found in its cards, worked
+  out in code - "3 Nov 2026", "22 Sep and 29 Oct 2026", "Nov 3, 2026",
+  ISO dates; a date with no year takes the year after it - one line per date,
+  newest first, with the cards it is on (`ask.dates_note`). On that board the
+  list starts "11 November 2026: Professor Daniel King; NTU Business School
+  and Research Partnerships; Sarah Malone".
+- **Think deeper looped.** It thought "Wait, I need to check if I should
+  mention the 3 Nov meeting in the NEXT section. Yes. Okay." again and again
+  until its limit. Thinking ran with the answering settings; it now uses
+  Qwen's settings for thinking - temperature 0.6, top_p 0.95, and the
+  presence penalty 1.5 they advise against endless repetition. And a guard
+  (`ask.LoopGuard`) watches the thinking: the same real line a third time
+  ends it, the model is hung up on, and the question is answered without
+  thinking, saying so.
+- **Fix the writing** (`ask.proofread`, `POST /api/boards/{id}/proofread`).
+  A wand in each card's toolbar: the local model corrects spelling, grammar
+  and punctuation in the title and text - the person's words, not a rewrite;
+  lists, links, names and line breaks kept - and the card changes in one
+  undoable step. A reply that drops much of the note is not taken. Tried
+  with the real model: "Meting with Sara / We discused the budjet and the nex
+  step is to send the reprot to Paul / - book the lab for tuesday" became
+  "Meeting with Sara / We discussed the budget and the next step is to send
+  the report to Paul / - book the lab for Tuesday" in 2 s; Ctrl+Z undid it.
+- **Clear the conversation** asks above the chat bar in Mindboard's own style,
+  Keep or Clear, instead of the browser's dialog.
+- **Summaries on hover (§54) are removed** at the person's request: the
+  route, the background writing, the page code and `search/summaries.json`'s
+  writer are gone.
+
+## 57. Groups of boards, and the first page's own look (2026-11-12)
+
+- **Groups** (`home.py`, `/api/home...`). "New group" on the first page, or
+  "New group..." from a tile's folder button. A board goes into a group by
+  dragging its tile onto it, or from that folder button; it is in at most one,
+  or in none. A group shows as a fanned stack of up to three of its boards'
+  previews in their own colours, its name and how many boards it holds, in
+  its own colour. Clicking it opens it: "All boards / AI work - 1 board", and
+  its boards. Deleting a group keeps its boards. The first page shows groups,
+  then the boards in none.
+- **The page's look.** "Look", at the right of the actions: the ten themes,
+  and six backgrounds - dots, grid, lines, dunes, stars, plain - each with a
+  preview. A board keeps its own theme while open; the first page sets its
+  own again when you come back.
+- Groups and look are kept in `<data>/home.json` and travel in backups;
+  restoring adds groups not here (not in "copy" mode, where boards get new
+  ids), and the look only when replacing.
+- **The tile colour picker** is redrawn in the page's style: a titled panel,
+  eight distinct colours (a teal in place of a gold too close to the yellow),
+  a tick on the current one, "Any colour" and "None". A tile lets its panel
+  out instead of cutting it off. Groups use the same picker.
+- **Deleting a board** asks in the page's own style too.
+- Found while trying it: the board grid, empty where the Look panel opens,
+  sat above the panel and took its clicks; the action row is now above it.
+
+## 58. `mindboard update` (2026-11-12)
+
+Menu option 9 only reinstalled: it never fetched anything new. Now it, and a
+new `mindboard update`, get the latest version from GitHub first
+(`updater.py`): `git fetch`, then `git pull --ff-only` on the branch the copy
+follows - nothing merged, nothing overwritten - saying what came ("got 3 new
+changes" and their titles), then run the installer, which installs new
+packages and rebuilds the interface. Changes of your own to Mindboard's files
+stop it and are named, to keep with `git stash`; a copy not cloned with git,
+or no git, says what to do. Already up to date, it asks (menu) or stops
+(`--force` reinstalls anyway). Mindboard must not be running. Boards are never
+touched: they live in the data folder.
+
+260 tests.

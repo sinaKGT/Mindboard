@@ -22,6 +22,11 @@ if (!token) { try { token = localStorage.getItem('mb_token') || '' } catch { tok
 /** a theme of your own: a name, the built-in theme it starts from, its colours */
 export interface CustomTheme { id: string; name: string; base: string; palette: Record<string, string> }
 
+/** the first page (DESIGN.md 57) */
+export interface HomeLook { theme: string; pattern: string }
+export interface BoardGroup { id: string; name: string; colour: string; boards: string[] }
+export interface Home { look: HomeLook; groups: BoardGroup[] }
+
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as any) }
   if (token) headers['X-Mindboard-Token'] = token
@@ -43,9 +48,16 @@ const apiCore = {
   patchBoard: (id: string, patch: Partial<Pick<BoardMeta, 'title' | 'description' | 'settings'>>) =>
     req<BoardMeta>(`/boards/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteBoard: (id: string) => req<{ deleted: boolean }>(`/boards/${id}`, { method: 'DELETE' }),
-  /** the board's tile summary, written by the local model and kept (DESIGN.md 54) */
-  boardSummary: (id: string) =>
-    req<{ summary: string; pending?: boolean; empty?: boolean; installed?: boolean }>(`/boards/${id}/summary`),
+  /** the first page: groups of boards, and its theme and pattern (DESIGN.md 57) */
+  home: () => req<Home>('/home'),
+  setLook: (look: Partial<HomeLook>) => req<HomeLook>('/home/look', { method: 'PATCH', body: JSON.stringify(look) }),
+  addGroup: (name: string, colour = '') =>
+    req<BoardGroup>('/home/groups', { method: 'POST', body: JSON.stringify({ name, colour }) }),
+  updateGroup: (id: string, patch: { name?: string; colour?: string }) =>
+    req<BoardGroup>(`/home/groups/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteGroup: (id: string) => req<{ deleted: boolean }>(`/home/groups/${id}`, { method: 'DELETE' }),
+  placeBoard: (board: string, group: string | null) =>
+    req<Home>('/home/place', { method: 'POST', body: JSON.stringify({ board, group }) }),
 
   graph: (id: string) =>
     req<{ board: BoardMeta; revision: number; nodes: MNode[]; edges: MEdge[] }>(`/boards/${id}/graph`),
@@ -191,6 +203,10 @@ const apiMore = {
                                       candidates?: string[]; history?: { role: string; text: string }[] }) =>
     req<{ title: string; text: string; link_to: string; kind: string; label: string; why: string }>(
       `/boards/${boardId}/ask/draft`, { method: 'POST', body: JSON.stringify(body) }),
+  /** a card's words with spelling and grammar fixed (DESIGN.md 56) */
+  proofread: (boardId: string, body: { title: string; text: string }) =>
+    req<{ title: string; text: string; changed: boolean }>(`/boards/${boardId}/proofread`,
+      { method: 'POST', body: JSON.stringify(body) }),
   askStop: (boardId: string) =>
     req<{ stopped: boolean }>(`/boards/${boardId}/ask/stop`, { method: 'POST' }),
   /** Accepts a single .mindboard bundle or a whole backup zip. */
