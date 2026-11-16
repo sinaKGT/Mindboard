@@ -75,47 +75,54 @@ export function blocks(src: string): Block[] {
 }
 
 // maths first (DESIGN.md 61): a formula's _ and * are not italics
-const INLINE = new RegExp(`(${MATH_SOURCE}|` + String.raw`\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|` + '`[^`\\n]+`' + String.raw`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))`, 'g')
+const INLINE = new RegExp(`(${MATH_SOURCE}|` + String.raw`\((?:p|pp)\.\s?\d{1,4}(?:\s?[-–]\s?\d{1,4})?\)|\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|` + '`[^`\\n]+`' + String.raw`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))`, 'g')
 
 /** one line's light formatting; citations through `cite` */
-function inline(text: string, cite: (id: string) => ReactNode, key = ''): ReactNode[] {
+type PageCite = (page: number, label: string) => ReactNode
+
+function inline(text: string, cite: (id: string) => ReactNode, key = '', page?: PageCite): ReactNode[] {
   // "... [[id]] ." - no gap left between a citation and the stop after it
   const clean = text.replace(/\]\]\s+(?=[.,;:!?)])/g, ']]')
   return clean.split(INLINE).map((piece, j) => {
     const k = `${key}${j}`
     if (!piece) return null
     if (j % 2 && texOf(piece)) return <Tex key={k} piece={piece} />
+    // a file's page, cited "(p. 12)" (DESIGN.md 64): a link to it, where there is one
+    const pg = j % 2 ? piece.match(/^\((?:p|pp)\.\s?(\d{1,4})/) : null
+    if (pg) return <Fragment key={k}>{page ? page(Number(pg[1]), piece) : piece}</Fragment>
     if (piece.startsWith('[[')) {
       const id = piece.match(/^\[\[([0-9A-Za-z]{26})\]\]$/)
       return id ? <Fragment key={k}>{cite(id[1])}</Fragment> : null   // a citation the model got wrong: left out
     }
-    if (/^(\*\*|__).+\1$/.test(piece)) return <strong key={k}>{inline(piece.slice(2, -2), cite, k)}</strong>
+    if (/^(\*\*|__).+\1$/.test(piece)) return <strong key={k}>{inline(piece.slice(2, -2), cite, k, page)}</strong>
     if (/^`.+`$/.test(piece)) return <code key={k}>{piece.slice(1, -1)}</code>
-    if (/^([*_]).+\1$/.test(piece)) return <em key={k}>{inline(piece.slice(1, -1), cite, k)}</em>
+    if (/^([*_]).+\1$/.test(piece)) return <em key={k}>{inline(piece.slice(1, -1), cite, k, page)}</em>
     return <Fragment key={k}>{piece}</Fragment>
   })
 }
 
 const BULLETS = ['•', '◦', '▪', '◦', '▪']
 
-export function Prose({ text, cite, className = '' }: {
+export function Prose({ text, cite, className = '', page }: {
   text: string
   cite: (id: string) => ReactNode
   className?: string
+  /** a file's page cited "(p. 12)" - drawn by this, when given (DESIGN.md 64) */
+  page?: PageCite
 }) {
   return (
     <div className={`prose ${className}`}>
       {blocks(text).map((b, i) => {
         switch (b.k) {
-          case 'h': return <div key={i} className={`prose-h prose-h${Math.min(b.level, 4)}`}>{inline(b.text, cite)}</div>
-          case 'p': return <p key={i} className="prose-p">{inline(b.text, cite)}</p>
+          case 'h': return <div key={i} className={`prose-h prose-h${Math.min(b.level, 4)}`}>{inline(b.text, cite, '', page)}</div>
+          case 'p': return <p key={i} className="prose-p">{inline(b.text, cite, '', page)}</p>
           case 'li': return (
             <div key={i} className="prose-li" style={{ paddingLeft: `${b.depth * 1.35}em` }}>
               <span className={`prose-mark ${b.mark ? 'num' : ''}`}>{b.mark ?? BULLETS[b.depth]}</span>
-              <span className="prose-li-text">{inline(b.text, cite)}</span>
+              <span className="prose-li-text">{inline(b.text, cite, '', page)}</span>
             </div>
           )
-          case 'quote': return <div key={i} className="prose-quote">{inline(b.text, cite)}</div>
+          case 'quote': return <div key={i} className="prose-quote">{inline(b.text, cite, '', page)}</div>
           case 'code': return <pre key={i} className="prose-code">{b.text}</pre>
           case 'hr': return <hr key={i} className="prose-hr" />
           case 'table': return (
@@ -123,7 +130,7 @@ export function Prose({ text, cite, className = '' }: {
               <table className="prose-table"><tbody>
                 {b.rows.map((r, ri) => (
                   <tr key={ri}>{r.map((c, ci) => ri === 0
-                    ? <th key={ci}>{inline(c, cite)}</th> : <td key={ci}>{inline(c, cite)}</td>)}</tr>
+                    ? <th key={ci}>{inline(c, cite, '', page)}</th> : <td key={ci}>{inline(c, cite, '', page)}</td>)}</tr>
                 ))}
               </tbody></table>
             </div>

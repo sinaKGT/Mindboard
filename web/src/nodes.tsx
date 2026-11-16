@@ -5,7 +5,7 @@ import {
   addConnected, deleteNodes, duplicateNodes, linkifyNode, moveOut, refreshLinkPreview, setBodyList, setStyle, unwrapMeta, updateNode,
 } from './actions'
 import { api } from './api'
-import { useAsk } from './askStore'
+import { askable, useAsk } from './askStore'
 import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
@@ -612,6 +612,13 @@ export function FileNode({ data, selected }: NodeProps) {
           <span className="doc-name">{name}</span>
           {openable ? <span className="doc-hint">Opens in your PDF reader</span> : null}
         </span>
+        {boardId && sha && askable(name) ? (
+          <button className="icon-btn nodrag" title="Ask this file - prepared, then searched on its own (DESIGN.md 64)"
+            aria-label={`Ask ${name}`} onPointerDown={stop} onPointerUp={stop} onDoubleClick={stop}
+            onClick={(e) => { stop(e); void useAsk.getState().openFile({ board: boardId, sha, card: node.id, name }) }}>
+            <Icon name="ask" size={13} />
+          </button>
+        ) : null}
         {boardId && sha ? (
           <a className="icon-btn nodrag" href={api.assetUrl(boardId, sha)} download={name}
             title="Save a copy somewhere else"

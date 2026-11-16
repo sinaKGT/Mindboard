@@ -27,6 +27,14 @@ export interface HomeLook { theme: string; pattern: string }
 export interface BoardGroup { id: string; name: string; colour: string; boards: string[] }
 export interface Home { look: HomeLook; groups: BoardGroup[] }
 
+/** a file being prepared or asked (DESIGN.md 64) */
+export interface FileInfo {
+  id: string; name: string; kind: string; status: 'preparing' | 'ready' | 'failed'
+  stage: string; done: number; total: number; error: string; pages: number; passages: number
+  note: string; board: string; sha: string
+  sheets?: { name: string; rows: number; columns: number }[]
+}
+
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as any) }
   if (token) headers['X-Mindboard-Token'] = token
@@ -75,6 +83,22 @@ const apiCore = {
     return req<{ sha256: string; mime: string; width: number | null; height: number | null }>(
       `/boards/${boardId}/assets`, { method: 'POST', body: fd })
   },
+  /** Asking one file (DESIGN.md 64): start preparing it - one added in the
+   *  chat, or one on a board - then follow it, ask it, and close it. */
+  openFile: (src: { file: File } | { board: string; sha: string; name: string }) => {
+    const fd = new FormData()
+    if ('file' in src) fd.append('file', src.file)
+    else { fd.append('board', src.board); fd.append('sha', src.sha); fd.append('name', src.name) }
+    return req<FileInfo>('/files', { method: 'POST', body: fd })
+  },
+  fileInfo: (id: string) => req<FileInfo>(`/files/${id}`),
+  closeFile: (id: string) => req<{ closed: boolean }>(`/files/${id}`, { method: 'DELETE' }),
+  askFile: (id: string, body: unknown, onEvent: (name: string, data: any) => void, signal: AbortSignal) =>
+    streamEvents(`/files/${id}/ask`, body, onEvent, signal),
+  fileUrl: (id: string, page?: number | null) =>
+    `/api/files/${id}/raw${token ? `?t=${encodeURIComponent(token)}` : ''}${page ? `#page=${page}` : ''}`,
+  filePageUrl: (id: string, page: number, size = 240) =>
+    `/api/files/${id}/page/${page}?size=${size}${token ? `&t=${encodeURIComponent(token)}` : ''}`,
   /** Media is stored locally; a page comes back with a stored preview and,
    *  when it is a video we can play, its embed address. */
   fromUrl: (boardId: string, url: string) =>

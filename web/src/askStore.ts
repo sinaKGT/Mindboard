@@ -30,7 +30,7 @@ export interface Turn {
   leftOut?: number
   /** how the cards were chosen: by hand, or a search of the whole board -
    *  never the whole board sent entire */
-  mode?: 'chosen' | 'search' | 'explain' | 'own'
+  mode?: 'chosen' | 'search' | 'explain' | 'own' | 'file'
   used?: number
   /** the cards the answer was given, best match first - for the files it offers (DESIGN.md 48) */
   cards?: string[]
@@ -48,7 +48,41 @@ export interface Turn {
   said?: string[]
   /** an answer: still looking at the pictures pasted with its question */
   looking?: boolean
+  /** an answer from a file (DESIGN.md 64): where each passage it was given comes from */
+  passages?: { where: string; page: number | null; figure: boolean; pictured: boolean }[]
+  /** a spreadsheet's answer: what the model chose to calculate over whole sheets (DESIGN.md 65) */
+  tools?: { why: string; trouble: string; calls: { tool: string; label: string; said: string; error: string }[] }
 }
+
+/** A conversation with one file (DESIGN.md 64): a branch of its own beside
+ *  the board's, with its own questions and answers. The file is prepared on
+ *  the server first - read, its figures described, indexed - and is gone
+ *  there when the branch is closed. */
+export interface FileBranch {
+  id: string
+  name: string
+  kind: string
+  /** a file on the board: its card, board and hash - empty for one added in the chat */
+  board?: string
+  card?: string
+  sha?: string
+  status: 'preparing' | 'ready' | 'failed' | 'gone'
+  stage?: string
+  done?: number
+  total?: number
+  pages?: number
+  passages?: number
+  note?: string
+  error?: string
+  sheets?: { name: string; rows: number; columns: number }[]
+  /** when its preparation last moved on - to say when it is slow */
+  moved?: number
+  /** its conversation, while another is shown */
+  turns: Turn[]
+}
+
+export const FILE_ACCEPT = '.pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md'
+export const askable = (name: string) => /\.(pdf|docx|xlsx|xlsm|csv|txt|md)$/i.test(name)
 
 interface Ask {
   boardId: string | null
@@ -82,6 +116,14 @@ interface Ask {
   setOwn(on: boolean): void
   send(question: string, pictures?: PastedPicture[]): Promise<void>
   stop(): void
+  /** file conversations, and which is shown - null for the board's own */
+  branches: FileBranch[]
+  active: string | null
+  /** the board's conversation, kept while a file's is shown */
+  boardTurns: Turn[]
+  openFile(src: { file?: File; board?: string; sha?: string; card?: string; name: string }): Promise<void>
+  show(id: string | null): void
+  closeBranch(id: string): void
 }
 
 const KEY = (b: string) => `mb_ask_${b}`
@@ -92,17 +134,24 @@ const savedSide = (): 'center' | 'left' => {
 }
 const HISTORY_TURNS = 10
 
+// an answer cut off by a refresh is kept as far as it got
+const settled = (turns: Turn[]) => turns.map((t) => (t.status && t.status !== 'done'
+  ? { ...t, status: 'stopped' as const } : t))
+
 function save(s: Ask) {
   if (!s.boardId) return
+  // the shown conversation is `turns`; the others wait where they belong
+  const boardTurns = s.active ? s.boardTurns : s.turns
+  const branches = s.branches.map((b) => ({ ...b, turns: settled(b.id === s.active ? s.turns : b.turns) }))
   try {
     sessionStorage.setItem(KEY(s.boardId), JSON.stringify({
       context: s.context, open: s.open, think: s.think, expanded: s.expanded, explain: s.explain, own: s.own,
-      // an answer cut off by a refresh is kept as far as it got
-      turns: s.turns.map((t) => (t.status && t.status !== 'done'
-        ? { ...t, status: 'stopped' as const } : t)),
+      turns: settled(boardTurns), branches,
     }))
   } catch { /* private mode, or full */ }
 }
+
+const polling = new Set<string>()
 
 export const useAsk = create<Ask>()((set, get) => ({
   boardId: null,
@@ -116,6 +165,9 @@ export const useAsk = create<Ask>()((set, get) => ({
   busy: false,
   controller: null,
   side: savedSide(),
+  branches: [],
+  active: null,
+  boardTurns: [],
 
   load(boardId) {
     get().controller?.abort()
@@ -125,7 +177,9 @@ export const useAsk = create<Ask>()((set, get) => ({
     }
     set({ boardId, open: !!saved.open, context: saved.context ?? [], turns: saved.turns ?? [],
           think: !!saved.think, expanded: !!saved.expanded, explain: !!saved.explain, own: !!saved.own,
-          busy: false, controller: null })
+          busy: false, controller: null, branches: saved.branches ?? [], active: null, boardTurns: [] })
+    // a file's preparation lives on the server: see whether it still does
+    for (const b of get().branches) if (b.status !== 'gone' && b.status !== 'failed') poll(b.id)
   },
   setOpen(open) { set(open ? { open } : { open, expanded: false }); save(get()) },
   toggle(id) {
@@ -156,6 +210,43 @@ export const useAsk = create<Ask>()((set, get) => ({
   setExplain(on) { set({ explain: on }); save(get()) },
   setOwn(on) { set({ own: on }); save(get()) },
 
+  async openFile(src) {
+    const s = get()
+    // the same file on the board, already open: go to it
+    const had = src.sha ? s.branches.find((b) => b.sha === src.sha && b.status !== 'gone') : undefined
+    if (had) { get().show(had.id); set({ open: true }); return }
+    try {
+      const info = await api.openFile(src.file ? { file: src.file } : { board: src.board!, sha: src.sha!, name: src.name })
+      const branch: FileBranch = { ...info, card: src.card, turns: [] }
+      set((st) => ({ branches: [...st.branches, branch] }))
+      get().show(branch.id)
+      set({ open: true })
+      save(get())
+      poll(branch.id)
+    } catch (err: any) {
+      useStore.getState().say(err.message || `could not open ${src.name}`, true)
+    }
+  },
+
+  show(id) {
+    const s = get()
+    if (s.busy || id === s.active) return
+    // put the shown conversation back where it belongs, then show the other
+    const branches = s.branches.map((b) => (b.id === s.active ? { ...b, turns: s.turns } : b))
+    const boardTurns = s.active ? s.boardTurns : s.turns
+    const next = id ? branches.find((b) => b.id === id) : undefined
+    set({ branches, boardTurns, active: next ? next.id : null, turns: next ? next.turns : boardTurns })
+    save(get())
+  },
+
+  closeBranch(id) {
+    const s = get()
+    if (s.active === id) { if (s.busy) return; get().show(null) }
+    set((st) => ({ branches: st.branches.filter((b) => b.id !== id) }))
+    save(get())
+    void api.closeFile(id).catch(() => {})       // gone on the server too: temporary
+  },
+
   stop() {
     const { controller, boardId } = get()
     if (!controller) return
@@ -172,6 +263,9 @@ export const useAsk = create<Ask>()((set, get) => ({
     const nodes = useStore.getState().nodes
     // nothing added means the whole board - the server reads it that way
     const cards = s.context.filter((id) => nodes[id])
+    const branch = s.active ? s.branches.find((b) => b.id === s.active) : undefined
+    if (branch && branch.status !== 'ready') return
+    const own = s.own && !branch
     // Board off (DESIGN.md 63) carries only Board off turns: an earlier answer
     // from the board would bring the board's facts back in by the side door
     const ownTurn = (i: number) => {
@@ -180,7 +274,7 @@ export const useAsk = create<Ask>()((set, get) => ({
     }
     const history = s.turns
       .filter((t, i) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done')
-        && (!s.own || ownTurn(i)))
+        && (!own || ownTurn(i)))
       .slice(-HISTORY_TURNS)
       .map((t) => ({ role: t.role, text: t.role === 'user' ? withSaid(t.text, t.said) : t.text }))
     // the cards earlier answers drew on stay in the conversation (DESIGN 34)
@@ -188,15 +282,15 @@ export const useAsk = create<Ask>()((set, get) => ({
       .filter((id) => nodes[id]).slice(-40)
     // Explain more holds in either view - the header icon in the small one,
     // the chip in the full screen one
-    const own = s.own
-    const explain = s.explain && !own
+    const explain = s.explain && !own && !branch
     const controller = new AbortController()
     set({
       busy: true, controller, open: true,
       turns: [...s.turns,
               { role: 'user', text: question.trim(),
                 ...(pictures.length ? { images: pictures.map((p) => p.thumb) } : {}) },
-              { role: 'assistant', text: '', status: 'reading', ...(pictures.length ? { looking: true } : {}) }],
+              { role: 'assistant', text: '', status: 'reading', ...(branch ? { mode: 'file' as const } : {}),
+                ...(pictures.length && !own && !branch ? { looking: true } : {}) }],
     })
     const patch = (p: Partial<Turn>) => set((st) => {
       const turns = st.turns.slice()
@@ -206,10 +300,23 @@ export const useAsk = create<Ask>()((set, get) => ({
     const last = () => get().turns[get().turns.length - 1]
 
     try {
-      await api.ask(boardId, { question: question.trim(), cards, history, think: s.think, keep, explain,
-                               images: pictures.map((p) => p.url), own },
-        (name, data) => {
-          if (name === 'pasted') {
+      const body = { question: question.trim(), cards, history, think: s.think, keep, explain,
+                     images: pictures.map((p) => p.url), own }
+      await (branch ? api.askFile(branch.id, body, (n, d) => handle(n, d), controller.signal)
+        : api.ask(boardId, body, (n, d) => handle(n, d), controller.signal))
+      if (last().status !== 'done') patch({ status: 'stopped' })
+    } catch (err: any) {
+      if (controller.signal.aborted) patch({ status: 'stopped' })
+      else patch({ error: err.message || 'could not ask', status: 'done' })
+    } finally {
+      set({ busy: false, controller: null })
+      save(get())
+    }
+
+    function handle(name: string, data: any) {
+          if (name === 'tools') {
+            patch({ tools: { why: data.why, trouble: data.trouble, calls: data.calls } })
+          } else if (name === 'pasted') {
             // what the model saw in the pictures, kept with the question
             set((st) => {
               const turns = st.turns.slice()
@@ -219,9 +326,11 @@ export const useAsk = create<Ask>()((set, get) => ({
               return { turns }
             })
           } else if (name === 'context') {
-            patch({ warning: data.warning, status: data.loading ? 'loading' : 'reading',
+            patch({ warning: data.warning, status: data.loading ? 'loading' : 'reading', looking: false,
                     whole: data.whole, tokens: data.tokens, leftOut: data.pictures_left_out,
-                    mode: data.mode, used: data.cards?.length, cards: data.cards, total: data.total, how: data.how })
+                    mode: data.mode, used: data.mode === 'file' ? data.passages?.length : data.cards?.length,
+                    cards: data.cards, total: data.total, how: data.how,
+                    ...(data.passages?.length ? { passages: data.passages } : {}) })
           } else if (name === 'progress') {
             // the first progress means the model is loaded and reading
             patch({ status: 'reading',
@@ -238,17 +347,38 @@ export const useAsk = create<Ask>()((set, get) => ({
           } else if (name === 'error') {
             patch({ error: data.message, status: 'done' })
           }
-        }, controller.signal)
-      if (last().status !== 'done') patch({ status: 'stopped' })
-    } catch (err: any) {
-      if (controller.signal.aborted) patch({ status: 'stopped' })
-      else patch({ error: err.message || 'could not ask', status: 'done' })
-    } finally {
-      set({ busy: false, controller: null })
-      save(get())
     }
   },
 }))
+
+/** Follow a file's preparation until it is ready, failed, or gone. */
+function poll(id: string) {
+  if (polling.has(id)) return
+  polling.add(id)
+  const tick = async () => {
+    const b = useAsk.getState().branches.find((x) => x.id === id)
+    if (!b) { polling.delete(id); return }
+    let next: Partial<FileBranch>
+    try {
+      const info = await api.fileInfo(id)
+      const moved = info.stage !== b.stage || info.done !== b.done ? Date.now() : (b.moved ?? Date.now())
+      next = { status: info.status, stage: info.stage, done: info.done, total: info.total, moved,
+               pages: info.pages, passages: info.passages, note: info.note, error: info.error,
+               sheets: info.sheets }
+      misses = 0
+    } catch (err: any) {
+      // only "no such file" means it is gone; a hiccup - the server busy or
+      // restarting - is tried again, more slowly, a few times
+      if (/ended|not found|404/i.test(err?.message || '') || ++misses > 8) next = { status: 'gone' }
+      else { window.setTimeout(tick, Math.min(700 * 2 ** misses, 10000)); return }
+    }
+    useAsk.setState((st) => ({ branches: st.branches.map((x) => (x.id === id ? { ...x, ...next } : x)) }))
+    if (next.status === 'preparing') window.setTimeout(tick, 700)
+    else { polling.delete(id); save(useAsk.getState()) }
+  }
+  let misses = 0
+  void tick()
+}
 
 /** Go to a card wherever it is - inside a group, or a group inside that -
  *  the way a ghost endpoint does. */

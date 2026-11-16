@@ -3330,3 +3330,100 @@ leaves the board out entirely:
 - Board chat only: an expert is its boards, so it has no Board off.
 
 264 tests.
+
+## 64. Asking one file: prepared, then searched on its own (2026-11-16)
+
+A file is never put into the model's context whole. To ask a PDF, Word
+document, Excel workbook, CSV or text file, it is **prepared** first and
+then **searched inside itself only**, the way a board is searched - in a
+conversation of its own beside the board's.
+
+- **Ways in**: the file button in the chat bar, or a file dropped or pasted
+  on it (a file added this way goes on the board only with "Add file to
+  board"); "Ask this file" beside a PDF an answer offers; the ask button on a
+  file card on the board.
+- **A branch of its own**: each file is a tab above the conversation, next
+  to "Board", with its own questions and answers; switching keeps both
+  (`askStore`: `branches`, `active`, `boardTurns`). Board off and Explain more
+  do not apply in a file's tab. Add to board works as before, and links the
+  new card to the file's card when the file is on the board.
+- **Preparing** (`filechat.py`, on its own thread, progress in the strip):
+  read into passages of about 1,100 characters with some overlap - a PDF by
+  page with pdfium, a Word document under its headings plus its tables, a
+  sheet or CSV row by row with the header's names in every row; figures
+  described by the model once (a PDF page with pictures, many drawn lines or
+  little text - charts and scans - and a Word document's pictures, 24 at
+  most), so a question finds them by what they show; a keyword index (BM25,
+  Tantivy, in memory) and a vector per passage.
+- **Asking**: exact phrases, keywords and meaning fused by reciprocal rank,
+  the best 30 reranked, then passages taken best first up to 5,000 tokens
+  (12 at most), sent in the file's order, each labelled where it is. "What
+  is this about?" also takes the file's start. The model cites "(p. 12)",
+  which opens the file at that page.
+- **Multimodal, smartly**: a page that is mostly a figure, a table, formulas
+  or a scan goes to the model as a picture of the page when one of its
+  passages is among the best (2 pages at most); text pages go as text. A
+  picture costs about 1,300 tokens and some seconds, so only pages that need
+  it pay. Under the answer, the pages it was given, small, the ones it saw as
+  pictures outlined.
+- **Temporary**: in memory and under `<data>/tmp/filechat`, removed when its
+  tab is closed, after six hours unused, and whenever Mindboard starts. A
+  board's file is read where it is, never changed. Boards and their search
+  are untouched.
+- New dependencies: pypdfium2 (pages drawn and counted), python-docx,
+  openpyxl.
+- With the real model, a four-page report with a bar chart drawn as a
+  picture: prepared in seconds; "which month had the most visitors?" was
+  answered from the chart page (November, 16), and "how much does the depot
+  cost?" with "(p. 2)" linked to page 2. Closing the tab removed it on the
+  server.
+
+Not yet: Experts' conversations, older .doc and .xls files, and sums or
+averages over a whole column (a sheet is searched row by row).
+
+270 tests.
+
+## 65. A spreadsheet's tools, chosen by the model (2026-11-16)
+
+Searching a workbook row by row (§64) finds what a row says, but a total over
+three hundred rows is in no passage. So an Excel or CSV file asked on its own
+is also loaded, while it is prepared, into an in-memory SQLite database - a
+table a sheet, every row up to 200,000, a column numeric when 80% of it reads
+as numbers ("1,800", "£4.20" and "12%" included), dates as YYYY-MM-DD so they
+compare as dates (`sheets.py`).
+
+- **The model decides.** Before each answer it is shown the sheets' columns,
+  types and a few example values, and the question, and answers in JSON:
+  which tools, if any (`decide`). Most questions about one row need none.
+  It is told which operation fits which wording - "which region had the
+  most visitors" is a sum per region, not the largest single visit; the
+  first real try picked max and the answer, rightly, said it could not tell.
+- **Three tools, at most three calls**: `calculate` (sum, average, min, max,
+  count, count distinct, median; filters; per group, sorted), `rows` (the
+  rows matching filters, sorted, 30 at most), `distinct` (a column's values,
+  most common first). Structured, never SQL from the model: every sheet and
+  column is checked against the file, every value passed as a parameter, so
+  nothing it writes can change or escape the data - a filter of "'; DROP
+  TABLE" is refused, a "contains" of "%' OR 1=1 --" matches nothing.
+- **Facts only.** Results go to the answer marked CALCULATED over the whole
+  sheet, and the model says "(calculated)" after figures it takes from them.
+  A tool that fails, and a choice that cannot be made, are listed as NOT
+  CALCULATED with the instruction not to work those figures out from the
+  passages - they are only part of the sheet. For every file, the model is
+  told never to present a total or "all of them" from passages, and never to
+  fill a gap with a guess. Under the answer, what was calculated, and what
+  could not be, in its own box.
+- **Slow or failing steps**: choosing tools is cut off after 120 s (the
+  reply is hung up, so llama-server stops) and the answer goes on from the
+  passages, saying no calculation was made; a calculation is stopped after 5
+  s; a figure that fails or takes over 120 s to describe while preparing is
+  skipped and said in the strip; a preparation that has not moved for two
+  minutes says so and offers to stop; the page tries again, more slowly,
+  when the server does not answer for a moment, and only "not found" ends a
+  file's tab (after a restart it says to prepare or add the file again).
+- With the real model on a 300-row visits workbook (true totals known): "how
+  many visitors came from Europe?" - 365 (calculated), exact; "which region
+  had the most visitors?" - East Midlands, 971, exact; "what did MIT's
+  visitors do?" - the sheet has no such column, and it said so.
+
+274 tests.

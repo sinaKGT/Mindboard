@@ -114,6 +114,34 @@ question the person could ask next: short, in their words - one going deeper,
 one putting it to use, one on a neighbouring idea."""
 
 
+FILE_SYSTEM = f"""You answer questions about one document, from PASSAGES found in it for
+each question - its best-matching parts, not the whole document. A page given
+as a picture is that page itself: read its figures, tables and formulas from
+the picture.
+
+How to answer:
+1. Answer from the passages first. After each thing you take from them, say
+   where it is, in brackets as the passage is labelled: (p. 12), (Sales, rows
+   2-21), (table 2). Never invent a page. Figures under CALCULATED were
+   worked out over the whole sheet with tools: use them for totals, counts,
+   averages and rankings, and say "(calculated)" after each.
+2. If the passages do not answer the question, say so plainly first: the
+   answer may be in a part of the document not found this time - suggest
+   other words to ask with. The passages are only part of the document:
+   never present a total, count, average or "all of them" worked out from
+   passages as if it covered the whole document, and never fill a gap with
+   a guess. Say what is known and from where.
+3. Anything you add from your own knowledge goes after a line that reads
+   exactly "{BEYOND}" - meaning beyond this document.
+4. Start with the answer itself. Short and exact by default: a few sentences
+   or a short list. Explain at length only when asked to explain, or asked how
+   or why. Write a formula in LaTeX between dollar signs, like $E = mc^2$.
+5. Finish with three lines, each starting exactly "{NEXT}", each holding one
+   question the person could ask next about this document: short, in their
+   words - one going deeper, one putting it to use, one on a neighbouring
+   part of the document."""
+
+
 def own_context(attached: Optional[list[Picture]] = None) -> Context:
     """What a Board off question takes: nothing from the board."""
     return Context([], "", mode="own", attached=list(attached or []))
@@ -331,6 +359,8 @@ class Context:
     offer: list[str] = field(default_factory=list)
     # pictures pasted into the question itself - not on the board (DESIGN.md 62)
     attached: list[Picture] = field(default_factory=list)
+    # asking one file (DESIGN.md 64): where each passage sent comes from
+    passages: list = field(default_factory=list)
 
     @property
     def tokens(self) -> int:
@@ -704,7 +734,7 @@ def dates_note(ctx: "Context", question: str, today=None) -> str:
 
     today = today or dt.date.today()
     note = f"\n\n(Today is {dt.date.strftime(today, '%A')} {say_date(today)}.)"
-    if not TIME_WORDS.search(question):
+    if not TIME_WORDS.search(question) or ctx.mode in ("own", "file"):
         return note
     on: dict = {}                            # date -> the cards it is written on
     for block in ctx.text.split("\n\n"):
@@ -755,6 +785,15 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     read again, as they should be."""
     if ctx.mode == "own":
         msgs = [{"role": "system", "content": OWN_SYSTEM}]
+        return _conversation(msgs, ctx, question, history)
+    if ctx.mode == "file":
+        # one file's passages (DESIGN.md 64), and its pages better seen than read
+        parts: list[dict[str, Any]] = [{"type": "text", "text": ctx.text}]
+        for p in ctx.pictures:
+            parts.append({"type": "text", "text": f"{p.card} of the file, as a picture:"})
+            parts.append({"type": "image_url", "image_url": {"url": p.data_url}})
+        msgs = [{"role": "system", "content": FILE_SYSTEM}, {"role": "user", "content": parts},
+                {"role": "assistant", "content": "I have read these passages. Ask away."}]
         return _conversation(msgs, ctx, question, history)
     parts: list[dict[str, Any]] = [{"type": "text", "text": ctx.text}]
     for p in ctx.pictures:
@@ -919,7 +958,7 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     yield {"event": "context", "cards": ctx.cards, "pictures": len(ctx.pictures), "tokens": used,
            "whole": ctx.whole, "pictures_left_out": ctx.pictures_left_out,
            "mode": ctx.mode, "total": ctx.total, "how": ctx.how, "where": ctx.where,
-           "reading": ctx.reading, "offer": ctx.offer}
+           "reading": ctx.reading, "offer": ctx.offer, "passages": ctx.passages}
     text: list[str] = []
     timings: dict = {}
     looped = False

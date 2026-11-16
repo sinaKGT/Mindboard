@@ -24,6 +24,11 @@ dependencies = [
   # a PDF's text, read once so it is found by what it covers (DESIGN.md 48):
   # pure Python, BSD-3-Clause
   "pypdf>=5.0",
+  # asking one file (DESIGN.md 64): a PDF page drawn as a picture (pdfium,
+  # BSD-3/Apache-2.0), a Word document and an Excel workbook read (MIT)
+  "pypdfium2>=4.30",
+  "python-docx>=1.1",
+  "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

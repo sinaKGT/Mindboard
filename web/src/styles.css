@@ -1649,3 +1649,66 @@ a.btn { text-decoration: none; }
 .bar-chip.own-chip.on { color: var(--mb-text); border-style: dashed;
   border-color: var(--mb-border-strong); background: var(--mb-surface-3); }
 .voice.own { padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--mb-border-strong); }
+
+/* Asking one file (DESIGN.md 64): its conversation a tab beside the board's,
+   a strip saying how its preparation goes, and the pages each answer used. */
+.file-tabs { display: flex; gap: 4px; padding: 6px 10px 0; overflow-x: auto; scrollbar-width: none;
+  border-bottom: 1px solid var(--mb-border); flex: none; }
+.file-tab { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 220px;
+  font-size: 11.5px; color: var(--mb-text-dim); border: 1px solid transparent; border-bottom: 0;
+  border-radius: 8px 8px 0 0; padding: 0 2px 0 0; margin-bottom: -1px; background: transparent; }
+button.file-tab { padding: 5px 10px; gap: 5px; }
+.file-tab > button:first-child { display: inline-flex; align-items: center; gap: 5px; padding: 5px 4px 5px 9px;
+  min-width: 0; color: inherit; }
+.file-tab.on { color: var(--mb-text); background: var(--mb-surface); border-color: var(--mb-border); }
+.file-tab:hover { color: var(--mb-text); }
+.file-tab-badge { font-size: 8.5px; font-weight: 700; letter-spacing: .04em; padding: 1px 4px; border-radius: 4px;
+  background: var(--mb-accent-soft); color: var(--mb-accent); }
+.file-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--mb-accent); animation: fileDot 1s ease-in-out infinite; }
+.file-tab-x { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; opacity: .5; }
+.file-tab-x:hover { opacity: 1; background: var(--mb-surface-3); }
+.file-tab.failed .file-tab-name, .file-tab.gone .file-tab-name { text-decoration: line-through; opacity: .7; }
+@keyframes fileDot { 50% { opacity: .25; } }
+.file-strip { padding: 8px 12px; border-bottom: 1px solid var(--mb-border); font-size: 12px; color: var(--mb-text-dim);
+  display: flex; flex-direction: column; gap: 6px; flex: none; }
+.file-strip b { color: var(--mb-text); font-weight: 600; }
+.file-strip-size { color: var(--mb-text-faint, var(--mb-text-dim)); }
+.file-strip-note { font-size: 11px; color: var(--mb-text-faint, var(--mb-text-dim)); }
+.file-strip-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.file-btn { font-size: 11.5px; padding: 3px 10px; border-radius: 999px; color: var(--mb-accent);
+  border: 1px solid var(--mb-border); text-decoration: none; background: transparent; cursor: pointer; }
+.file-btn:hover { border-color: var(--mb-accent); }
+.file-btn:disabled { opacity: .6; cursor: default; }
+.file-strip.failed { color: var(--mb-danger, #e06c6c); }
+.file-progress { height: 4px; border-radius: 4px; background: var(--mb-surface-3); overflow: hidden; }
+.file-progress i { display: block; height: 100%; background: var(--mb-accent); border-radius: 4px;
+  transition: width 300ms ease; }
+.file-progress i.indeterminate { animation: fileSlide 1.2s ease-in-out infinite; }
+@keyframes fileSlide { from { transform: translateX(-100%); } to { transform: translateX(800%); } }
+.page-cite { color: var(--mb-accent); text-decoration: none; white-space: nowrap;
+  border-bottom: 1px dotted color-mix(in srgb, var(--mb-accent) 60%, transparent); }
+.page-cite:hover { border-bottom-style: solid; }
+.pages-used { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; white-space: normal; }
+.pages-used-lead { font-size: 11px; color: var(--mb-text-faint, var(--mb-text-dim)); }
+.pages-used-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.page-thumb { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none;
+  font-size: 10px; color: var(--mb-text-dim); }
+.page-thumb img { width: 58px; height: 76px; object-fit: cover; object-position: top; border-radius: 5px;
+  border: 1px solid var(--mb-border-strong); background: #fff; display: block; }
+.page-thumb.pictured img { border-color: var(--mb-accent); box-shadow: 0 0 0 1px var(--mb-accent); }
+.page-thumb:hover img { border-color: var(--mb-accent); }
+.place-chip { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--mb-surface-3);
+  color: var(--mb-text-dim); border: 1px solid var(--mb-border); }
+.answer-file-btn.ask { background: var(--mb-accent-soft); }
+
+/* a spreadsheet's calculations (DESIGN.md 65): figures worked out over every
+   row, apart from the answer's words, so it is clear which are exact */
+.calculated { margin-top: 8px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--mb-border);
+  background: var(--mb-surface-2); display: flex; flex-direction: column; gap: 4px; }
+.calculated-lead { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--mb-text-faint, var(--mb-text-dim)); }
+.calculated-lead svg { vertical-align: -1px; }
+.calculated-row { font-size: 11.5px; color: var(--mb-text); white-space: pre-wrap; font-variant-numeric: tabular-nums; }
+.calculated-row.failed { color: var(--mb-danger, #e06c6c); }
+.file-strip-note.slow { color: var(--mb-warn, #d9a441); }
+.linkish { color: inherit; text-decoration: underline; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }

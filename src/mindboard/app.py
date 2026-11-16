@@ -539,6 +539,114 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
 
+    # ------------------------------------------------------- one file asked --
+    # DESIGN.md 64: a file prepared - read, its figures described, indexed -
+    # then asked, searched inside itself only. Temporary; boards untouched.
+    from . import filechat
+
+    files = filechat.FileChats(dd)
+    app.state.files = files
+
+    def file_or_404(fid: str) -> "filechat.FileSession":
+        s = files.get(fid)
+        if s is None:
+            raise HTTPException(404, "this file's conversation has ended - open the file again")
+        return s
+
+    @app.post("/api/files")
+    def api_file_open(file: Optional[UploadFile] = File(None), board: str = Form(""),
+                      sha: str = Form(""), name: str = Form("")):
+        """Start preparing a file: one added in the chat, or one on a board."""
+        try:
+            if file is not None:
+                s = files.from_upload(file.file, file.filename or name)
+            else:
+                board_or_404(board)
+                path = resolve(dd, conn_for(dd, board), board, sha)
+                if path is None:
+                    raise HTTPException(404, "that file is not on this computer")
+                s = files.from_board(path, name, board, sha)
+        except filechat.FileError as exc:
+            raise HTTPException(400, str(exc))
+        files.prepare(s, local_model, lambda: search_model("embed"),
+                      lambda m: take_turn(m))
+        return s.info()
+
+    @app.get("/api/files/{fid}")
+    def api_file(fid: str):
+        return file_or_404(fid).info()
+
+    @app.delete("/api/files/{fid}")
+    def api_file_close(fid: str):
+        return {"closed": files.close(fid)}
+
+    @app.get("/api/files/{fid}/raw")
+    def api_file_raw(fid: str):
+        """The file itself - to open at a page (#page=12), or to add to a board."""
+        s = file_or_404(fid)
+        import mimetypes
+        return FileResponse(s.path, filename=s.name,
+                            media_type=mimetypes.guess_type(s.name)[0] or "application/octet-stream",
+                            content_disposition_type="inline")
+
+    @app.get("/api/files/{fid}/page/{page}")
+    def api_file_page(fid: str, page: int, size: int = 360):
+        s = file_or_404(fid)
+        if s.kind != "pdf" or not 1 <= page <= max(s.pages, 1):
+            raise HTTPException(404, "no such page")
+        return FileResponse(files.thumb(s, page, max(120, min(size, 1200))), media_type="image/jpeg",
+                            headers={"Cache-Control": "private, max-age=3600"})
+
+    @app.post("/api/files/{fid}/ask")
+    async def api_file_ask(fid: str, body: AskRequest, request: Request):
+        """Ask the file: its best passages, and pages better seen than read,
+        streamed like a board's answer. Reads only."""
+        from starlette.concurrency import run_in_threadpool
+
+        from .ask import AskError, answer_events, take_pasted
+
+        s = file_or_404(fid)
+        history = [t.model_dump() for t in body.history]
+
+        def prepare():
+            if s.status != "ready":
+                raise HTTPException(409, s.error or "the file is still being prepared")
+            model = local_model()
+            if model is None:
+                raise HTTPException(503, "Ask your board is not set up yet - choose 6 in the "
+                                         "Mindboard menu, or run: mindboard ai install")
+            try:
+                pasted = take_pasted(body.images)
+            except AskError as exc:
+                raise HTTPException(400, str(exc))
+            picked, how = files.find(s, body.question, search_model("embed"), search_model("rerank"))
+            ctx = files.context(s, picked, how)
+            ctx.attached = pasted
+            return model, ctx, model.memory_note()
+
+        model, ctx, warning = await run_in_threadpool(prepare)
+
+        def run():
+            # a spreadsheet (DESIGN.md 65): the model first decides whether the
+            # question needs calculating over whole sheets, and the tools run
+            if s.book is not None:
+                from .sheets import calculated_text, decide
+
+                calls, why, trouble = decide(model, s.book, body.question, history)
+                if model.cancelled():
+                    yield {"event": "done", "answer": "", "board": "", "beyond": "", "cited": [],
+                           "dropped": [], "next": "", "nexts": [], "stopped": True,
+                           "tokens_per_second": None}
+                    return
+                results = [s.book.run(c) for c in calls]
+                yield {"event": "tools", "why": why, "trouble": trouble,
+                       "calls": [{"tool": r.get("tool"), "label": r.get("label", ""),
+                                  "said": r["said"], "error": r.get("error", "")} for r in results]}
+                ctx.text = calculated_text(results, trouble) + ctx.text
+            yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
+
+        return stream_answer(model, run, warning, request, hold=True)
+
     # ------------------------------------------------------------- experts --
     # DESIGN.md 40: experts span boards, so they live in the library
     from . import experts as experts_mod

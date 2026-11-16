@@ -26,8 +26,10 @@ export function filesToOffer(cited: string[], ranked: string[], fileOf: (card: s
   return out.slice(0, MOST)
 }
 
-export function AnswerFiles({ files, onShow, className = '' }: {
+export function AnswerFiles({ files, onShow, onAsk, className = '' }: {
   files: Filed[]; onShow?: (f: Filed) => void; className?: string
+  /** ask this file on its own (DESIGN.md 64) */
+  onAsk?: (f: Filed) => void
 }) {
   const [said, setSaid] = useState('')
   if (!files.length) return null
@@ -43,6 +45,8 @@ export function AnswerFiles({ files, onShow, className = '' }: {
         <div key={f.card} className="answer-file">
           <span className="answer-file-badge">PDF</span>
           <span className="answer-file-name" title={f.name}>{f.name}</span>
+          {onAsk ? <button className="answer-file-btn ask" title="Prepare this file, then ask it questions on their own"
+            onClick={() => onAsk(f)}>Ask this file</button> : null}
           <button className="answer-file-btn" onClick={() => open(f)}>Open</button>
           {onShow ? <button className="answer-file-btn" onClick={() => onShow(f)}>Show on its board</button> : null}
         </div>
