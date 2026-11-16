@@ -3267,3 +3267,66 @@ italics, and half a line went slanted.
   long one on its own line scrolls.
 
 260 tests.
+
+## 62. Pictures pasted into the chat (2026-11-16)
+
+Paste a picture into a chat box (Ctrl/⌘+V), drop one on it, or choose one
+with the picture button, and ask about it - "explain this", "who is this
+visitor" - answered from the picture and the board together. Board chat and
+an expert's chat alike (not the Experts' guide, which only picks who to ask).
+
+- **In the box** (`Pasted.tsx`): up to four pictures wait in a row on top of
+  the bar, each removable, with a note that they go to this computer's model
+  only. They are shrunk in the browser first (1600 px JPEG; a phone photo is
+  megabytes), and a 180 px copy is kept to show in the question - in the tab,
+  like the rest of the conversation. A picture with no words asks "Explain
+  this picture." A pasted picture is never put on the board; Add to board
+  turns the answer into a card as usual.
+- **On the server** (`ask.take_pasted`): read again with Pillow, shrunk to
+  1024 px and re-encoded as JPEG - whatever was pasted, the model gets a plain
+  picture; anything else is refused at once (400).
+- **Looked at, then searched by.** "Explain this" says nothing a search can
+  use, so with the model held the picture is first described in two or three
+  sentences (`describe_pasted`, 220 tokens) and the question is searched and
+  planned with that description (`with_pasted`). The page is told what the
+  model saw (`pasted`) and keeps it with the question, so a follow-up still
+  knows the picture without sending it again. Stop during the look stops.
+- **Answered with the picture itself**, placed with the newest question after
+  the cards (`ctx.attached`), so the start of the prompt and llama-server's
+  cache stay put, and counted in what fits.
+- With the real model a pasted visitor badge was read ("Dr. Maria Keller, ETH
+  Zurich, 11 Nov 2026"), the board searched by it - no card for her, but the
+  visit on the same day found and cited; an expert answered in 22 s.
+
+263 tests.
+
+## 63. Board off: the model alone (2026-11-16)
+
+Some questions are not about the board - a general explanation, a pasted
+picture to explain, a quick fact. Explain more (§34) skips the search but
+still sends the cards the conversation used, and the instructions still put
+the board first. **Board off**, a switch in the bar beside Think deeper,
+leaves the board out entirely:
+
+- **Nothing from the board** (`own: true`, `own_context`): no search, no
+  cards, no date list from cards - today's date only. Explain more and chosen
+  cards are ignored while it is on.
+- **Its own instructions** (`OWN_SYSTEM`): a plain assistant that does not
+  talk of cards or a board, still short by default, formulas in `$...$`, and
+  the three next questions. The prompt is tiny, so it answers quickly.
+- **Only Board off turns as the conversation.** The first try sent the whole
+  conversation, and an earlier answer from the board brought its facts back
+  in: asked "who visited on 11 Nov?", it named the visitor from the board
+  under the label "not from your board". Now a Board off question carries
+  only earlier Board off questions and answers; asked afresh, the model had
+  no idea who visited.
+- **A pasted picture** goes straight to the model - with nothing to search,
+  it is not described first.
+- **Marked**: each answer is headed "Not from your board - the model's own
+  knowledge", in the dashed frame of "Beyond your board"; the context strip
+  says the board is not searched or sent; the box says "Ask without your
+  board…". It stays on (per board, in the tab) until switched off, like Think
+  deeper. Add to board still turns an answer into a card.
+- Board chat only: an expert is its boards, so it has no Board off.
+
+264 tests.

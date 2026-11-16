@@ -8,6 +8,7 @@
 import { create } from 'zustand'
 
 import { api } from './api'
+import { type PastedPicture, PICTURE_ONLY, withSaid } from './Pasted'
 import { useStore } from './store'
 import { useUI } from './ui'
 
@@ -29,7 +30,7 @@ export interface Turn {
   leftOut?: number
   /** how the cards were chosen: by hand, or a search of the whole board -
    *  never the whole board sent entire */
-  mode?: 'chosen' | 'search' | 'explain'
+  mode?: 'chosen' | 'search' | 'explain' | 'own'
   used?: number
   /** the cards the answer was given, best match first - for the files it offers (DESIGN.md 48) */
   cards?: string[]
@@ -41,6 +42,12 @@ export interface Turn {
   next?: string
   /** the three questions it offers next (DESIGN.md 46) */
   nexts?: string[]
+  /** a question: small copies of the pictures pasted with it, and what the
+   *  model saw in them - kept for the turns after (DESIGN.md 62) */
+  images?: string[]
+  said?: string[]
+  /** an answer: still looking at the pictures pasted with its question */
+  looking?: boolean
 }
 
 interface Ask {
@@ -54,6 +61,8 @@ interface Ask {
   /** Explain more (in the expanded view): answer from the conversation and
    *  its cards, without searching the board */
   explain: boolean
+  /** Board off (DESIGN.md 63): the model alone - no search, no cards */
+  own: boolean
   busy: boolean
   controller: AbortController | null
   load(boardId: string | null): void
@@ -70,7 +79,8 @@ interface Ask {
   setThink(on: boolean): void
   setExpanded(on: boolean): void
   setExplain(on: boolean): void
-  send(question: string): Promise<void>
+  setOwn(on: boolean): void
+  send(question: string, pictures?: PastedPicture[]): Promise<void>
   stop(): void
 }
 
@@ -86,7 +96,7 @@ function save(s: Ask) {
   if (!s.boardId) return
   try {
     sessionStorage.setItem(KEY(s.boardId), JSON.stringify({
-      context: s.context, open: s.open, think: s.think, expanded: s.expanded, explain: s.explain,
+      context: s.context, open: s.open, think: s.think, expanded: s.expanded, explain: s.explain, own: s.own,
       // an answer cut off by a refresh is kept as far as it got
       turns: s.turns.map((t) => (t.status && t.status !== 'done'
         ? { ...t, status: 'stopped' as const } : t)),
@@ -102,6 +112,7 @@ export const useAsk = create<Ask>()((set, get) => ({
   think: false,
   expanded: false,
   explain: false,
+  own: false,
   busy: false,
   controller: null,
   side: savedSide(),
@@ -113,7 +124,7 @@ export const useAsk = create<Ask>()((set, get) => ({
       try { saved = JSON.parse(sessionStorage.getItem(KEY(boardId)) || '{}') } catch { saved = {} }
     }
     set({ boardId, open: !!saved.open, context: saved.context ?? [], turns: saved.turns ?? [],
-          think: !!saved.think, expanded: !!saved.expanded, explain: !!saved.explain,
+          think: !!saved.think, expanded: !!saved.expanded, explain: !!saved.explain, own: !!saved.own,
           busy: false, controller: null })
   },
   setOpen(open) { set(open ? { open } : { open, expanded: false }); save(get()) },
@@ -143,6 +154,7 @@ export const useAsk = create<Ask>()((set, get) => ({
   setThink(on) { set({ think: on }); save(get()) },
   setExpanded(on) { set({ expanded: on, open: on || get().open }); save(get()) },
   setExplain(on) { set({ explain: on }); save(get()) },
+  setOwn(on) { set({ own: on }); save(get()) },
 
   stop() {
     const { controller, boardId } = get()
@@ -152,28 +164,39 @@ export const useAsk = create<Ask>()((set, get) => ({
     controller.abort()
   },
 
-  async send(question) {
+  async send(question, pictures = []) {
     const s = get()
     const boardId = s.boardId
+    if (!question.trim() && pictures.length) question = PICTURE_ONLY
     if (!boardId || s.busy || !question.trim()) return
     const nodes = useStore.getState().nodes
     // nothing added means the whole board - the server reads it that way
     const cards = s.context.filter((id) => nodes[id])
+    // Board off (DESIGN.md 63) carries only Board off turns: an earlier answer
+    // from the board would bring the board's facts back in by the side door
+    const ownTurn = (i: number) => {
+      const answer = s.turns[s.turns[i].role === 'user' ? i + 1 : i]
+      return answer?.role === 'assistant' && answer.mode === 'own'
+    }
     const history = s.turns
-      .filter((t) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done'))
+      .filter((t, i) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done')
+        && (!s.own || ownTurn(i)))
       .slice(-HISTORY_TURNS)
-      .map((t) => ({ role: t.role, text: t.text }))
+      .map((t) => ({ role: t.role, text: t.role === 'user' ? withSaid(t.text, t.said) : t.text }))
     // the cards earlier answers drew on stay in the conversation (DESIGN 34)
     const keep = [...new Set(s.turns.flatMap((t) => (t.status === 'done' && t.cited) || []))]
       .filter((id) => nodes[id]).slice(-40)
     // Explain more holds in either view - the header icon in the small one,
     // the chip in the full screen one
-    const explain = s.explain
+    const own = s.own
+    const explain = s.explain && !own
     const controller = new AbortController()
     set({
       busy: true, controller, open: true,
-      turns: [...s.turns, { role: 'user', text: question.trim() },
-              { role: 'assistant', text: '', status: 'reading' }],
+      turns: [...s.turns,
+              { role: 'user', text: question.trim(),
+                ...(pictures.length ? { images: pictures.map((p) => p.thumb) } : {}) },
+              { role: 'assistant', text: '', status: 'reading', ...(pictures.length ? { looking: true } : {}) }],
     })
     const patch = (p: Partial<Turn>) => set((st) => {
       const turns = st.turns.slice()
@@ -183,9 +206,19 @@ export const useAsk = create<Ask>()((set, get) => ({
     const last = () => get().turns[get().turns.length - 1]
 
     try {
-      await api.ask(boardId, { question: question.trim(), cards, history, think: s.think, keep, explain },
+      await api.ask(boardId, { question: question.trim(), cards, history, think: s.think, keep, explain,
+                               images: pictures.map((p) => p.url), own },
         (name, data) => {
-          if (name === 'context') {
+          if (name === 'pasted') {
+            // what the model saw in the pictures, kept with the question
+            set((st) => {
+              const turns = st.turns.slice()
+              const q = turns.length - 2
+              if (q >= 0) turns[q] = { ...turns[q], said: data.said }
+              turns[turns.length - 1] = { ...turns[turns.length - 1], looking: false }
+              return { turns }
+            })
+          } else if (name === 'context') {
             patch({ warning: data.warning, status: data.loading ? 'loading' : 'reading',
                     whole: data.whole, tokens: data.tokens, leftOut: data.pictures_left_out,
                     mode: data.mode, used: data.cards?.length, cards: data.cards, total: data.total, how: data.how })

@@ -1617,3 +1617,35 @@ a.btn { text-decoration: none; }
 .math-display { display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden;
   padding: 0.25em 0; text-align: center; }
 .math-display .katex-display { margin: 0; }
+
+/* Pictures pasted into a chat box (DESIGN.md 62): waiting in a row on top of
+   the bar until the question goes, then small in the question itself. */
+.ask-bar.has-pictures { flex-wrap: wrap; border-radius: 22px; row-gap: 6px; }
+.pasted-strip { flex-basis: 100%; order: -1; display: flex; align-items: center; gap: 8px;
+  padding: 4px 2px 0; flex-wrap: wrap; cursor: default; }
+.pasted-pic { position: relative; width: 52px; height: 52px; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--mb-border-strong); background: var(--mb-surface-2); flex: none;
+  animation: pastedIn 180ms cubic-bezier(.2, .9, .25, 1); }
+.pasted-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pasted-pic.reading { background: linear-gradient(100deg, var(--mb-surface-2) 30%,
+  color-mix(in srgb, var(--mb-accent) 22%, var(--mb-surface-2)) 50%, var(--mb-surface-2) 70%);
+  background-size: 200% 100%; animation: pastedShimmer 1s linear infinite; }
+.pasted-x { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff; background: rgba(0, 0, 0, .62); opacity: 0;
+  transition: opacity 120ms; }
+.pasted-pic:hover .pasted-x, .pasted-x:focus-visible { opacity: 1; }
+.pasted-note { font-size: 11px; color: var(--mb-text-faint, var(--mb-text-dim)); }
+@keyframes pastedIn { from { transform: scale(.85); opacity: 0; } }
+@keyframes pastedShimmer { to { background-position: -200% 0; } }
+.pick-picture { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.bar-chip.icon-only { padding: 0; width: 28px; justify-content: center; }
+.ask-bar.rest .pick-picture { display: none; }
+.asked-with { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 6px; }
+.asked-with img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px;
+  border: 1px solid var(--mb-border-strong); display: block; }
+
+/* Board off (DESIGN.md 63): lit when the board is left out, and its answers
+   marked as the model's own, with the dashed edge of "Beyond your board" */
+.bar-chip.own-chip.on { color: var(--mb-text); border-style: dashed;
+  border-color: var(--mb-border-strong); background: var(--mb-surface-3); }
+.voice.own { padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--mb-border-strong); }

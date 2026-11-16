@@ -1,7 +1,7 @@
 """Wire shapes. Deliberately identical to what graph.json holds, so export is
 just this serialisation written to a file - one representation, not two."""
 
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -81,6 +81,10 @@ class AskRequest(BaseModel):
     keep: list[str] = Field(default_factory=list, max_length=200)
     # Explain more: answer from the conversation and its cards - no search
     explain: bool = False
+    # Board off: the model alone - no search, no cards (DESIGN.md 63)
+    own: bool = False
+    # pictures pasted into the chat box, as data: URLs (DESIGN.md 62)
+    images: list[Annotated[str, Field(max_length=21_000_000)]] = Field(default_factory=list, max_length=4)
 
 
 class DraftRequest(BaseModel):

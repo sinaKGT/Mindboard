@@ -12,6 +12,7 @@ import { AnswerFiles, filesToOffer } from './AnswerFiles'
 import { AnswerPictures, picturesToShow } from './AnswerPictures'
 import { cardsInside, revealCard, useAsk, type Turn } from './askStore'
 import { Icon } from './icons'
+import { AskedWith, PastedStrip, PickPicture, usePasted } from './Pasted'
 import { Prose } from './Prose'
 import { useStore } from './store'
 import { useUI } from './ui'
@@ -84,6 +85,7 @@ function statusLine(t: Turn): string | null {
   if (t.status === 'loading') return 'Starting the model…'
   if (t.status === 'thinking') return 'Thinking…'
   if (t.status !== 'reading') return null
+  if (t.looking) return 'Looking at your picture…'
   if (t.mode === undefined) return 'Looking through your cards…'   // before the cards are chosen
   const what = t.mode === 'search' ? `the ${t.used} best-matching cards` : 'your cards'
   const p = t.progress
@@ -190,7 +192,13 @@ function Answer({ turn, offer, question }: {
       {showThinking && turn.thinking ? <div className="thinking">{turn.thinking}</div> : null}
       {!turn.text && statusLine(turn)
         ? <div className="ask-status">{statusLine(turn)}</div> : null}
-      {board.trim() ? <div className="voice board"><Rich text={board.trim()} /></div> : null}
+      {board.trim() ? (
+        <div className={`voice board ${turn.mode === 'own' ? 'own' : ''}`}>
+          {turn.mode === 'own'
+            ? <div className="voice-head">Not from your board — the model's own knowledge</div> : null}
+          <Rich text={board.trim()} />
+        </div>
+      ) : null}
       {beyond.trim() ? (
         <div className="voice beyond">
           <div className="voice-head">Beyond your board — the model's own knowledge</div>
@@ -248,6 +256,7 @@ export function AskPanel() {
   const open = useAsk((s) => s.open)
   const expanded = useAsk((s) => s.expanded)
   const explain = useAsk((s) => s.explain)
+  const own = useAsk((s) => s.own)
   const context = useAsk((s) => s.context)
   const turns = useAsk((s) => s.turns)
   const busy = useAsk((s) => s.busy)
@@ -262,7 +271,8 @@ export function AskPanel() {
   const think = useAsk((s) => s.think)
   const nodes = useStore((s) => s.nodes)
   const [draft, setDraft] = useState('')
-  const awake = hot || focused || !!draft.trim() || busy || open
+  const pasted = usePasted()
+  const awake = hot || focused || !!draft.trim() || busy || open || pasted.pictures.length > 0
   useEffect(() => () => window.clearTimeout(cool.current), [])
   const box = useRef<HTMLTextAreaElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -304,15 +314,17 @@ export function AskPanel() {
 
   const present = context.filter((id) => nodes[id])
   const everything = Object.keys(nodes).length
-  const canSend = !busy && everything > 0
-  const explaining = explain
+  const canSend = !busy && (everything > 0 || own)
+  const explaining = explain && !own
 
   const send = (text: string) => {
-    if (!canSend || !text.trim()) return
+    if (!canSend || (!text.trim() && !pasted.pictures.length) || pasted.reading) return
     following.current = true
-    void ask.send(text)
+    void ask.send(text, pasted.pictures)
     setDraft('')
+    pasted.clear()
   }
+  const ready = canSend && !pasted.reading && (!!draft.trim() || pasted.pictures.length > 0)
   // Esc steps back one level: the expanded view, then the conversation
   const escape = (e: React.KeyboardEvent) => {
     if (e.key !== 'Escape') return
@@ -360,7 +372,10 @@ export function AskPanel() {
           </header>
 
           <div className="ask-context">
-            {explaining ? (
+            {own ? (
+              <span className="ask-empty"><b>Board off:</b> answers come from the model's own
+                knowledge — the board is not searched or sent. Switch it back on in the bar below.</span>
+            ) : explaining ? (
               <span className="ask-empty">Explain more is on: answers come from this conversation,
                 and the board is not searched.</span>
             ) : present.length === 0 ? (
@@ -409,7 +424,7 @@ export function AskPanel() {
               </div>
             ) : turns.map((t, i) => (
               t.role === 'user'
-                ? <div key={i} className="turn question">{t.text}</div>
+                ? <div key={i} className="turn question"><AskedWith thumbs={t.images} />{t.text}</div>
                 // only the latest answer offers its next question
                 : <Answer key={i} turn={t} question={turns[i - 1]?.text ?? ''}
                     offer={i === turns.length - 1 && canSend ? send : undefined} />
@@ -434,26 +449,31 @@ export function AskPanel() {
       {/* the one way in: always at the bottom of the board. At rest a small
           "Ask me" pill; it opens to the full bar under the pointer, while you
           type, and while a conversation or an answer is going */}
-      <div className={`ask-bar nodrag nopan ${awake ? 'awake' : 'rest'} ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''}`}
+      <div className={`ask-bar nodrag nopan ${awake ? 'awake' : 'rest'} ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''} ${pasted.pictures.length || pasted.reading ? 'has-pictures' : ''}`}
         onKeyDown={escape}
         onMouseEnter={() => { window.clearTimeout(cool.current); setHot(true) }}
         onMouseLeave={() => { cool.current = window.setTimeout(() => setHot(false), 160) }}
         onClick={() => box.current?.focus()}
+        onDragOver={pasted.onDragOver} onDrop={pasted.onDrop}
         title={awake ? undefined : `Ask your board  (${/mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+J)`}>
+        <PastedStrip pictures={pasted.pictures} reading={pasted.reading} remove={pasted.remove} />
         <span className="bar-mark" aria-hidden><Icon name="ankh" size={15} /></span>
         <textarea ref={box} rows={1} value={draft} aria-label="Ask your board"
           placeholder={!awake ? (everything ? 'Ask me' : 'No cards yet')
+            : own ? 'Ask without your board…'
             : explaining ? 'Ask for an explanation…'
             : present.length ? 'Ask about these cards…'
             : everything ? 'Ask your board anything…' : 'This board has no cards yet'}
-          disabled={everything === 0}
+          disabled={everything === 0 && !own}
           onFocus={() => { setFocused(true); if (turns.length && !open) ask.setOpen(true) }}
           onBlur={() => setFocused(false)}
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={pasted.onPaste}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(draft) }
           }} />
         <div className="bar-tools">
+          <PickPicture add={pasted.add} className="bar-chip icon-only" size={12} />
           {expanded && open ? (
             <label className={`bar-chip ${explain ? 'on' : ''}`}
               title="Answer from this conversation, with examples, without searching the board">
@@ -461,6 +481,12 @@ export function AskPanel() {
               <Icon name="bullets" size={12} /> Explain more
             </label>
           ) : null}
+          <label className={`bar-chip own-chip ${own ? 'on' : ''}`}
+            title={own ? 'Board off: the model answers alone. Click to use your board again'
+              : 'Answer from the model alone - without searching or sending your board'}>
+            <input type="checkbox" checked={own} onChange={(e) => ask.setOwn(e.target.checked)} />
+            <Icon name="grid" size={12} /> {own ? 'Board off' : 'Board on'}
+          </label>
           <label className={`bar-chip ${think ? 'on' : ''}`} title="Slower, and deeper - worth it for what is missing">
             <input type="checkbox" checked={think} onChange={(e) => ask.setThink(e.target.checked)} />
             <Icon name="bulb" size={12} /> Think deeper
@@ -470,8 +496,8 @@ export function AskPanel() {
               <Icon name="stop" size={13} />
             </button>
           ) : (
-            <button className={`send ${canSend && draft.trim() ? 'ready' : ''}`} title="Ask  (Enter)"
-              disabled={!canSend || !draft.trim()} onClick={() => send(draft)}>
+            <button className={`send ${ready ? 'ready' : ''}`} title="Ask  (Enter)"
+              disabled={!ready} onClick={() => send(draft)}>
               <Icon name="send" size={14} />
             </button>
           )}

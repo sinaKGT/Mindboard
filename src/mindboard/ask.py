@@ -97,6 +97,28 @@ How to answer:
    to use, one on a neighbouring idea from the cards."""
 
 
+# Board off (DESIGN.md 63): the person asked for the model alone - no search,
+# no cards, and instructions that do not talk of a board, so nothing pulls the
+# answer towards their notes. The conversation and pasted pictures still count.
+OWN_SYSTEM = f"""You are a clear, careful assistant. The person has switched their board
+of notes off for this question: answer from your own knowledge, and do not
+mention cards, notes or a board.
+
+Start with the answer itself. Short and exact by default: a few sentences or a
+short list. Explain at length - steps, examples - only when they ask you to
+explain, or ask how or why. Say plainly when you are unsure or something may
+be out of date. Write a formula in LaTeX between dollar signs, like $E = mc^2$.
+
+Finish with three lines, each starting exactly "{NEXT}", each holding one
+question the person could ask next: short, in their words - one going deeper,
+one putting it to use, one on a neighbouring idea."""
+
+
+def own_context(attached: Optional[list[Picture]] = None) -> Context:
+    """What a Board off question takes: nothing from the board."""
+    return Context([], "", mode="own", attached=list(attached or []))
+
+
 # ------------------------------------------------------ planning the answer --
 #
 # DESIGN.md 46-47. Asked "which architecture for a RAG system for a school,
@@ -307,10 +329,13 @@ class Context:
     reading: dict = field(default_factory=dict)
     # PDFs that match the question itself, offered to read more (DESIGN.md 48)
     offer: list[str] = field(default_factory=list)
+    # pictures pasted into the question itself - not on the board (DESIGN.md 62)
+    attached: list[Picture] = field(default_factory=list)
 
     @property
     def tokens(self) -> int:
-        return estimate(self.text) + sum(p.tokens for p in self.pictures)
+        return (estimate(self.text) + sum(p.tokens for p in self.pictures)
+                + sum(p.tokens for p in self.attached))
 
 
 FILE_EXCERPT = 700       # characters of a PDF's text the model reads with its card
@@ -401,6 +426,73 @@ def _picture(dd: DataDir, conn: sqlite3.Connection, bid: str, sha: str) -> Optio
         return None
     url = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
     return url, (w * h) // (32 * 32) + 16   # Qwen sees a picture in 32-pixel squares
+
+
+# ---------------------------------------------------- pictures pasted in --
+#
+# DESIGN.md 62: a picture pasted into the chat box comes with the question. It
+# is shrunk and re-encoded like a card's picture - whatever was pasted, the
+# model gets a plain JPEG - described in a few lines so the board can be
+# searched for what it shows, and then seen by the model with the question.
+
+PASTED_MAX = 4                 # pictures with one question
+PASTED_BYTES = 15_000_000      # a pasted picture's size, before shrinking
+PASTED_TOKENS = 220            # a description to search by: a few lines
+PASTED_PROMPT = ("Say in two or three plain sentences what this picture shows - what kind of "
+                 "picture it is, its subject, and the main words, names, numbers or formulas in "
+                 "it (formulas in LaTeX between dollar signs). No preamble.")
+
+
+def take_pasted(urls: list[str]) -> list[Picture]:
+    """Pasted pictures (data: URLs) as the model takes them. AskError for
+    anything that is not a picture."""
+    from PIL import Image
+
+    got: list[Picture] = []
+    for i, url in enumerate(urls[:PASTED_MAX]):
+        head, _, data = str(url).partition(",")
+        if not head.startswith("data:image/") or ";base64" not in head:
+            raise AskError("a pasted picture did not come through - paste it again")
+        try:
+            raw = base64.b64decode(data, validate=False)
+            if len(raw) > PASTED_BYTES:
+                raise AskError("that picture is too large - paste a smaller one")
+            with Image.open(io.BytesIO(raw)) as im:
+                im = im.convert("RGB")
+                im.thumbnail((MAX_SIDE, MAX_SIDE))
+                buf = io.BytesIO()
+                im.save(buf, "JPEG", quality=88)
+                w, h = im.size
+        except AskError:
+            raise
+        except Exception:
+            raise AskError("a pasted picture could not be read - try a PNG or JPEG")
+        got.append(Picture(f"pasted {i + 1}",
+                           "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"),
+                           (w * h) // (32 * 32) + 16))
+    return got
+
+
+def describe_pasted(model, pic: Picture) -> str:
+    """A few lines on what a pasted picture shows, to search the board by.
+    The caller holds the model."""
+    reply = model.chat([{"role": "user", "content": [
+        {"type": "text", "text": PASTED_PROMPT},
+        {"type": "image_url", "image_url": {"url": pic.data_url}}]}],
+        max_tokens=PASTED_TOKENS, think=False, temperature=0.2)
+    return " ".join(str(reply.get("text") or "").split())[:1200]
+
+
+def with_pasted(question: str, said: list[str]) -> str:
+    """The question as it is searched and answered: what was pasted, in words.
+    Kept in the conversation too, so a follow-up still knows the picture."""
+    said = [d for d in said if d]
+    if not said:
+        return question
+    if len(said) == 1:
+        return f"{question}\n\n(The person pasted a picture with this question. It shows: {said[0]})"
+    return (f"{question}\n\n(The person pasted {len(said)} pictures with this question. "
+            + " ".join(f"Picture {i + 1} shows: {d}" for i, d in enumerate(said)) + ")")
 
 
 # cards a question embeds itself before searching - what one person writes
@@ -661,6 +753,9 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     The short reply after the cards keeps the turns alternating, as the chat
     template expects. Change the cards and the start changes - and they are
     read again, as they should be."""
+    if ctx.mode == "own":
+        msgs = [{"role": "system", "content": OWN_SYSTEM}]
+        return _conversation(msgs, ctx, question, history)
     parts: list[dict[str, Any]] = [{"type": "text", "text": ctx.text}]
     for p in ctx.pictures:
         parts.append({"type": "text", "text": f"PICTURE on card [{p.card}]:"})
@@ -670,15 +765,33 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     msgs: list[dict] = [{"role": "system", "content": system},
                         {"role": "user", "content": parts},
                         {"role": "assistant", "content": READY}]
+    return _conversation(msgs, ctx, question, history)
+
+
+def _conversation(msgs: list[dict], ctx: Context, question: str, history: list[dict]) -> list[dict]:
+    """The conversation after the cards (or after nothing, Board off), and the
+    newest question last, with any pictures pasted into it."""
     for turn in history:
         if turn.get("role") in ("user", "assistant") and str(turn.get("text", "")).strip():
             msgs.append({"role": turn["role"], "content": str(turn["text"])})
     # Explain more asks for a fuller answer; said with the question, not in
     # the system prompt, so the start of the prompt - and its cache - stay put
-    msgs.append({"role": "user", "content": question.strip()
-                 + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")
-                 + weighing(ctx.reading) + dates_note(ctx, question)})
+    asked = (question.strip() + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")
+             + weighing(ctx.reading) + dates_note(ctx, question))
+    if ctx.attached:
+        # pasted pictures go with the newest question, after the cards, so the
+        # start of the prompt - and what llama-server has cached - stays put
+        pasted: list[dict[str, Any]] = [{"type": "text", "text": PASTED_HEAD}]
+        for p in ctx.attached:
+            pasted.append({"type": "image_url", "image_url": {"url": p.data_url}})
+        msgs.append({"role": "user", "content": pasted + [{"type": "text", "text": asked}]})
+    else:
+        msgs.append({"role": "user", "content": asked})
     return msgs
+
+
+PASTED_HEAD = ("PASTED with this question (not on the board): the picture below. Answer about it, "
+               "and bring in the cards wherever they bear on it - cite them as usual.")
 
 
 def check_fits(ctx: Context, question: str, history: list[dict], think: bool) -> int:

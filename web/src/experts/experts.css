@@ -245,3 +245,12 @@
 .xp-files .answer-file-btn { color: var(--gold); border-color: var(--xp-border); }
 .xp-files .answer-file-btn:hover { border-color: var(--gold); }
 .xp-files .answer-files-said { color: var(--xp-dim); }
+
+/* pictures pasted into an expert's chat (DESIGN.md 62) */
+.xp-bar.has-pictures { height: auto; flex-wrap: wrap; row-gap: 6px; padding-top: 8px; }
+.xp-bar.has-pictures input { min-height: 38px; }
+.xp-pasted .pasted-pic { border-color: var(--xp-border); }
+.xp-pasted .pasted-note { color: var(--xp-text); opacity: .6; }
+.xp-pick { width: 34px; height: 34px; border-radius: 50%; color: var(--xp-text); opacity: .75; }
+.xp-pick:hover { opacity: 1; color: var(--gold); }
+.xp-q .asked-with { justify-content: flex-start; }

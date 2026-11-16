@@ -828,3 +828,77 @@ def test_fixing_the_writing_keeps_the_note_and_says_if_anything_changed():
     cut = ask.proofread(DraftModel(js.dumps({"title": "T", "text": "short"})), "T", "a long note " * 20)
     assert cut["text"] == "a long note " * 20 and not cut["changed"], "a reply that drops the note is not a fix"
     assert ask.proofread(DraftModel("no json here"), "T", "x")["changed"] is False
+
+
+# ------------------------------------------------------ pictures pasted in --
+
+def png_url(colour=(200, 30, 30), size=(64, 40)) -> str:
+    import base64 as b64
+    import io as _io
+
+    from PIL import Image
+    buf = _io.BytesIO()
+    Image.new("RGB", size, colour).save(buf, "PNG")
+    return "data:image/png;base64," + b64.b64encode(buf.getvalue()).decode()
+
+
+def test_a_pasted_picture_is_read_as_a_plain_jpeg_and_a_bad_one_refused():
+    """DESIGN.md 62: whatever was pasted, the model gets a shrunk JPEG."""
+    got = ask.take_pasted([png_url(size=(3000, 1500))] * 6)
+    assert len(got) == ask.PASTED_MAX
+    assert got[0].data_url.startswith("data:image/jpeg;base64,") and got[0].card == "pasted 1"
+    assert got[0].tokens == (1024 * 512) // (32 * 32) + 16, "shrunk to MAX_SIDE first"
+    for bad in ["data:text/html;base64,PGI+", "data:image/png;base64,bm90IGEgcGljdHVyZQ==", "http://x/y.png"]:
+        with pytest.raises(ask.AskError):
+            ask.take_pasted([bad])
+
+
+def test_pasted_pictures_go_with_the_newest_question_after_the_cards():
+    pic = ask.take_pasted([png_url()])[0]
+    ctx = ask.Context(["A" * 26], "CARDS\n[" + "A" * 26 + "] a card", attached=[pic])
+    q = ask.with_pasted("what is this?", ["A red square."])
+    assert q == "what is this?\n\n(The person pasted a picture with this question. It shows: A red square.)"
+    msgs = ask.messages(ctx, q, [{"role": "user", "text": "hi"}, {"role": "assistant", "text": "hello"}])
+    assert msgs[1]["content"][0]["text"].startswith("CARDS"), "the cards still come first"
+    last = msgs[-1]["content"]
+    assert last[0]["text"] == ask.PASTED_HEAD and last[1]["image_url"]["url"] == pic.data_url
+    assert last[-1]["text"].startswith("what is this?")
+    assert ctx.tokens > ask.estimate(ctx.text), "a pasted picture counts towards what fits"
+    assert ask.with_pasted("q", ["", ""]) == "q"
+
+
+def test_asking_with_a_pasted_picture_looks_at_it_then_searches_and_answers(client, board, cards, model):
+    h = {"X-Mindboard-Token": TOKEN}
+    res = client.post(ask_url(board["id"]), headers=h,
+                      json={"question": "what is in my picture?", "cards": [], "images": [png_url()]})
+    assert res.status_code == 200, res.text
+    evs = events(res)
+    assert evs[0] == ("pasted", {"said": ["The word is MINDBOARD, beside a red circle."]})
+    assert evs[1][0] == "context" and evs[-1][0] == "done"
+    log = (model.home / "logs" / "llama-server.log").read_text()
+    seen = evs[1][1]["pictures"] + 1                # the cards' pictures, and the pasted one
+    assert f"asked: images={seen} " in log, "the answer saw the pasted picture"
+    bad = client.post(ask_url(board["id"]), headers=h,
+                      json={"question": "q", "cards": [], "images": ["data:image/png;base64,AAAA"]})
+    assert bad.status_code == 400 and "could not be read" in bad.json()["detail"]
+
+
+def test_board_off_asks_the_model_alone(client, board, cards, model):
+    """DESIGN.md 63: no search, no cards, no board in the instructions - the
+    conversation and a pasted picture still go."""
+    h = {"X-Mindboard-Token": TOKEN}
+    res = client.post(ask_url(board["id"]), headers=h, json={
+        "question": "what is a mind map?", "cards": [cards["mount"]], "own": True, "images": [png_url()],
+        "history": [{"role": "user", "text": "hi"}, {"role": "assistant", "text": "hello"}]})
+    assert res.status_code == 200, res.text
+    evs = events(res)
+    assert [n for n, _ in evs if n == "pasted"] == [], "nothing to search, so no look first"
+    ctx = evs[0]
+    assert ctx[0] == "context" and ctx[1]["mode"] == "own" and ctx[1]["cards"] == [] and ctx[1]["pictures"] == 0
+    assert evs[-1][0] == "done" and evs[-1][1]["cited"] == []
+    log = (model.home / "logs" / "llama-server.log").read_text()
+    assert "asked: images=1 messages=4 roles=system,user,assistant,user" in log, \
+        "the system prompt, the conversation and the question with its picture - no cards"
+    msgs = ask.messages(ask.own_context(), "q", [])
+    assert msgs[0]["content"] == ask.OWN_SYSTEM and "board" not in msgs[-1]["content"].lower()
+    assert "CARDS" not in ask.OWN_SYSTEM

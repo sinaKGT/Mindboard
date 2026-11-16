@@ -95,11 +95,11 @@ const apiCore = {
    *  the question cannot be asked at all. */
   ask: (boardId: string, body: {
     question: string; cards: string[]; history: { role: string; text: string }[]; think: boolean
-    keep: string[]; explain: boolean
+    keep: string[]; explain: boolean; images?: string[]; own?: boolean
   }, onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> =>
     streamEvents(`/boards/${boardId}/ask`, body, onEvent, signal),
   /** Ask one expert: its boards searched together, answered in its voice. */
-  askExpert: (expertId: string, body: { question: string; history: { role: string; text: string }[] },
+  askExpert: (expertId: string, body: { question: string; history: { role: string; text: string }[]; images?: string[] },
               onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> =>
     streamEvents(`/experts/${expertId}/ask`, { ...body, cards: [], think: false }, onEvent, signal),
   experts: () => req<{ experts: Expert[]; shapes: ShapeState[] }>('/experts'),

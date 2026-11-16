@@ -381,7 +381,8 @@ def run_plan(model, lib: Library, question: str, plan: dict, embedder=None,
 
 
 def answer(model, dd: DataDir, expert: dict, lib: Library, question: str, history: list[dict],
-           embedder=None, embed_model: str = "", reranker=None, think: bool = False) -> Iterator[dict]:
+           embedder=None, embed_model: str = "", reranker=None, think: bool = False,
+           attached: Optional[list] = None) -> Iterator[dict]:
     """Ask an expert, planned (DESIGN.md 47): the plan, its steps, then the
     answer, as one run of events. The caller holds the model for all of it."""
     from .ask import answer_events, check_citations, make_plan
@@ -402,6 +403,7 @@ def answer(model, dd: DataDir, expert: dict, lib: Library, question: str, histor
         return
     ctx, _ = context(dd, expert, question, history, embedder, embed_model, reranker, plan, lib=lib,
                      offer=offer)
+    ctx.attached = list(attached or [])        # pictures pasted with the question (DESIGN.md 62)
     yield from answer_events(model, ctx, question, history, think, hold=False)
 
 

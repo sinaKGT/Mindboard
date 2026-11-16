@@ -394,7 +394,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         Reads the board only - nothing is written."""
         from starlette.concurrency import run_in_threadpool
 
-        from .ask import AskError, answer_events, build, check_fits
+        from .ask import AskError, answer_events, build, check_fits, own_context, take_pasted
 
         history = [t.model_dump() for t in body.history]
 
@@ -404,6 +404,20 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             if model is None:
                 raise HTTPException(503, "Ask your board is not set up yet - choose 6 in the "
                                          "Mindboard menu, or run: mindboard ai install")
+            if body.own:
+                # Board off (DESIGN.md 63): nothing from the board, so nothing
+                # to search by - a pasted picture goes straight to the model
+                try:
+                    return model, own_context(take_pasted(body.images)), model.memory_note()
+                except AskError as exc:
+                    raise HTTPException(400, str(exc))
+            if body.images:
+                # pasted pictures (DESIGN.md 62): read now, so a bad one is
+                # refused at once; looked at and searched by once the model is held
+                try:
+                    return model, take_pasted(body.images), model.memory_note()
+                except AskError as exc:
+                    raise HTTPException(400, str(exc))
             try:
                 emb = search_model("embed")
                 ctx = build(dd, conn_for(dd, bid), bid, body.cards, body.question, history,
@@ -420,11 +434,47 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             return model, ctx, model.memory_note()
 
         model, ctx, warning = await run_in_threadpool(prepare)
+        if isinstance(ctx, list):
+            pics = ctx
+
+            def with_pictures():
+                question = yield from look_at_pasted(model, pics, body.question)
+                if question is None:
+                    return
+                emb = search_model("embed")
+                try:
+                    got = build(dd, conn_for(dd, bid), bid, body.cards, question, history,
+                                emb, emb.inst.embedder.name if emb else "", search_model("rerank"),
+                                background=True, keep=body.keep, explain=body.explain)
+                finally:
+                    indexer.want(bid)
+                got.attached = pics
+                yield from answer_events(model, got, question, history, body.think, hold=False)
+
+            return stream_answer(model, with_pictures, warning, request,
+                                 after=lambda: indexer.want(bid), hold=True)
         # held for the whole answer, its loop fallback included; a question
         # asked while a picture is being described waits its turn (DESIGN.md 60)
         return stream_answer(model, lambda: answer_events(model, ctx, body.question, history,
                                                           body.think, hold=False),
                              warning, request, after=lambda: indexer.want(bid), hold=True)
+
+    def look_at_pasted(model, pics, question: str):
+        """Pasted pictures described in a few lines each (DESIGN.md 62) - said to
+        the page, which keeps them with the question for later turns - and the
+        question with them, to search and answer by. None if stopped meanwhile.
+        The caller holds the model."""
+        from .ask import check_citations, describe_pasted, with_pasted
+
+        said = []
+        for p in pics:
+            said.append(describe_pasted(model, p))
+            if model.cancelled():
+                yield {"event": "done", **check_citations("", set()), "next": "", "nexts": [],
+                       "stopped": True, "tokens_per_second": None}
+                return None
+        yield {"event": "pasted", "said": said}
+        return with_pasted(question, said)
 
     def stream_answer(model, make, warning, request: Request, after=None,
                       hold: bool = False) -> StreamingResponse:
@@ -629,6 +679,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         Streams like a board's answer. Reads only."""
         from starlette.concurrency import run_in_threadpool
 
+        from .ask import AskError, take_pasted
+
         expert = expert_or_404(eid)
         history = [t.model_dump() for t in body.history]
 
@@ -643,20 +695,30 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 # The run below waits for the slot (60): the answer stops at
                 # once, a picture being described finishes first
                 model.cancel()
+            try:
+                pics = take_pasted(body.images)           # DESIGN.md 62
+            except AskError as exc:
+                raise HTTPException(400, str(exc))
             emb = search_model("embed")
             lib = experts_mod.library(dd, expert, emb, emb.inst.embedder.name if emb else "")
             if not lib.nodes:
                 raise HTTPException(400, "this expert's boards have no cards yet")
-            return model, emb, lib, model.memory_note()
+            return model, emb, lib, model.memory_note(), pics
 
-        model, emb, lib, warning = await run_in_threadpool(prepare)
+        model, emb, lib, warning, pics = await run_in_threadpool(prepare)
         reranker = search_model("rerank")
 
         def run():
+            question = body.question
+            if pics:
+                question = yield from look_at_pasted(model, pics, question)
+                if question is None:
+                    return
             # planned (DESIGN.md 47): the plan, its steps and the answer, streamed
             # as they happen; anything that goes wrong on the way is said as an error
-            yield from experts_mod.answer(model, dd, expert, lib, body.question, history, emb,
-                                          emb.inst.embedder.name if emb else "", reranker, body.think)
+            yield from experts_mod.answer(model, dd, expert, lib, question, history, emb,
+                                          emb.inst.embedder.name if emb else "", reranker, body.think,
+                                          attached=pics)
 
         def after():
             for bid in lib.indexes:
