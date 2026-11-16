@@ -305,15 +305,30 @@ def test_says_why_it_cannot_ask(client, board, cards, monkeypatch):
                        headers=h).status_code == 413
 
 
-def test_one_question_at_a_time(client, board, cards):
+def test_one_question_at_a_time_and_a_question_waits_its_turn(client, board, cards, monkeypatch):
+    """DESIGN.md 60: the model busy a moment - a picture being described after
+    the last answer - is no reason to refuse the next question. It waits, goes
+    first, and is told "still answering" only if the model never comes free."""
+    import threading as th
+
     h = {"X-Mindboard-Token": TOKEN}
     body = {"question": "q", "cards": [cards["mount"]]}
     assert client.post(ask_url(board["id"]), json=body, headers=h).status_code == 200
     held = client.app.state.ask["model"]
     held._asking.acquire()
+    seen = []
+    def let_go():
+        seen.append(held.waiting)            # the question was waiting meanwhile
+        held._asking.release()
+    th.Timer(0.6, let_go).start()
+    res = client.post(ask_url(board["id"]), json=body, headers=h)
+    assert res.status_code == 200 and events(res)[-1][0] == "done"
+    assert seen == [1] and held.waiting == 0 and not held._asking.locked()
+    monkeypatch.setattr(llm, "TURN_WAIT", 0.2)
+    held._asking.acquire()
     try:
         res = client.post(ask_url(board["id"]), json=body, headers=h)
-        assert res.status_code == 409 and "still answering" in res.json()["detail"]
+        assert events(res)[-1] == ("error", {"message": "still answering the last question"})
     finally:
         held._asking.release()
 
@@ -590,6 +605,11 @@ def test_a_new_picture_is_described_soon_but_never_ahead_of_a_question(dd, board
         indexer.describer = lambda: busy
         indexer.want(board["id"]); assert indexer.idle(20)
         assert busy.asked == 0, "a question is never kept waiting"
+        waited = Seeing()
+        waited.waiting = 1                          # a question waiting for the model
+        indexer.describer = lambda: waited
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert waited.asked == 0 and not waited._asking.locked(), "the question goes first"
         asleep = Seeing(running=False)
         indexer.describer = lambda: asleep
         indexer.want(board["id"]); assert indexer.idle(20)

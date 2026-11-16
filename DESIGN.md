@@ -3212,3 +3212,30 @@ touched: they live in the data folder.
   and without looping; the plain answer named 11 Nov as the latest visit too.
 
 260 tests.
+
+## 60. A question waits its turn instead of being refused (2026-11-16)
+
+Asked on one board, answered in full, then asked on another: "still answering
+the last question". Nothing was answering. When an answer ends, and when a
+board is opened, the indexer gets a moment with the free model to describe
+the board's pictures (§49, §51) - longer descriptions now, old short ones
+redone while the model is loaded. It held the one question slot for each
+picture, and a question arriving meanwhile was refused at once: the board
+route said 409 if the slot was taken, the model's stream said busy if it
+could not take it that instant.
+
+- **A question waits** (`LocalModel.take_turn`, `TURN_WAIT` = 120 s): it
+  counts itself in `waiting` and waits for the slot. The board's answer is
+  held for its whole run by `stream_answer` - the answer and, if it loops, the
+  plain retry (§56) - like an expert's. Only a model that never comes free is
+  "still answering". Fixing a card's writing, drafting a card and the Experts'
+  guide wait up to 30 s (`SHORT_WAIT`).
+- **Background work steps aside.** The indexer describes one picture at a
+  time and starts none while a question is `waiting`, so a question waits at
+  most for the picture already under way, then goes first. The rest wait for
+  the next quiet moment.
+- **Experts**: a new question still stops the answer being written (§45), and
+  now waits for the slot rather than giving up after 6 s - a picture being
+  described cannot be stopped mid-way, only finished.
+
+260 tests.

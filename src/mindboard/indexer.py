@@ -202,7 +202,14 @@ class Indexer:
         todo = new + again
         done = False
         for sha in todo:
-            if self._changed_again(bid) or not chat._asking.acquire(blocking=False):
+            # a question waiting for the model goes first (DESIGN.md 60): one
+            # picture at a time, and none started while somebody is asking
+            if self._changed_again(bid) or getattr(chat, "waiting", 0):
+                break
+            if not chat._asking.acquire(blocking=False):
+                break
+            if getattr(chat, "waiting", 0):
+                chat._asking.release()
                 break
             try:
                 text = describe_picture(chat, self.dd, conn, bid, sha)

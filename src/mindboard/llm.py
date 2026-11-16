@@ -810,6 +810,9 @@ class ModelError(RuntimeError):
     """The local model could not start or answer - phrased for the person."""
 
 
+TURN_WAIT = 120.0   # a question waits this long for one picture's description to finish
+
+
 class ModelBusy(ModelError):
     """Another question is being answered; the server runs one at a time."""
 
@@ -955,6 +958,7 @@ class LocalModel:
         self._requests = threading.Condition(self._lock)   # see _enter, evict
         self._draining = False
         self._asking = threading.Lock()     # one question at a time, like --parallel 1
+        self.waiting = 0                    # questions waiting for it: background work steps aside
         self._cancel = threading.Event()
         self._watcher: Optional[threading.Thread] = None
         atexit.register(self.stop)
@@ -1153,6 +1157,19 @@ class LocalModel:
         }
 
 
+    def take_turn(self, timeout: Optional[float] = None) -> bool:
+        """Take the one question slot, waiting up to `timeout` seconds for it
+        (DESIGN.md 60). While a question waits, background work - a picture
+        being described - sees `waiting` and does not start another, so the
+        question goes next instead of being told "still answering"."""
+        with self._lock:
+            self.waiting += 1
+        try:
+            return self._asking.acquire(timeout=TURN_WAIT if timeout is None else timeout)
+        finally:
+            with self._lock:
+                self.waiting -= 1
+
     def cancel(self) -> None:
         """Stop the answer being written, from any thread. The stream notices
         before its next piece and hangs up on llama-server, which stops."""
@@ -1178,7 +1195,7 @@ class LocalModel:
         import httpx
 
         if hold:
-            if not self._asking.acquire(blocking=False):
+            if not self.take_turn():
                 raise ModelBusy("still answering the last question")
             self._cancel.clear()
         elif self._cancel.is_set():

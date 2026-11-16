@@ -7,7 +7,6 @@ import re
 import threading
 import shutil
 import tempfile
-import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -35,6 +34,19 @@ from .paths import DataDir
 
 WEB_DIR = Path(__file__).parent / "web"
 SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+SHORT_WAIT = 30.0   # fixing a card's writing or drafting one waits this long for the model
+
+
+def take_turn(model, timeout: Optional[float] = None) -> bool:
+    """The model's one question slot, waited for (DESIGN.md 60): a picture
+    being described in the background finishes and steps aside, so a question
+    is not told "still answering" just because the model was busy a moment."""
+    take = getattr(model, "take_turn", None)
+    if take is None:                       # a stand-in model in the tests
+        return model._asking.acquire(timeout=timeout if timeout is not None else 10)
+    return take(timeout) if timeout is not None else take()
 
 
 def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
@@ -348,7 +360,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         model = local_model()
         if model is None:
             raise HTTPException(503, "Set up the AI first - choose 6 in the Mindboard menu")
-        if not model._asking.acquire(blocking=False):
+        if not take_turn(model, SHORT_WAIT):
             raise HTTPException(409, "still answering the last question - try again in a moment")
         try:
             return proofread(model, str(body.get("title") or "")[:300], str(body.get("text") or "")[:20000])
@@ -366,8 +378,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         model = local_model()
         if model is None:
             raise HTTPException(503, "Ask your board is not set up yet")
-        if not model._asking.acquire(blocking=False):
-            raise HTTPException(409, "still answering the last question")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
         try:
             nodes = {n["id"]: n for n in read_graph(conn_for(dd, bid), bid)["nodes"]}
             return draft_card(model, nodes, body.question, body.answer, body.cited,
@@ -392,8 +404,6 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             if model is None:
                 raise HTTPException(503, "Ask your board is not set up yet - choose 6 in the "
                                          "Mindboard menu, or run: mindboard ai install")
-            if model._asking.locked():
-                raise HTTPException(409, "still answering the last question")
             try:
                 emb = search_model("embed")
                 ctx = build(dd, conn_for(dd, bid), bid, body.cards, body.question, history,
@@ -410,8 +420,11 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             return model, ctx, model.memory_note()
 
         model, ctx, warning = await run_in_threadpool(prepare)
-        return stream_answer(model, lambda: answer_events(model, ctx, body.question, history, body.think),
-                             warning, request, after=lambda: indexer.want(bid))
+        # held for the whole answer, its loop fallback included; a question
+        # asked while a picture is being described waits its turn (DESIGN.md 60)
+        return stream_answer(model, lambda: answer_events(model, ctx, body.question, history,
+                                                          body.think, hold=False),
+                             warning, request, after=lambda: indexer.want(bid), hold=True)
 
     def stream_answer(model, make, warning, request: Request, after=None,
                       hold: bool = False) -> StreamingResponse:
@@ -437,7 +450,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             held = False
             try:
                 if hold:
-                    held = model._asking.acquire(timeout=10)
+                    held = take_turn(model)
                     if not held:
                         raise RuntimeError("still answering the last question")
                     model._cancel.clear()
@@ -504,8 +517,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 continue
             for n in read_graph(conn_for(dd, bid), bid)["nodes"]:
                 nodes[n["id"]], board_of[n["id"]] = n, bid
-        if not model._asking.acquire(blocking=False):
-            raise HTTPException(409, "still answering the last question")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
         try:
             got = draft_card(model, nodes, body.question, body.answer, body.cited,
                              body.candidates, [t.model_dump() for t in body.history])
@@ -600,8 +613,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         """Who can help with this question - the experts whose boards answer
         it best, and why. Reads only."""
         model = local_model()
-        if model is not None and not model._asking.acquire(blocking=False):
-            raise HTTPException(409, "still answering the last question")
+        if model is not None and not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
         try:
             emb = search_model("embed")
             return experts_mod.guide(dd, body.question, model, emb,
@@ -626,14 +639,10 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                                          "Mindboard menu, or run: mindboard ai install")
             if model._asking.locked():
                 # a conversation: the newest question replaces the one being
-                # answered - spoken over it, or asked again (DESIGN.md 45)
+                # answered - spoken over it, or asked again (DESIGN.md 45).
+                # The run below waits for the slot (60): the answer stops at
+                # once, a picture being described finishes first
                 model.cancel()
-                for _ in range(120):
-                    if not model._asking.locked():
-                        break
-                    time.sleep(0.05)
-                else:
-                    raise HTTPException(409, "still answering the last question")
             emb = search_model("embed")
             lib = experts_mod.library(dd, expert, emb, emb.inst.embedder.name if emb else "")
             if not lib.nodes:
