@@ -3427,3 +3427,74 @@ compare as dates (`sheets.py`).
   visitors do?" - the sheet has no such column, and it said so.
 
 274 tests.
+
+## 66. Understanding the request, then doing it in steps (2026-11-16)
+
+"Summarize this for me" with a pasted slide got a description of the slide:
+the chat sent the question to the model in one shot, and nothing worked out
+first that a summary was asked for. Experts planned (§47); the board's chat,
+Board off and a file's tab did not. Now every question there goes through
+three stages (`tasks.py`), inside the run that holds the model:
+
+1. **Understand** (one call, JSON, 60 s at most): the task - answer,
+   summarize, explain, compare, extract, analyze, rewrite, translate, plan -
+   what it is about, the output asked for ("short", "a table", "in
+   Persian"), the request read back ("You want ..."), and steps only when one
+   look is not enough. The model is told what is already in front of it and
+   which actions exist here.
+2. **Chain the steps** (ReAct-style, 4 at most): `read` the pasted pictures
+   in full (every line, figures described), `search` the board or the file
+   (a board search's cards join the answer's, so they can be cited), `work
+   out` something from the earlier steps - each step's result handed to the
+   next. After the last of two or more, a check: is anything the task needs
+   plainly missing? One more step may be added, once. A step that fails is
+   marked and hands on nothing; one that takes over 150 s is cut off (hung
+   up, so llama-server stops).
+3. **Write** with what the steps found and the task's shape said with the
+   question (`ctx.task_note`, after the cached start): a summary as its gist,
+   the key points under the source's own headings, and what it means; a
+   comparison as a table; a list with each item's source; a plan as numbered
+   steps; and the output asked for over all of it. Every part answered, every
+   source cited, and no empty "Beyond your board: None".
+
+Tuning, with the real model: a plain question at first got steps - "when was
+the latest visit?" planned a search, which only repeated the search already
+made, took 17 s and lost the citations. The planner is now told most
+requests need none, and a plan of one search is dropped. Then the
+"extract" shape's "no commentary" cut the answer to a bare date; it now
+lists each item with its source and answers every part. Now: the slide -
+Summary, short, 2 steps (read it, work out its points) - came back as a gist
+line, Objective / What to monitor / Implementation / Outcome, and what it
+means; the latest-visit question - no steps, about 5 s more than before -
+gave the date, both visitors and their cards; comparing two visits ran three
+steps and gave a cited table.
+
+The page shows the task above the answer - its kind, the output asked for,
+"You want ..." - and the steps live ("Step 2 of 3: work out ..."), folded
+into "2 steps" once the answer is written. If the request cannot be
+understood in time, it is answered as it stands, as before. Experts' planner
+knows the same kinds and answers them in the same shapes.
+
+281 tests.
+
+## 67. Back from a board returns to the group it was opened from (2026-11-16)
+
+Opened from inside a group on the first page, a board's back led to the
+first page, not the group. Two causes:
+
+- **The open group was forgotten**: it was the first page's own state, lost
+  when the page gave way to the board. It is now kept for the tab
+  (`sessionStorage` `mb_home_inside`) and restored when the first page comes
+  back; "All boards" clears it, and a group that no longer exists is let go.
+- **Opening a board replaced the page in the browser's history** instead of
+  adding to it (`history.replaceState` in `App.tsx`), so the browser's back
+  button skipped the first page and landed on the welcome page. Opening a
+  board is now a step forward (`pushState`, marked `mbBoard`), and leaving by
+  the board's own button steps back through it (`history.back()`), so both
+  ways back agree. From an expert's conversation the same holds: back
+  returns to the Experts.
+
+Checked in the browser: group "AI work" → board → browser back, and → board →
+the board's back button: both land inside "AI work"; "All boards" leaves it.
+
+281 tests.

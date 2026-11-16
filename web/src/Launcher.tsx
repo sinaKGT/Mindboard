@@ -93,6 +93,9 @@ function Confirm({ title, body, action, onYes, onNo }: {
   )
 }
 
+/** the group open on the first page, kept for the tab (DESIGN.md 67) */
+const INSIDE_KEY = 'mb_home_inside'
+
 export function Launcher({ onImport }: { onImport: () => void }) {
   const [boards, setBoards] = useState<BoardMeta[] | null>(null)
   const [home, setHome] = useState<Home>({ look: { theme: 'midnight', pattern: 'dots' }, groups: [] })
@@ -106,8 +109,17 @@ export function Launcher({ onImport }: { onImport: () => void }) {
   const say = useStore((s) => s.say)
   // which small panel is open: a tile's colour or folder, a group's colour, the look
   const [panel, setPanel] = useState<string | null>(null)
-  // the group being looked inside, or the whole shelf
-  const [inside, setInside] = useState<string | null>(null)
+  // the group being looked inside, or the whole shelf - remembered for the
+  // tab, so leaving a board opened from a group comes back into that group
+  const [inside, setInside] = useState<string | null>(() => {
+    try { return sessionStorage.getItem(INSIDE_KEY) } catch { return null }
+  })
+  useEffect(() => {
+    try {
+      if (inside) sessionStorage.setItem(INSIDE_KEY, inside)
+      else sessionStorage.removeItem(INSIDE_KEY)
+    } catch { /* private mode */ }
+  }, [inside])
   const [dropOn, setDropOn] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {

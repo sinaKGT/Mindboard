@@ -52,7 +52,12 @@ export interface Turn {
   passages?: { where: string; page: number | null; figure: boolean; pictured: boolean }[]
   /** a spreadsheet's answer: what the model chose to calculate over whole sheets (DESIGN.md 65) */
   tools?: { why: string; trouble: string; calls: { tool: string; label: string; said: string; error: string }[] }
+  /** the request understood, and its steps as they run (DESIGN.md 66) */
+  task?: TaskPlan
 }
+
+export interface TaskStep { do: string; what: string; status: 'waiting' | 'running' | 'done' | 'failed' | 'stopped'; note?: string }
+export interface TaskPlan { task: string; about: string; output: string; reading: string; steps: TaskStep[] }
 
 /** A conversation with one file (DESIGN.md 64): a branch of its own beside
  *  the board's, with its own questions and answers. The file is prepared on
@@ -314,7 +319,18 @@ export const useAsk = create<Ask>()((set, get) => ({
     }
 
     function handle(name: string, data: any) {
-          if (name === 'tools') {
+          if (name === 'task') {
+            patch({ task: { task: data.task, about: data.about, output: data.output, reading: data.reading,
+                            steps: (data.steps ?? []).map((x: any) => ({ do: x.do, what: x.what, status: 'waiting' })) } })
+          } else if (name === 'step' || name === 'task_step') {
+            const t = last().task
+            if (t) {
+              const steps = t.steps.slice()
+              if (name === 'task_step') steps.push({ do: data.do, what: data.what, status: 'waiting' })
+              else if (steps[data.i]) steps[data.i] = { ...steps[data.i], status: data.status, note: data.note }
+              patch({ task: { ...t, steps } })
+            }
+          } else if (name === 'tools') {
             patch({ tools: { why: data.why, trouble: data.trouble, calls: data.calls } })
           } else if (name === 'pasted') {
             // what the model saw in the pictures, kept with the question

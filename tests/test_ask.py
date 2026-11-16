@@ -255,11 +255,16 @@ def client(dd, model):
         app.state.ask["model"].stop()
 
 
-def events(res) -> list[tuple[str, dict]]:
+TASK_EVENTS = ("task", "step", "task_step")
+
+
+def events(res, tasks: bool = False) -> list[tuple[str, dict]]:
+    """The answer's events - without the task's own (DESIGN.md 66) unless asked."""
     out = []
     for block in res.text.strip().split("\n\n"):
         lines = dict(line.split(": ", 1) for line in block.splitlines())
-        out.append((lines["event"], json.loads(lines["data"])))
+        if tasks or lines["event"] not in TASK_EVENTS:
+            out.append((lines["event"], json.loads(lines["data"])))
     return out
 
 

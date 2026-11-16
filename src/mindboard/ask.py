@@ -173,7 +173,9 @@ notes (the cards) before the answer is written. Reply with JSON only:
 
 - kind: "fact" (what is, define, recall), "explain" (how or why), "advice"
   (what should they do or choose, for their situation), "compare" (which of
-  these, how they differ) or "design" (how to build or plan something).
+  these, how they differ), "design" (how to build something), "summarize",
+  "extract" (list every X), "analyze" (assess, critique), "rewrite",
+  "translate" or "plan" (the steps to do something).
 - reading: their situation and what they want, in one plain sentence in the
   second person ("You want ..."), in their terms. Keep their goal as big as
   they said it: never call it a project, homework, prototype or toy unless
@@ -215,7 +217,8 @@ and then the weighing:
 and "what is a foreign key?" (fact) gets "steps": []."""
 
 STEP_MARK = "STEP"
-KINDS = ("fact", "explain", "advice", "compare", "design")
+KINDS = ("fact", "explain", "advice", "compare", "design", "summarize", "extract", "analyze",
+         "rewrite", "translate", "plan")
 WEIGHED = ("advice", "compare", "design")
 MAX_STEPS = 4
 
@@ -294,6 +297,17 @@ LENGTH = {"fact": "Answer in one to three sentences, then the three NEXT: lines.
           "explain": "Explain it clearly, with a short example if it helps, then the three NEXT: lines."}
 
 
+def _task_shapes() -> None:
+    # the chat's task shapes (tasks.py) for an expert's plan too, so both
+    # answer "summarize" the same way
+    from .tasks import SHAPES
+    for kind in ("summarize", "extract", "analyze", "rewrite", "translate", "plan"):
+        LENGTH[kind] = SHAPES[kind] + " Then the three NEXT: lines."
+
+
+_task_shapes()
+
+
 def findings_note(plan: dict) -> str:
     """What the steps found, said with the question for the answer to build on."""
     found = plan.get("findings") or []
@@ -361,6 +375,9 @@ class Context:
     attached: list[Picture] = field(default_factory=list)
     # asking one file (DESIGN.md 64): where each passage sent comes from
     passages: list = field(default_factory=list)
+    # what the task's steps found and the shape the task asks for (tasks.py,
+    # DESIGN.md 66) - said with the question, so the cached start stays put
+    task_note: str = ""
 
     @property
     def tokens(self) -> int:
@@ -816,7 +833,7 @@ def _conversation(msgs: list[dict], ctx: Context, question: str, history: list[d
     # Explain more asks for a fuller answer; said with the question, not in
     # the system prompt, so the start of the prompt - and its cache - stay put
     asked = (question.strip() + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")
-             + weighing(ctx.reading) + dates_note(ctx, question))
+             + weighing(ctx.reading) + ctx.task_note + dates_note(ctx, question))
     if ctx.attached:
         # pasted pictures go with the newest question, after the cards, so the
         # start of the prompt - and what llama-server has cached - stays put
@@ -836,6 +853,7 @@ PASTED_HEAD = ("PASTED with this question (not on the board): the picture below.
 def check_fits(ctx: Context, question: str, history: list[dict], think: bool) -> int:
     """Refuse up front rather than let the model silently drop the start."""
     used = (ctx.tokens + estimate(SYSTEM) + estimate(question) + estimate(weighing(ctx.reading))
+            + estimate(ctx.task_note)
             + sum(estimate(str(t.get("text", ""))) for t in history))
     room = CONTEXT_TOKENS - ANSWER_TOKENS - (THINKING_TOKENS if think else 0)
     if used > room:

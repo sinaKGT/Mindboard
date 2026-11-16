@@ -73,6 +73,12 @@ class Handler(BaseHTTPRequestHandler):
                    ("content", "Beyond your board:\nConsider wind load."),
                    ("content", "\nNEXT: Where else"), ("content", " could it go?")]
         slow = "SLOWLY" in texts
+        system = next((m["content"] for m in body["messages"] if m["role"] == "system"), "")
+        if isinstance(system, str) and system.startswith("You read a person's request"):
+            # the chat understanding a request first (DESIGN.md 66): a plain
+            # question, no steps - said at once, as JSON
+            pieces, slow = [("content", '{"task": "answer", "about": "", "output": "", '
+                                        '"reading": "You want an answer.", "steps": []}')], False
         if slow:
             pieces += [("content", " more")] * 400
         self.send_response(200)

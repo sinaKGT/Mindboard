@@ -1712,3 +1712,20 @@ button.file-tab { padding: 5px 10px; gap: 5px; }
 .calculated-row.failed { color: var(--mb-danger, #e06c6c); }
 .file-strip-note.slow { color: var(--mb-warn, #d9a441); }
 .linkish { color: inherit; text-decoration: underline; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
+
+/* the request understood and its steps (DESIGN.md 66) */
+.task-steps { margin-bottom: 8px; display: flex; flex-direction: column; gap: 5px; white-space: normal; }
+.task-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--mb-text-dim); }
+.task-kind { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 1px 7px;
+  border-radius: 999px; background: var(--mb-accent-soft); color: var(--mb-accent); }
+.task-output { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--mb-border); }
+.task-reading { font-style: italic; }
+.task-toggle { font-size: 11px; color: var(--mb-accent); background: none; border: 0; padding: 0; cursor: pointer; }
+.task-list { list-style: none; margin: 0; padding: 0 0 0 2px; display: flex; flex-direction: column; gap: 3px; }
+.task-step { display: flex; gap: 7px; font-size: 11.5px; color: var(--mb-text-dim); line-height: 1.45; }
+.task-step b { color: var(--mb-text); font-weight: 600; }
+.task-mark { width: 12px; flex: none; text-align: center; }
+.task-step.running .task-mark { color: var(--mb-accent); animation: fileDot 1s ease-in-out infinite; }
+.task-step.done .task-mark { color: var(--mb-accent); }
+.task-step.failed { color: var(--mb-danger, #e06c6c); }
+.task-note { color: var(--mb-text-faint, var(--mb-text-dim)); }

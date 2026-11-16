@@ -449,15 +449,76 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 finally:
                     indexer.want(bid)
                 got.attached = pics
+                yield from tasks_mod.run(model, got, body.question, history,
+                                         board_tools(model, bid, pics))
                 yield from answer_events(model, got, question, history, body.think, hold=False)
 
             return stream_answer(model, with_pictures, warning, request,
                                  after=lambda: indexer.want(bid), hold=True)
-        # held for the whole answer, its loop fallback included; a question
-        # asked while a picture is being described waits its turn (DESIGN.md 60)
-        return stream_answer(model, lambda: answer_events(model, ctx, body.question, history,
-                                                          body.think, hold=False),
-                             warning, request, after=lambda: indexer.want(bid), hold=True)
+
+        def understood():
+            # the request understood and its steps done first (DESIGN.md 66);
+            # held for the whole answer, its loop fallback included; a question
+            # asked while a picture is being described waits its turn (60)
+            tools = own_tools(model, ctx.attached) if ctx.mode == "own" \
+                else board_tools(model, bid, ctx.attached)
+            yield from tasks_mod.run(model, ctx, body.question, history, tools)
+            yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
+
+        return stream_answer(model, understood, warning, request, after=lambda: indexer.want(bid), hold=True)
+
+    # ------------------------------------------------- what steps can do --
+    # DESIGN.md 66: the tools a task's steps use, where the question is asked
+    from . import tasks as tasks_mod
+
+    READ_PICTURE = ("Write out all the text in this picture exactly, in reading order, keeping its "
+                    "headings, bullet points and their nesting. Then describe each figure, chart or "
+                    "diagram in one or two sentences. Formulas in LaTeX between dollar signs. No preamble.")
+
+    def picture_reader(model, pics):
+        if not pics:
+            return None
+
+        def read(_what: str) -> str:
+            out = []
+            for i, p in enumerate(pics, 1):
+                reply = model.chat([{"role": "user", "content": [
+                    {"type": "text", "text": READ_PICTURE},
+                    {"type": "image_url", "image_url": {"url": p.data_url}}]}],
+                    max_tokens=900, think=False, temperature=0.1, timeout=tasks_mod.STEP_SECONDS)
+                text = str(reply.get("text") or "").strip()
+                out.append((f"PICTURE {i}\n" if len(pics) > 1 else "") + text)
+            return "\n\n".join(out)
+        return read
+
+    def board_tools(model, bid: str, pics) -> "tasks_mod.Tools":
+        from . import retrieve
+        from .ask import board_index, card_text
+        from .experts import STEP_BUDGET
+
+        def search(query: str):
+            conn = conn_for(dd, bid)
+            g = read_graph(conn, bid)
+            nodes = {n["id"]: n for n in g["nodes"]}
+            emb = search_model("embed")
+            index = board_index(dd, conn, bid, nodes, emb, emb.inst.embedder.name if emb else "",
+                                background=True)
+            found = retrieve.search(index, query, nodes, g["edges"], index.costs, emb,
+                                    budget=STEP_BUDGET, reranker=search_model("rerank"))
+            ids = found.ids[:8]
+            return "\n\n".join(card_text(nodes[i], nodes) for i in ids), ids
+
+        have = ("Cards from the person's board found for this request are already in front of the "
+                "model; a step can search the board for more.")
+        if pics:
+            have += f" {len(pics)} picture{'s' if len(pics) > 1 else ''} pasted with the request."
+        return tasks_mod.Tools(have, "the board", read=picture_reader(model, pics), search=search)
+
+    def own_tools(model, pics) -> "tasks_mod.Tools":
+        have = "No notes - the board is switched off; general knowledge only."
+        if pics:
+            have += f" {len(pics)} picture{'s' if len(pics) > 1 else ''} pasted with the request."
+        return tasks_mod.Tools(have, read=picture_reader(model, pics))
 
     def look_at_pasted(model, pics, question: str):
         """Pasted pictures described in a few lines each (DESIGN.md 62) - said to
@@ -643,9 +704,24 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                        "calls": [{"tool": r.get("tool"), "label": r.get("label", ""),
                                   "said": r["said"], "error": r.get("error", "")} for r in results]}
                 ctx.text = calculated_text(results, trouble) + ctx.text
+            # the request understood and its steps done (DESIGN.md 66)
+            yield from tasks_mod.run(model, ctx, body.question, history, file_tools(model, s, ctx.attached))
             yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
 
         return stream_answer(model, run, warning, request, hold=True)
+
+    def file_tools(model, s, pics) -> "tasks_mod.Tools":
+        def search(query: str):
+            picked, _ = files.find(s, query, search_model("embed"), search_model("rerank"))
+            return "\n\n".join(f"[{c.where}] {c.text}" for c in picked[:8]), []
+
+        have = (f'The file "{s.name}": the passages that best match the request are already in front '
+                "of the model; a step can search the file for more.")
+        if s.book is not None:
+            have += " Totals and counts over its sheets were already calculated where needed."
+        if pics:
+            have += f" {len(pics)} picture{'s' if len(pics) > 1 else ''} pasted with the request."
+        return tasks_mod.Tools(have, "this file", read=picture_reader(model, pics), search=search)
 
     # ------------------------------------------------------------- experts --
     # DESIGN.md 40: experts span boards, so they live in the library

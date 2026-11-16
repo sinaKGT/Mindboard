@@ -12,6 +12,7 @@ import { AnswerFiles, filesToOffer } from './AnswerFiles'
 import { AnswerPictures, picturesToShow } from './AnswerPictures'
 import { askable, cardsInside, FILE_ACCEPT, revealCard, useAsk, type Turn } from './askStore'
 import { Calculated, FileStrip, FileTabs, PagesUsed, pageLink } from './FileBranch'
+import { stepLine, TaskSteps } from './TaskSteps'
 import { Icon } from './icons'
 import { AskedWith, PastedStrip, PickPicture, usePasted } from './Pasted'
 import { Prose } from './Prose'
@@ -89,10 +90,12 @@ const fmt = (n: number) => n.toLocaleString()
 function statusLine(t: Turn): string | null {
   if (t.status === 'loading') return 'Starting the model…'
   if (t.status === 'thinking') return 'Thinking…'
+  const step = stepLine(t)
+  if (step) return step
   if (t.status !== 'reading') return null
   if (t.looking) return 'Looking at your picture…'
-  if (t.mode === 'file' && t.used === undefined) return 'Searching the file…'
-  if (t.mode === undefined) return 'Looking through your cards…'   // before the cards are chosen
+  // before the answer's context: the request being understood (DESIGN.md 66)
+  if (t.used === undefined) return t.task ? 'Getting ready to write…' : 'Understanding your request…'
   const what = t.mode === 'search' ? `the ${t.used} best-matching cards`
     : t.mode === 'file' ? `${t.used} passages from the file` : 'your cards'
   const p = t.progress
@@ -200,6 +203,7 @@ function Answer({ turn, offer, question }: {
           {showThinking ? 'Hide' : 'Show'} its thinking
         </button>
       ) : null}
+      <TaskSteps turn={turn} />
       {showThinking && turn.thinking ? <div className="thinking">{turn.thinking}</div> : null}
       {!turn.text && statusLine(turn)
         ? <div className="ask-status">{statusLine(turn)}</div> : null}
