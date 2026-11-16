@@ -10,7 +10,9 @@ EDGE_KINDS = ("relates", "causes", "supports", "contradicts", "part-of", "exampl
 PROVENANCE = ("user", "import", "ai")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "theme": "midnight",
+    # a new board starts light - near-white, white cards (DESIGN.md 68); boards
+    # made before keep the theme they have
+    "theme": "daylight",
     "palette": {},
     "viewport": {"x": 0, "y": 0, "zoom": 1},
 }

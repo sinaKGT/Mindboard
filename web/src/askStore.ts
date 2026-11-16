@@ -115,6 +115,9 @@ interface Ask {
   /** where the panel sits: in the middle above the bar, or along the left edge */
   side: 'center' | 'left'
   setSide(side: 'center' | 'left'): void
+  /** pinned open: a click on the empty canvas does not close it (DESIGN.md 68) */
+  pinned: boolean
+  setPinned(on: boolean): void
   setThink(on: boolean): void
   setExpanded(on: boolean): void
   setExplain(on: boolean): void
@@ -170,6 +173,7 @@ export const useAsk = create<Ask>()((set, get) => ({
   busy: false,
   controller: null,
   side: savedSide(),
+  pinned: (() => { try { return localStorage.getItem('mb_ask_pinned') === '1' } catch { return false } })(),
   branches: [],
   active: null,
   boardTurns: [],
@@ -205,6 +209,10 @@ export const useAsk = create<Ask>()((set, get) => ({
     get().controller?.abort()
     set({ turns: [], busy: false, controller: null })
     save(get())
+  },
+  setPinned(on) {
+    set({ pinned: on })
+    try { localStorage.setItem('mb_ask_pinned', on ? '1' : '0') } catch { /* private mode */ }
   },
   setSide(side) {
     set({ side })

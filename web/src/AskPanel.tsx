@@ -49,6 +49,17 @@ function Rich({ text, page }: { text: string; page?: (page: number, label: strin
   return <Prose text={text} cite={(id) => <Cite id={id} />} page={page} />
 }
 
+/** a pin: the chat stays open when the board is clicked (DESIGN.md 68) */
+function PinIcon({ on }: { on: boolean }) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 16 16" fill={on ? 'currentColor' : 'none'} stroke="currentColor"
+      strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" aria-hidden>
+      <path d="M6 2.5h4l-.6 4 2.1 2.2H4.5l2.1-2.2z" />
+      <path d="M8 8.7v4.8" fill="none" />
+    </svg>
+  )
+}
+
 /** the file conversation being shown, if one is (DESIGN.md 64) */
 const useBranch = () => useAsk((s) => (s.active ? s.branches.find((b) => b.id === s.active) : undefined))
 
@@ -273,6 +284,7 @@ export function AskPanel() {
   const expanded = useAsk((s) => s.expanded)
   const explain = useAsk((s) => s.explain)
   const own = useAsk((s) => s.own)
+  const pinned = useAsk((s) => s.pinned)
   const branch = useBranch()
   const context = useAsk((s) => s.context)
   const turns = useAsk((s) => s.turns)
@@ -303,9 +315,25 @@ export function AskPanel() {
     const el = scroller.current
     if (el && following.current) el.scrollTop = el.scrollHeight
   }, [turns, open, expanded])
+  // back at the bottom picks the answer up again; only the reader's own
+  // moves upward (below) let it go - our own scrolls never do
   const onScroll = () => {
     const el = scroller.current
-    if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    // a few lines' grace: the answer may have grown since the scroll began
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) following.current = true
+  }
+  // Scrolling up lets go at once. Read from the scroll position alone it did
+  // not: a smooth wheel scroll moves a few pixels at a time, the next words
+  // arrived first and pulled the view back down, and it could never get away
+  // while an answer was being written (DESIGN.md 68).
+  const letGo = () => { following.current = false }
+  const onWheel = (e: React.WheelEvent) => {
+    const el = scroller.current
+    if (e.deltaY < 0) letGo()
+    else if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) following.current = true
+  }
+  const onKeyScroll = (e: React.KeyboardEvent) => {
+    if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) letGo()
   }
 
   // grow the box with what is typed, up to a few lines - and again whenever
@@ -380,6 +408,12 @@ export function AskPanel() {
                   <Icon name="explain" size={14} />
                 </button>
               ) : null}
+              <button className={`icon-btn pin-btn ${pinned ? 'on' : ''}`} aria-pressed={pinned}
+                title={pinned ? 'Pinned open - a click on the board leaves it open. Click to unpin'
+                  : 'Pin open - otherwise a click on the board puts the chat away'}
+                onClick={() => ask.setPinned(!pinned)}>
+                <PinIcon on={pinned} />
+              </button>
               <button className="icon-btn" title="Clear the conversation" disabled={!turns.length}
                 onClick={() => setClearing(true)}>
                 <Icon name="trash" size={14} />
@@ -442,7 +476,9 @@ export function AskPanel() {
             )}
           </div>}
 
-          <div className="ask-turns" ref={scroller} onScroll={onScroll}>
+          <div className="ask-turns" ref={scroller} onScroll={onScroll} onWheel={onWheel}
+            onTouchMove={letGo} onPointerDown={(e) => { if (e.target === e.currentTarget) letGo() }}
+            onKeyDown={onKeyScroll} tabIndex={-1}>
             {turns.length === 0 && branch ? (
               <div className="ask-hello">
                 {branch.status === 'ready'

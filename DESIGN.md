@@ -3498,3 +3498,61 @@ Checked in the browser: group "AI work" → board → browser back, and → boar
 the board's back button: both land inside "AI work"; "All boards" leaves it.
 
 281 tests.
+
+## 68. Scrolling while it writes, panels that put themselves away, new boards light (2026-11-16)
+
+- **Scrolling during an answer.** The chat follows an answer as it is
+  written, and let go only when the scroll position was well away from the
+  bottom. A smooth wheel scroll moves a few pixels at a time; the next words
+  arrived first and pulled the view back down, so while an answer was being
+  written it could not be scrolled at all. Now the reader's own moves upward
+  let go at once - wheel up, touch, the arrow, Page Up and Home keys, a press
+  on the scrollbar - and only coming back near the bottom (or wheeling down
+  near it) picks the answer up again; the page's own scrolls never let go. A
+  first try that ignored the page's own scroll events by a flag got stuck
+  when two scrolls arrived as one event, and the answer was never picked up
+  again; dropped. The Experts' conversation had the same trouble and the
+  same fix.
+- **A click on the board puts panels away.** The board's look (theme panel)
+  and the chat close when the empty board is clicked. The chat has a pin in
+  its header to stay open while working on the board (kept in
+  `localStorage`); the expanded chat still closes by its dimmed backdrop.
+- **The theme panel saves as you change it** - it always did: every pick is
+  an op on the board at once. "Done" made it look otherwise; it is replaced
+  by a close button, "Saved as you change it", Escape, and the board click.
+- **New boards start light**: `DEFAULT_SETTINGS.theme` is `daylight`
+  (near-white canvas, white cards). Boards made before keep their theme.
+
+Checked in the browser: scrolled up while an answer was written and stayed
+there; back at the bottom it followed again; an unpinned chat closed on a
+board click and a pinned one stayed; the theme panel closed on a board click;
+a new board opened on daylight.
+
+282 tests.
+
+## 69. Markdown in cards, and the canvas's pattern (2026-11-16)
+
+- **Markdown in a card.** A card showed paragraphs and simple lists only.
+  Its text is now drawn by the chat's own renderer (`Prose`), so a card takes
+  what an answer does: headings, **bold**, _italics_, `code` and code blocks,
+  quotes, tables, rules, numbered and nested lists, formulas - and three
+  things added to the renderer for both: links (`[words](https://...)` and
+  bare addresses, http and https only, opening in a new tab, a press on one
+  not taken as a press on the card), ~~strikethrough~~, and task items
+  (`- [ ]`, `- [x]`, drawn as boxes, done ones struck through). A card keeps
+  its line breaks as written (`breaks`); an answer's lines still run on as a
+  paragraph. A card named in a card's text (`[[id]]`) shows as its title and
+  goes to it. Sizes are in em, so a card's text size carries to all of it.
+  Editing is unchanged: the card's text is written as plain text, and drawn
+  when it is not being edited.
+- **The canvas's pattern** is chosen in the board's theme panel, beside the
+  themes: dots (as before, the default), grid, large grid (a fine grid with a
+  stronger line every five squares), crosses, or plain. Kept in the board's
+  settings (`pattern`) like its theme; drawn in the theme's grid colour.
+
+Checked in the browser: a card with a heading, bold and italics, a kept line
+break, a done and an open task, a numbered list, a quote, inline code,
+strikethrough, a formula, a table and both kinds of link drew each one; each
+pattern drew on the canvas and the choice was saved with the board.
+
+282 tests.

@@ -32,6 +32,16 @@ export const CUSTOMISABLE: { key: string; label: string }[] = [
   { key: '--mb-type-meta', label: 'Meta-nodes' },
 ]
 
+/** the canvas's pattern, chosen with the theme (DESIGN.md 69) */
+export const CANVAS_PATTERNS = [
+  { key: 'dots', label: 'Dots' },
+  { key: 'grid', label: 'Grid' },
+  { key: 'big-grid', label: 'Large grid' },
+  { key: 'cross', label: 'Crosses' },
+  { key: 'plain', label: 'Plain' },
+] as const
+export type CanvasPattern = (typeof CANVAS_PATTERNS)[number]['key']
+
 export const NODE_COLOURS = [
   '#6ea8fe', '#6fd7a4', '#cf8ce8', '#e6b95c', '#ff9e64', '#f97583', '#90a0b8',
 ]

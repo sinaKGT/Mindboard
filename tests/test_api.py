@@ -129,3 +129,11 @@ def test_the_page_is_never_kept_stale_after_an_update(dd):
         for path in ("/", "/b/somewhere"):
             res = c.get(path)
             assert res.status_code == 200 and res.headers["cache-control"] == "no-cache"
+
+
+def test_a_new_board_starts_light(tmp_path):
+    """DESIGN.md 68: new boards start on the near-white daylight theme."""
+    from mindboard.boards import create_board
+    from mindboard.paths import DataDir
+    b = create_board(DataDir(tmp_path), "Fresh")
+    assert b["settings"]["theme"] == "daylight"

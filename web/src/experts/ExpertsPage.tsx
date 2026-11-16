@@ -477,7 +477,11 @@ export function ExpertsPage() {
           <div className="xp-who">{e.name}</div>
           <div className="xp-cartouches">{e.boards.map((b) => <span key={b.id} className="xp-cartouche">{b.title}</span>)}</div>
           <div className="xp-turns" ref={scroller}
-            onScroll={(ev) => { const el = ev.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60 }}>
+            onScroll={(ev) => { const el = ev.currentTarget; if (el.scrollHeight - el.scrollTop - el.clientHeight < 24) stick.current = true }}
+            // scrolling up lets go at once, even while the answer is written (DESIGN.md 68)
+            onWheel={(ev) => { if (ev.deltaY < 0) stick.current = false }}
+            onTouchMove={() => { stick.current = false }}
+            onPointerDown={(ev) => { if (ev.target === ev.currentTarget) stick.current = false }}>
             {turns.map((t, i) => t.role === 'user'
               ? <div key={i} className="xp-q"><AskedWith thumbs={t.images} />{t.text}</div>
               : (

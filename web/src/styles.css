@@ -1729,3 +1729,62 @@ button.file-tab { padding: 5px 10px; gap: 5px; }
 .task-step.done .task-mark { color: var(--mb-accent); }
 .task-step.failed { color: var(--mb-danger, #e06c6c); }
 .task-note { color: var(--mb-text-faint, var(--mb-text-dim)); }
+
+/* the board's look: closes on a click on the board, saved as it changes (DESIGN.md 68) */
+.theme-sheet-head { display: flex; align-items: center; justify-content: space-between; }
+.theme-sheet-head h4 { margin: 0; }
+.theme-sheet-foot { align-items: center; }
+.theme-saved { margin-right: auto; font-size: 11px; color: var(--mb-text-faint, var(--mb-text-dim)); }
+
+/* Markdown in a card (DESIGN.md 69): the chat's layout, at the card's own
+   size and colours - everything in em, so the card's text size carries */
+.card-prose { display: flex; flex-direction: column; gap: .35em; white-space: normal; }
+.card-prose .prose-p { margin: 0; white-space: pre-wrap; }
+.card-prose .prose-h { font-weight: 650; color: var(--mb-text); line-height: 1.3; }
+.card-prose .prose-h1 { font-size: 1.3em; }
+.card-prose .prose-h2 { font-size: 1.15em; }
+.card-prose .prose-h3, .card-prose .prose-h4 { font-size: 1.02em; }
+.card-prose .prose-li { display: flex; gap: .45em; align-items: baseline; }
+.card-prose .prose-li + .prose-li { margin-top: -.15em; }
+.card-prose .prose-mark { flex: none; min-width: .9em; text-align: center; color: var(--mb-text-faint, var(--mb-text-dim)); }
+.card-prose .prose-mark.num { min-width: 1.3em; text-align: right; font-variant-numeric: tabular-nums; }
+.card-prose .prose-li-text { flex: 1; min-width: 0; }
+.card-prose .prose-li.task .prose-mark { color: var(--node-color, var(--mb-accent)); }
+.card-prose .prose-li.done .prose-li-text { text-decoration: line-through; opacity: .6; }
+.card-prose code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9em;
+  padding: .05em .35em; border-radius: 4px; background: var(--mb-surface-3); color: var(--mb-text); }
+.card-prose .prose-code { margin: 0; padding: .55em .7em; border-radius: 6px; overflow-x: auto; white-space: pre;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .85em;
+  background: var(--mb-surface-3); color: var(--mb-text); }
+.card-prose .prose-quote { padding-left: .7em; border-left: 2px solid var(--node-color, var(--mb-border-strong)); }
+.card-prose .prose-hr { border: 0; border-top: 1px solid var(--mb-border); margin: .3em 0; width: 100%; }
+.card-prose .prose-table-wrap { overflow-x: auto; }
+.card-prose .prose-table { border-collapse: collapse; font-size: .92em; }
+.card-prose .prose-table th, .card-prose .prose-table td { padding: .2em .55em; border-bottom: 1px solid var(--mb-border);
+  text-align: left; vertical-align: top; }
+.card-prose .prose-table th { color: var(--mb-text); font-weight: 600; }
+.card-prose strong { color: var(--mb-text); }
+.card-prose del { opacity: .6; }
+.prose-link { color: var(--mb-accent); text-decoration: underline; text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--mb-accent) 45%, transparent); word-break: break-all; }
+.prose-link:hover { text-decoration-color: var(--mb-accent); }
+.card-ref { display: inline; padding: 0 .4em; border-radius: 5px; font: inherit; font-size: .92em; cursor: pointer;
+  color: var(--mb-accent); background: var(--mb-surface-3); border: 1px solid var(--mb-border); }
+.card-ref:hover { border-color: var(--mb-accent); }
+
+/* the canvas's pattern, chosen with the theme (DESIGN.md 69) */
+.pattern-label { margin: 12px 0 6px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--mb-text-faint, var(--mb-text-dim)); }
+.pattern-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.pattern-chip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px;
+  border-radius: 8px; border: 1px solid var(--mb-border); font-size: 10.5px; color: var(--mb-text-dim); background: transparent; cursor: pointer; }
+.pattern-chip:hover { border-color: var(--mb-border-strong); color: var(--mb-text); }
+.pattern-chip.on { border-color: var(--mb-accent); color: var(--mb-text); box-shadow: 0 0 0 1px var(--mb-accent); }
+.pattern-swatch { width: 100%; height: 30px; border-radius: 5px; background-color: var(--mb-bg);
+  border: 1px solid var(--mb-border); --g: var(--mb-text-faint, #8888); }
+.pattern-swatch.dots { background-image: radial-gradient(var(--g) 1px, transparent 1.2px); background-size: 8px 8px; }
+.pattern-swatch.grid { background-image: linear-gradient(var(--g) 1px, transparent 1px), linear-gradient(90deg, var(--g) 1px, transparent 1px);
+  background-size: 8px 8px; }
+.pattern-swatch.big-grid { background-image: linear-gradient(var(--g) 1px, transparent 1px), linear-gradient(90deg, var(--g) 1px, transparent 1px),
+  linear-gradient(color-mix(in srgb, var(--g) 45%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--g) 45%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px, 6px 6px, 6px 6px; }
+.pattern-swatch.cross { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M5 3v4M3 5h4' stroke='%23888' stroke-width='1'/%3E%3C/svg%3E"); background-size: 10px 10px; }

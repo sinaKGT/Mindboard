@@ -5,11 +5,12 @@ import {
   addConnected, deleteNodes, duplicateNodes, linkifyNode, moveOut, refreshLinkPreview, setBodyList, setStyle, unwrapMeta, updateNode,
 } from './actions'
 import { api } from './api'
-import { askable, useAsk } from './askStore'
+import { askable, revealCard, useAsk } from './askStore'
 import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
-import { blocks, continueList, detectList, URL_ONLY } from './text'
+import { continueList, detectList, URL_ONLY } from './text'
+import { Prose } from './Prose'
 import { withMath } from './Math'
 import { NODE_COLOURS } from './theme'
 import type { MNode, NodeTone } from './types'
@@ -188,14 +189,11 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
         {node.title ? withMath(node.title) : <span className="placeholder">{placeholder}</span>}
       </div>
       {text_
+        // markdown, as in the chat's answers (DESIGN.md 69): headings, bold,
+        // italics, strikethrough, code, lists and tasks, quotes, tables,
+        // links and formulas - with the line breaks as written
         ? <div className="text" style={{ fontSize: fs }}>
-            {blocks(text_).map((block, i) => (
-              block.kind === 'p'
-                ? <p key={i}>{withMath(block.items.join('\n'))}</p>
-                : block.kind === 'ul'
-                  ? <ul key={i}>{block.items.map((it, j) => <li key={j}>{withMath(it)}</li>)}</ul>
-                  : <ol key={i}>{block.items.map((it, j) => <li key={j}>{withMath(it)}</li>)}</ol>
-            ))}
+            <Prose text={text_} cite={cardRef} breaks className="card-prose" />
           </div>
         : <div className="text placeholder hint-on-hover" style={{ fontSize: fs }}>
             {bodyPlaceholder}
@@ -574,6 +572,21 @@ export function LinkNode({ data, selected }: NodeProps) {
 
 /** What a file's name says it is, for its badge: PDF, DOCX, ZIP. */
 const extOf = (name: string) => (name.match(/\.([a-z0-9]{1,5})$/i)?.[1] ?? 'file').toUpperCase()
+
+/** a card named in a card's text ([[id]]): its title, a click away */
+function cardRef(id: string) {
+  return <CardRef key={id} id={id} />
+}
+
+function CardRef({ id }: { id: string }) {
+  const title = useStore((s) => s.nodes[id]?.title)
+  if (title === undefined) return <>{`[[${id}]]`}</>
+  return (
+    <button className="card-ref nodrag" title="Go to this card"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); revealCard(id) }}>{title || 'Untitled'}</button>
+  )
+}
 
 export function FileNode({ data, selected }: NodeProps) {
   const node = (data as { node: MNode }).node

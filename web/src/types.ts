@@ -62,6 +62,8 @@ export interface BoardSettings {
   custom?: string | null
   /** its tile's colour on the first page (DESIGN.md 54) */
   tile?: string
+  /** the canvas's pattern: dots, grid, big-grid, cross, plain (DESIGN.md 69) */
+  pattern?: string
   viewport?: { x: number; y: number; zoom: number }
 }
 

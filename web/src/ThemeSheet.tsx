@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { api, type CustomTheme } from './api'
 import { Icon } from './icons'
 import { useStore } from './store'
-import { CUSTOMISABLE, THEMES, THEME_LOOK, contrast, readVar } from './theme'
+import { CANVAS_PATTERNS, CUSTOMISABLE, THEMES, THEME_LOOK, contrast, readVar } from './theme'
 import { useUI } from './ui'
 
 export function ThemeSheet() {
@@ -59,8 +59,15 @@ export function ThemeSheet() {
   }
 
   return (
-    <div className="sheet theme-sheet" onMouseDown={(e) => e.stopPropagation()}>
-      <h4>Theme</h4>
+    <div className="sheet theme-sheet" onMouseDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => { if (e.key === 'Escape') setUI('themeOpen', false) }}>
+      <div className="theme-sheet-head">
+        <h4>Theme</h4>
+        <button className="icon-btn" title="Close (or click the board) - changes are already saved"
+          aria-label="Close" onClick={() => setUI('themeOpen', false)}>
+          <Icon name="x" size={13} />
+        </button>
+      </div>
       <div className="theme-row">
         {THEMES.map((t) => {
           const look = THEME_LOOK[t]
@@ -77,6 +84,18 @@ export function ThemeSheet() {
             </button>
           )
         })}
+      </div>
+
+      <div className="pattern-label">Canvas pattern</div>
+      <div className="pattern-row" role="radiogroup" aria-label="Canvas pattern">
+        {CANVAS_PATTERNS.map((p) => (
+          <button key={p.key} role="radio" aria-checked={(settings.pattern || 'dots') === p.key}
+            className={`pattern-chip ${(settings.pattern || 'dots') === p.key ? 'on' : ''}`}
+            title={p.label} onClick={() => write({ pattern: p.key })}>
+            <span className={`pattern-swatch ${p.key}`} />
+            <span>{p.label}</span>
+          </button>
+        ))}
       </div>
 
       {mine.length ? (
@@ -130,9 +149,10 @@ export function ThemeSheet() {
         </button>
       </div>
 
-      <div className="modal-actions" style={{ marginTop: 12 }}>
+      <div className="modal-actions theme-sheet-foot" style={{ marginTop: 12 }}>
+        {/* every change is written to the board the moment it is made (DESIGN.md 68) */}
+        <span className="theme-saved">Saved as you change it</span>
         <button className="btn" onClick={() => write({ palette: {}, custom: null })}>Reset colours</button>
-        <button className="btn" onClick={() => setUI('themeOpen', false)}>Done</button>
       </div>
     </div>
   )

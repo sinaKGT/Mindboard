@@ -118,6 +118,7 @@ function CanvasInner() {
   const setUI = useUI((s) => s.set)
   const minimap = useUI((s) => s.minimap)
   const themeOpen = useUI((s) => s.themeOpen)
+  const pattern = board?.settings?.pattern ?? 'dots'
   const focusId = useUI((s) => s.focusId)
   const linking = useUI((s) => s.linking)
   const selectedIds = useUI((s) => s.selected)
@@ -796,6 +797,11 @@ function CanvasInner() {
         }}
         onPaneClick={(e) => {
           setUI('selectedEdges', [])
+          // a click on the empty board puts away what floats over it: the
+          // board's look, and the chat unless it is pinned (DESIGN.md 68)
+          if (useUI.getState().themeOpen) setUI('themeOpen', false)
+          const chat = useAsk.getState()
+          if (chat.open && !chat.pinned && !chat.expanded) chat.setOpen(false)
           const active = useUI.getState().linking
           if (!active) return
           const src = useStore.getState().nodes[active.sourceId]
@@ -826,7 +832,20 @@ function CanvasInner() {
         proOptions={{ hideAttribution: true }}
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}>
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1.9} color="var(--mb-grid)" />
+        {/* the pattern chosen in the theme panel (DESIGN.md 69) */}
+        {pattern === 'grid' ? (
+          <Background variant={BackgroundVariant.Lines} gap={24} lineWidth={1} color="var(--mb-grid)" />
+        ) : pattern === 'big-grid' ? (
+          <>
+            <Background id="fine" variant={BackgroundVariant.Lines} gap={24} lineWidth={0.6}
+              color="color-mix(in srgb, var(--mb-grid) 55%, transparent)" />
+            <Background id="major" variant={BackgroundVariant.Lines} gap={120} lineWidth={1.2} color="var(--mb-grid)" />
+          </>
+        ) : pattern === 'cross' ? (
+          <Background variant={BackgroundVariant.Cross} gap={32} size={7} lineWidth={1} color="var(--mb-grid)" />
+        ) : pattern === 'plain' ? null : (
+          <Background variant={BackgroundVariant.Dots} gap={24} size={1.9} color="var(--mb-grid)" />
+        )}
         <PlacedCheck />
         {linkPath && (
           <ViewportPortal>
