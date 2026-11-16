@@ -5,9 +5,11 @@
  *  Shown as it came, that was a wall of `###` and `*`. Here it is read into
  *  blocks first and then drawn: headings as headings, lists with their real
  *  depth, citations as chips through `cite`. Nothing in an answer is ever
- *  treated as HTML; everything is text in React elements.
+ *  treated as HTML; everything is text in React elements - formulas apart,
+ *  drawn by KaTeX from its own reading of them (Math.tsx, DESIGN.md 61).
  */
 import { Fragment, type ReactNode } from 'react'
+import { MATH_SOURCE, Tex, texOf } from './Math'
 
 export type Block =
   | { k: 'h'; level: number; text: string }
@@ -72,7 +74,8 @@ export function blocks(src: string): Block[] {
   return out
 }
 
-const INLINE = /(\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))/g
+// maths first (DESIGN.md 61): a formula's _ and * are not italics
+const INLINE = new RegExp(`(${MATH_SOURCE}|` + String.raw`\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|` + '`[^`\\n]+`' + String.raw`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))`, 'g')
 
 /** one line's light formatting; citations through `cite` */
 function inline(text: string, cite: (id: string) => ReactNode, key = ''): ReactNode[] {
@@ -81,6 +84,7 @@ function inline(text: string, cite: (id: string) => ReactNode, key = ''): ReactN
   return clean.split(INLINE).map((piece, j) => {
     const k = `${key}${j}`
     if (!piece) return null
+    if (j % 2 && texOf(piece)) return <Tex key={k} piece={piece} />
     if (piece.startsWith('[[')) {
       const id = piece.match(/^\[\[([0-9A-Za-z]{26})\]\]$/)
       return id ? <Fragment key={k}>{cite(id[1])}</Fragment> : null   // a citation the model got wrong: left out

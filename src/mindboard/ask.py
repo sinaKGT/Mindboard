@@ -90,6 +90,7 @@ How to answer:
 5. Short and exact by default: a few sentences or a short list, nothing
    padded. Explain at length - steps, examples - only when they ask you to
    explain, or ask how or why. Plain sentences and short lists; no tables.
+   Write a formula in LaTeX between dollar signs, like $E = mc^2$.
 6. Finish with three lines, each starting exactly "{NEXT}", each holding one
    question the person could ask next: short, in their words, about what they
    just asked and the cards in front of you - one going deeper, one putting it
@@ -978,7 +979,9 @@ DESCRIBE = ("Describe this picture for a search index. First, in one or two plai
             "what it shows and what kind of picture it is (photo, diagram, screenshot, chart, "
             "table, slide). Then write \"Text:\" and every word, number and label you can read "
             "in it, in reading order, exactly as written - headings, labels, table cells, axis "
-            "names, captions, code. Leave out the Text part if there is no text. No preamble.")
+            "names, captions, code. Write any mathematical formula in LaTeX between single "
+            "dollar signs, like $P(Y \\mid X)$. Leave out the Text part if there is no text. "
+            "No preamble.")
 DESCRIBE_TOKENS = 600
 DESCRIBE_CHARS = 3000        # kept for search; the prompt reads less (SEEN_CHARS)
 SEEN_CHARS = 700             # of a description, read in place of a picture left out

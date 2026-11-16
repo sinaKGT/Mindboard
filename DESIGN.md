@@ -3239,3 +3239,31 @@ could not take it that instant.
   described cannot be stopped mid-way, only finished.
 
 260 tests.
+
+## 61. Formulas drawn as maths (2026-11-16)
+
+A picture of a formula is described in LaTeX (`$\arg\max_{\text{prompt}}
+P_\theta(Y \mid \text{prompt})$`), and that text reached cards and answers as
+code. Worse, an answer's light formatting took the formula's underscores for
+italics, and half a line went slanted.
+
+- **KaTeX, bundled** (`web/src/Math.tsx`): about 280 KB and its fonts, built
+  into the interface, so it works offline. `$$...$$` and `\[...\]` are drawn
+  on their own line, `$...$` and `\(...\)` in the sentence.
+- **Maths first.** In an answer (`Prose.tsx`) formulas are found before bold,
+  italics and citations, so a formula's `_` and `*` stay maths. On a card the
+  title and text are drawn with their formulas too.
+- **Prices stay prices.** A `$...$` has no space just inside either dollar,
+  is not followed by a letter or digit, and is not only a number: "$5 and
+  $10" and "$5-$10" are text. A formula KaTeX cannot read is shown as the text
+  it was, never an error. Hovering a formula shows its LaTeX; Copy copies it.
+- **KaTeX's HTML** is made by KaTeX from its own reading of the formula, with
+  trust off - no links, styles or raw HTML from the text.
+- **Asked for**: the picture reader writes any formula in LaTeX between single
+  dollar signs, and answers write formulas that way too, so both come out in
+  the one form that is drawn.
+- Cards break long words anywhere and keep line breaks; inside a formula that
+  put `\text{prompt}` one letter per line. A formula keeps together, and a
+  long one on its own line scrolls.
+
+260 tests.

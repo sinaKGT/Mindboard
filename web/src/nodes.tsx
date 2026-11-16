@@ -10,6 +10,7 @@ import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
 import { blocks, continueList, detectList, URL_ONLY } from './text'
+import { withMath } from './Math'
 import { NODE_COLOURS } from './theme'
 import type { MNode, NodeTone } from './types'
 import { useUI } from './ui'
@@ -184,16 +185,16 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
   return (
     <div className="body" style={{ textAlign: node.style.align }}>
       <div className="title" style={{ fontSize: fs + 1 }}>
-        {node.title || <span className="placeholder">{placeholder}</span>}
+        {node.title ? withMath(node.title) : <span className="placeholder">{placeholder}</span>}
       </div>
       {text_
         ? <div className="text" style={{ fontSize: fs }}>
             {blocks(text_).map((block, i) => (
               block.kind === 'p'
-                ? <p key={i}>{block.items.join('\n')}</p>
+                ? <p key={i}>{withMath(block.items.join('\n'))}</p>
                 : block.kind === 'ul'
-                  ? <ul key={i}>{block.items.map((it, j) => <li key={j}>{it}</li>)}</ul>
-                  : <ol key={i}>{block.items.map((it, j) => <li key={j}>{it}</li>)}</ol>
+                  ? <ul key={i}>{block.items.map((it, j) => <li key={j}>{withMath(it)}</li>)}</ul>
+                  : <ol key={i}>{block.items.map((it, j) => <li key={j}>{withMath(it)}</li>)}</ol>
             ))}
           </div>
         : <div className="text placeholder hint-on-hover" style={{ fontSize: fs }}>

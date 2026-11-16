@@ -1607,3 +1607,13 @@ a.btn { text-decoration: none; }
 /* the action row and its panels above the shelves - the board grid, empty
    where the Look panel opens, otherwise took the panel's clicks */
 .launcher-actions { z-index: 5; }
+
+/* Maths drawn by KaTeX (DESIGN.md 61). Cards and answers break long words
+   anywhere and keep their line breaks; inside a formula that broke \text{...}
+   into one letter per line. A formula keeps together; a long one scrolls. */
+.math { white-space: nowrap; word-break: normal; overflow-wrap: normal; }
+.math .katex { font-size: 1.08em; white-space: nowrap; }
+.math .katex * { white-space: nowrap; word-break: normal; overflow-wrap: normal; }
+.math-display { display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden;
+  padding: 0.25em 0; text-align: center; }
+.math-display .katex-display { margin: 0; }
