@@ -7,8 +7,8 @@ Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
 with a quiz as data, soft glass cards and Beautify (§75-79); all merged into
 main (PR #4); Explain more gives what it is asked for, with no "the cards
 do not cover it" line (§80-81); numbers in file answers - rows kept, a
-calculator and Double check (§82); the card AI panel moves (§83); next:
-the rest of C.
+calculator and Double check (§82); the card AI panel moves (§83); card
+titles in plain words (§84); next: the rest of C.
 
 ---
 
@@ -50,12 +50,6 @@ the rest of C.
   To decide: where it goes (dragging out, a key, or back on the bar).
 
 ## D2. Card AI - loose ends (from §72-79)
-
-- **Markdown asterisks in a card's title** (seen in §83). A card titled
-  "**Definition of Analogy:**" shows the asterisks on the card and in every
-  citation chip that names it. Where they came from (Beautify, Break it
-  into cards, or typed) is to find out; then either the title is drawn as
-  markdown, or the model is kept from writing them into titles.
 
 - **Break it into cards: a report cut off.** "When I click on break it down
   it shows..." - the rest of the sentence never came. The list-text fix

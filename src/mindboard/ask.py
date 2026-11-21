@@ -1386,7 +1386,7 @@ def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
         got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
     except Exception:
         return fallback                      # a model that strays still gives a usable card
-    title = str(got.get("title") or "").strip()[:80] or fallback["title"]
+    title = plain_title(got.get("title"))[:80] or fallback["title"]
     text = CITE.sub("", str(got.get("text") or "")).strip()[:800] or fallback["text"]
     link = str(got.get("link_to") or "").strip()
     kind = str(got.get("kind") or "").strip()
@@ -1452,7 +1452,7 @@ def break_card(model, title: str, text: str) -> dict:
     for c in (got.get("cards") if isinstance(got, dict) else None) or []:
         if not isinstance(c, dict):
             continue
-        t = " ".join(_plain(c.get("title")).split()[:10]).strip()[:80]
+        t = " ".join(plain_title(c.get("title")).split()[:10]).strip()[:80]
         x = CITE.sub("", _plain(c.get("text"))).strip()[:600]
         if t or x:
             out.append({"title": t or x[:60], "text": x})
@@ -1462,8 +1462,14 @@ def break_card(model, title: str, text: str) -> dict:
     # the model said one idea, strayed or failed: the card's own list or paragraphs
     points = _points(text)[:BREAK_MAX]
     if points:
-        return {"cards": [{"title": " ".join(p.split()[:6])[:60], "text": p[:600]} for p in points],
-                "note": ""}
+        cards = []
+        for p in points:
+            labelled = _label_line(p)           # "**Label:** what it says": the label names it
+            if labelled and labelled[1]:
+                cards.append({"title": labelled[0][:60], "text": labelled[1][:600]})
+            else:
+                cards.append({"title": " ".join(plain_title(p).split()[:6])[:60], "text": p[:600]})
+        return {"cards": cards, "note": ""}
     return {"cards": [], "note": "This card holds one idea - nothing to break up."}
 
 
@@ -1502,7 +1508,7 @@ def merge_cards(model, cards: list[dict]) -> dict:
         return fallback
     if not isinstance(got, dict):
         return fallback
-    title = " ".join(_plain(got.get("title")).split()[:10]).strip()[:80]
+    title = " ".join(plain_title(got.get("title")).split()[:10]).strip()[:80]
     text = CITE.sub("", _plain(got.get("text"))).strip()[:4000]
     # a merge that lost most of the words is not a merge
     if not text or len(text) < min(len(joined), 400) * 0.3:
@@ -1526,6 +1532,40 @@ Reply with JSON only, no other text:
 
 QUIZ_CHOICES = (3, 4)
 QUIZ_TRIES = 2
+
+
+# DESIGN.md 84: a card is titled in plain words. Breaking a Beautified card
+# (§78), whose lines open with bold labels, made cards titled
+# "**Definition of Analogy:**" - the asterisks shown on the card and in every
+# chip that names it. The page draws such titles the same way (text.ts).
+_TITLE_LEAD = re.compile(r"^\s*(?:#{1,6}\s+|(?:[-*+•]|\d{1,3}[.)])\s+)")
+_TITLE_MARKS = [(re.compile(r"\*\*(.+?)\*\*"), r"\1"), (re.compile(r"__(.+?)__"), r"\1"),
+                (re.compile(r"`([^`]+)`"), r"\1"),
+                (re.compile(r"(^|[\s(])\*([^*\s](?:[^*]*[^*\s])?)\*(?=$|[\s).,:;!?])"), r"\1\2"),
+                (re.compile(r"(^|[\s(])_([^_\s](?:[^_]*[^_\s])?)_(?=$|[\s).,:;!?])"), r"\1\2")]
+
+
+def plain_title(value) -> str:
+    """A title as words: no heading or list marker, no bold, italics or code
+    marks, and - when such marks were taken off - no trailing colon, which
+    belonged to a "**Label:**" rather than to the title."""
+    raw = " ".join(_plain(value).split())
+    out = _TITLE_LEAD.sub("", raw)
+    for pattern, keep in _TITLE_MARKS:
+        out = pattern.sub(keep, out)
+    out = out.strip("*_ ").strip()
+    if out != raw:
+        out = re.sub(r"\s*:$", "", out)
+    return out or raw
+
+
+def _label_line(line: str) -> Optional[tuple[str, str]]:
+    """A line that opens with a bold label - "**Definition:** The theory..."
+    as Beautify writes them: the label, and what follows it."""
+    m = re.match(r"^\s*(?:[-*+]\s+)?\*\*(.+?)\*\*\s*:?\s*(.*)$", line)
+    if not m or not m.group(1).strip(" :"):
+        return None
+    return re.sub(r"\s*:$", "", plain_title(m.group(1))), m.group(2).strip()
 
 
 def _plain(value) -> str:

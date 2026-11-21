@@ -631,6 +631,38 @@ def test_breaking_falls_back_to_the_cards_own_list_and_says_when_there_is_nothin
     assert len(many["cards"]) == ask.BREAK_MAX
 
 
+@pytest.mark.parametrize("given, want", [
+    ("**Definition of Analogy:**", "Definition of Analogy"),
+    ("## Base and target", "Base and target"),
+    ("- *Mapping* relations", "Mapping relations"),
+    ("`map()` in Python", "map() in Python"),
+    ("__Overlap__: 10-20%", "Overlap: 10-20%"),
+    ("Note: read later", "Note: read later"),
+    ("5 * 3 = 15", "5 * 3 = 15"),
+    (["**Two**", "lines"], "Two - lines"),
+    ("", ""),
+])
+def test_a_title_the_model_writes_is_plain_words(given, want):
+    """DESIGN.md 84: "**Definition of Analogy:**" reached a card's title."""
+    assert ask.plain_title(given) == want
+
+
+def test_breaking_a_beautified_card_titles_each_card_by_its_label():
+    """DESIGN.md 84: a Beautified card's lines open with bold labels (§78)."""
+    import json as js
+    text = ("**Definition of Analogy:** Taking knowledge from one situation to another.\n"
+            "**Base and target:** The two situations.")
+    got = ask.break_card(DraftModel('{"cards": []}'), "Analogy", text)
+    assert got["cards"] == [{"title": "Definition of Analogy", "text": "Taking knowledge from one situation to another."},
+                            {"title": "Base and target", "text": "The two situations."}]
+    model = DraftModel(js.dumps({"cards": [{"title": "**Definition of Analogy:**", "text": "Taking knowledge."},
+                                           {"title": "**Base**", "text": "One situation."}]}))
+    assert [c["title"] for c in ask.break_card(model, "Analogy", text)["cards"]] == ["Definition of Analogy", "Base"]
+    merged = ask.merge_cards(DraftModel(js.dumps({"title": "**Analogy:**", "text": "a " * 300})),
+                             [{"title": "A", "text": "a " * 300}, {"title": "B", "text": "b"}])
+    assert merged["title"] == "Analogy"
+
+
 def js_cards(n):
     import json as js
     return js.dumps({"cards": [{"title": f"T{i}", "text": f"t{i}"} for i in range(n)]})

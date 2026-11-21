@@ -4271,3 +4271,41 @@ Not done: Esc closes a moved panel only while it has focus (click it first)
 where a panel was put is not remembered after it closes.
 
 346 tests.
+
+## 84. Card titles in plain words (2026-11-21)
+
+In the owner's screenshot (§83) a card was titled "**Definition of Analogy:**",
+and every citation chip naming it showed the asterisks. The likely way in:
+Beautify (§78) writes a card's text with bold labels - "**Definition of
+Analogy:** The theory..." - and Break it into cards then made one card a
+line, its title from the model or, in the fallback, from the line's first six
+words; neither took markdown off a title.
+
+- **Titles the model writes are plain** (`ask.plain_title`): Break, Merge
+  and Add to board from the chat (`draft_card`, used by experts too) take off
+  a leading heading or list marker, bold, italics and code marks, and - only
+  when such marks came off - a trailing colon, which belonged to the label.
+  "Note: read later" keeps its colon; "5 * 3 = 15" is left alone. Fix the
+  writing keeps the person's own title as it is.
+- **Break's fallback reads a label.** A line that opens with a bold label
+  becomes a card titled by the label, with what follows as its text:
+  "**Base and target:** The two situations." gives "Base and target" and
+  "The two situations.".
+- **Titles already on a board are drawn plain** (`plainTitle` in text.ts,
+  the same rules): on the card, in the far-out view, in both kinds of
+  citation chip, in the related-cards list, and in the names an AI panel
+  gives a card it adds. Only the drawing changes: the title is kept, and
+  editing it shows it as written, so the asterisks can be deleted.
+
+Checked in the app: a card titled "**Definition of Analogy:**" showed
+"Definition of Analogy" on its face and in the two chips of its Explain
+panel. With the real model, Break on a card in Beautify's form gave
+"Definition of Analogy", "How Analogy Works", "Solar System Example" in three
+runs of three (9.1 s, then 1.5 s each); what the model wrote before
+cleaning is not shown by the route, so whether it wrote asterisks this time
+is not known - the unit tests hold the cleaning to the cases seen.
+
+Not done: titles typed with asterisks on purpose are drawn without them
+too; the search index and what the model reads keep the title as written.
+
+356 tests.

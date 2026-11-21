@@ -16,6 +16,7 @@ import { stepLine, TaskSteps } from './TaskSteps'
 import { Icon } from './icons'
 import { AskedWith, PastedStrip, PickPicture, usePasted } from './Pasted'
 import { Prose } from './Prose'
+import { plainTitle } from './text'
 import { useStore } from './store'
 import { useUI } from './ui'
 import { newEdge, newNode, type MEdge, type Op } from './types'
@@ -38,7 +39,7 @@ function Cite({ id }: { id: string }) {
   const node = useStore((s) => s.nodes[id])
   return (
     <button className="cite" title="Go to this card" onClick={() => revealCard(id)}>
-      {node ? (node.title || 'Untitled') : 'a card no longer here'}
+      {node ? (plainTitle(node.title) || 'Untitled') : 'a card no longer here'}
     </button>
   )
 }

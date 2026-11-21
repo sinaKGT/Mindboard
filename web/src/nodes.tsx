@@ -11,7 +11,7 @@ import { askable, revealCard, useAsk } from './askStore'
 import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
-import { continueList, URL_ONLY } from './text'
+import { continueList, plainTitle, URL_ONLY } from './text'
 import { Prose } from './Prose'
 import { withMath } from './Math'
 import { NODE_COLOURS } from './theme'
@@ -188,7 +188,7 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
   return (
     <div className="body" style={{ textAlign: node.style.align }}>
       <div className="title" style={{ fontSize: fs + 1 }}>
-        {node.title ? withMath(node.title) : <span className="placeholder">{placeholder}</span>}
+        {node.title ? withMath(plainTitle(node.title)) : <span className="placeholder">{placeholder}</span>}
       </div>
       {text_
         // markdown, as in the chat's answers (DESIGN.md 69): headings, bold,
@@ -261,7 +261,7 @@ const ACT: Record<Act, { label: string; doing: string; ask: (what: string, many:
  *  alone was read as whichever card a conversation was last about (DESIGN.md 72). */
 function nameCards(ids: string[]): { what: string; many: boolean; first: string } {
   const nodes = useStore.getState().nodes
-  const titles = ids.map((i) => (nodes[i]?.title || '').trim().slice(0, 80)).filter(Boolean)
+  const titles = ids.map((i) => plainTitle(nodes[i]?.title || '').slice(0, 80)).filter(Boolean)
   const many = ids.length > 1
   const what = many
     ? (titles.length ? `these cards: ${titles.map((t) => `"${t}"`).join(', ')}` : 'these cards')
@@ -882,7 +882,7 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
           return (
             <div key={c.id} className="tools-found">
               <button className="tools-found-card" title="Go to this card" onClick={() => revealCard(c.id)}>
-                <b>{c.title}</b>{c.snippet ? <em>{c.snippet}</em> : null}
+                <b>{plainTitle(c.title)}</b>{c.snippet ? <em>{c.snippet}</em> : null}
               </button>
               <button className={`tools-link ${done ? 'done' : ''}`} disabled={done}
                 onClick={() => { connect(node.id, c.id); setView({ ...view, linked: [...view.linked, c.id] }) }}>
@@ -1102,7 +1102,7 @@ function Shell({ node, selected, resizable, children }: {
   // its editor, list, picture or link preview (DESIGN.md 36). A boolean, so
   // the card renders again only when the line is crossed.
   const far = useFlow((s) => s.transform[2] < 0.35)
-  if (far && !selected) children = <div className="far-title">{node.title || 'Untitled'}</div>
+  if (far && !selected) children = <div className="far-title">{plainTitle(node.title) || 'Untitled'}</div>
   return (
     <>
       {resizable && (
@@ -1309,7 +1309,7 @@ function CardRef({ id }: { id: string }) {
   return (
     <button className="card-ref nodrag" title="Go to this card"
       onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => { e.stopPropagation(); revealCard(id) }}>{title || 'Untitled'}</button>
+      onClick={(e) => { e.stopPropagation(); revealCard(id) }}>{plainTitle(title) || 'Untitled'}</button>
   )
 }
 
