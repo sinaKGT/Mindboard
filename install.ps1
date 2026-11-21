@@ -96,6 +96,81 @@ function Test-Environment {
   return ($LASTEXITCODE -eq 0)
 }
 
+# The interface is built from web\ into src\mindboard\web\, which git does not
+# carry (it is generated), so a fresh copy has none and a pull can leave it
+# behind the code. Built here when missing or older than web\'s files - an
+# update used to keep the old one, as `mindboard install` builds only a
+# missing one (DESIGN.md 74). Building needs Node.js; offered through winget.
+$Interface = 'src\mindboard\web\index.html'
+
+function Test-InterfaceStale {
+  if (-not (Test-Path $Interface)) { return $true }
+  $built = (Get-Item $Interface).LastWriteTime
+  $newer = @(Get-ChildItem -Path 'web\src', 'web\index.html', 'web\package.json' -Recurse -File `
+      -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt $built } | Select-Object -First 1)
+  return ($newer.Count -gt 0)
+}
+
+function Find-Npm {
+  $cmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+  # just installed by winget: on disk, not yet on this window's PATH
+  foreach ($dir in @("$env:ProgramFiles\nodejs", "${env:ProgramFiles(x86)}\nodejs", "$env:LOCALAPPDATA\Programs\nodejs")) {
+    $npm = Join-Path $dir 'npm.cmd'
+    if (Test-Path $npm) { $env:PATH = "$dir;$env:PATH"; return $npm }
+  }
+  return $null
+}
+
+# MINDBOARD_NODE=yes|no answers for someone not at the keyboard (an agent).
+function Install-Node {
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return $false }
+  $answer = $env:MINDBOARD_NODE
+  if (-not $answer) {
+    if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { return $false }
+    $answer = Read-Host "  Building the interface needs Node.js. Install it now with winget? [Y/n]"
+  }
+  if ($answer -match '^(n|no)$') { return $false }
+  Say "node.js       installing with winget (a minute) ..."
+  $ErrorActionPreference = 'Continue'
+  winget install --id OpenJS.NodeJS.LTS -e --source winget --silent `
+    --accept-package-agreements --accept-source-agreements | Out-Null
+  return [bool](Find-Npm)
+}
+
+function Build-Interface {
+  if (-not (Test-InterfaceStale)) { Say "interface     up to date"; return }
+  $npm = Find-Npm
+  if (-not $npm -and -not (Install-Node)) {
+    if (Test-Path $Interface) {
+      Say "interface     older than the code - install Node.js to rebuild it (winget install OpenJS.NodeJS.LTS)"
+      return
+    }
+    Fail ("The interface needs building, which needs Node.js. Install it (winget install " +
+          "OpenJS.NodeJS.LTS, or from nodejs.org), then run this again.")
+  }
+  $npm = Find-Npm
+  Say "interface     building (a minute the first time)"
+  # npm writes progress to stderr; under 'Stop' PowerShell 5.1 would take
+  # that for a failure. The exit code says whether it worked.
+  $ErrorActionPreference = 'Continue'
+  Push-Location web
+  try {
+    $out = & $npm install --no-audit --no-fund 2>&1
+    if ($LASTEXITCODE -eq 0) { $out = & $npm run build 2>&1 }
+    $ok = ($LASTEXITCODE -eq 0)
+  } finally { Pop-Location }
+  # the build empties the output folder, placeholder too; put it back, or git
+  # sees a changed file and `mindboard update` refuses to run
+  $keep = 'src\mindboard\web\.gitkeep'
+  if (-not (Test-Path $keep)) { New-Item -ItemType File -Path $keep | Out-Null }
+  if (-not $ok -or -not (Test-Path $Interface)) {
+    $out | Select-Object -Last 15 | ForEach-Object { Write-Host "    $_" }
+    Fail "The interface did not build - the lines above say why."
+  }
+  Say "interface     built"
+}
+
 Write-Host ""
 Write-Host "  Installing Mindboard" -ForegroundColor White
 Write-Host ""
@@ -129,6 +204,7 @@ if (-not (Test-Environment $Venv)) {
   }
 }
 Say "packages      installed and verified"
+Build-Interface
 
 $venvMb = Join-Path $Venv 'Scripts\mindboard.exe'
 Write-Host ""

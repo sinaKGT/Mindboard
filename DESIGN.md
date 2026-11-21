@@ -3731,4 +3731,99 @@ right with a 🎉, gave 1/3 and asked question 2.
   the fallback now offers a card's separate lines when it has neither list
   items nor paragraphs.
 
-290 tests.
+**The quiz, played through** (asked after the weak spots): the three NEXT
+lines meant to be the answers to pick never came - told to stop and wait for
+an answer, the model writes none. So the server reads them from the question:
+an answer with no NEXT lines that ends with a run of two to four lettered
+choices, A) to D) in order, close to the end (`ask.choices`), sends those
+as its offers, marked `choices`; the page heads them "Your answer" and a tap
+sends the choice as the answer. Played to the end with the real model: three
+questions answered by tapping, a kind correction for a wrong pick, a score
+after each, a final score; then the offers went back to questions. Two
+questions in that run were not answerable from the card (what "MBE" stands
+for; what kind of company Nottingham City Transport is - with no right
+choice). The quiz shape now says to find the right answer written in the
+cards before asking, and the request itself asks for exactly one right choice;
+the next full run had three answerable questions, and three of four first
+questions on two selected cards had exactly one right choice (the fourth run's
+selection could not be confirmed). Summarise these, on the same two cards:
+4.5 s, the people, the visits and the reports.
+
+291 tests.
+
+## 73. The app's own tooltip (2026-11-21)
+
+Every button names itself with `title`, about a hundred of them, and the
+browser drew each as its own plain white box - foreign beside the app's
+panels, and the same on a dark board as on a light one.
+
+Rather than edit each button, one small module (`tooltip.ts`, installed in
+`main.tsx`) takes them over. On the first hover over an element with a
+`title`, the title moves to `data-tip`, so the browser's box never appears;
+an element with no other name keeps it as its `aria-label`, so screen readers
+lose nothing. After 450 ms of resting on it, the words are drawn in a small
+panel with the floating-panel surface, border and shadow (`.mb-tip`), in the
+board's theme, below the element - above it when there is no room below -
+and always inside the window. A shortcut written after two spaces in
+brackets ("Fit to view  (Ctrl+0)") is set apart as a key. A press, a key, a
+scroll, a wheel or leaving the element hides it; touch gets none. A title
+React writes again later is taken over on the next hover.
+
+Not chosen: removing the titles - the icon-only buttons (the card bar's,
+the dock's) would then say nothing at all.
+
+Checked in the browser on a light and a dark theme: hovering "Fit to view"
+showed the panel above the dock with Ctrl+0 as a key, the button kept no
+`title` and gained its `aria-label`; "Minimap" on the dark theme drew dark.
+
+291 tests.
+
+## 74. Node.js in the installers, and a guide for agents (2026-11-21)
+
+**Node.js.** The interface is built from `web/` into `src/mindboard/web/`,
+which git does not carry, so every install builds it - and building needs
+Node.js. What the installers did:
+
+- `install.sh` rebuilt a missing or out-of-date interface, and stopped with
+  "brew install node" when Node.js was missing.
+- `install.ps1` did not build at all; it left it to `mindboard install`, which
+  builds only a *missing* interface. A fresh Windows copy without Node.js got
+  no interface, and - found on the way - every update on Windows (which runs
+  `install.ps1` again) kept the old interface over the new code.
+- Building empties the output folder, including the tracked placeholder
+  `src/mindboard/web/.gitkeep`; git then sees a deleted file, and `mindboard
+  update` refuses to run over "changed" files. Nothing put it back.
+
+Now both installers rebuild when the interface is missing or older than any
+file in `web/src`, `web/index.html` or `web/package.json`, and put the
+placeholder back after building. When Node.js is missing they offer to install
+it - `winget install OpenJS.NodeJS.LTS` on Windows; Homebrew, apt, dnf, pacman
+or zypper elsewhere - asked, never done unasked; `MINDBOARD_NODE=yes|no`
+answers for someone not at the keyboard. Declined, with an older interface
+present, they carry on with it and say so; with none, they stop and name the
+command. Windows also looks for `npm` where winget puts Node.js, since a
+window opened before the install does not have it on its PATH. `mindboard
+install` names the command for the system it runs on. The README now says
+Node.js is needed on every system, with the commands.
+
+**AGENTS.md** - for an AI coding agent asked to install Mindboard: ground
+rules (ask before anything large or system-wide, never enter the person's
+password, never edit, commit or discard Mindboard's files, report what
+happened); a table of what to check (Python 3.10+, git, Node.js, uv, disk,
+graphics card) with the install command for each system; clone; install with
+the questions answered in advance; check with `version`, `doctor` and
+`where`; the AI as an optional, asked step (the three model sizes, `--yes`
+only after the person agreed to the size the installer states, `ai check`,
+the voice); starting and handing over; updating; and a troubleshooting table
+of the installers' own messages.
+
+Checked on Windows in a scratch environment and data folder: an out-of-date
+interface was rebuilt and `git status` stayed clean; a second run said "up to
+date"; with Node.js off the PATH, `npm` was found where winget installs it.
+The Mac/Linux build step was run in Git Bash: declined with no package
+manager it warned and carried on; with Node.js it built and put the
+placeholder back. Not yet tried: the Mac and Linux installers on a real Mac
+or Linux, the winget install itself on a computer without Node.js, and an
+agent following AGENTS.md on a clean computer.
+
+291 tests.

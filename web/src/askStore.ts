@@ -42,6 +42,8 @@ export interface Turn {
   next?: string
   /** the three questions it offers next (DESIGN.md 46) */
   nexts?: string[]
+  /** the nexts are a quiz question's choices, to pick as the answer (DESIGN.md 72) */
+  choices?: boolean
   /** a question: small copies of the pictures pasted with it, and what the
    *  model saw in them - kept for the turns after (DESIGN.md 62) */
   images?: string[]
@@ -380,6 +382,7 @@ export const useAsk = create<Ask>()((set, get) => ({
             patch({ text: data.answer, board: data.board, beyond: data.beyond,
                     cited: data.cited, dropped: data.dropped.length, next: data.next || undefined,
                     nexts: data.nexts?.length ? data.nexts : data.next ? [data.next] : undefined,
+                    choices: !!data.choices || undefined,
                     status: data.stopped ? 'stopped' : 'done' })
           } else if (name === 'error') {
             patch({ error: data.message, status: 'done' })

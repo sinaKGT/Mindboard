@@ -136,7 +136,10 @@ def install(
     if not built and root and not skip_build:
         npm = shutil.which("npm")
         if npm is None:
-            _warn("interface not built", "Node is not installed - install Node, then rerun")
+            how = ("winget install OpenJS.NodeJS.LTS" if sys.platform.startswith("win")
+                   else "brew install node" if sys.platform == "darwin"
+                   else "your package manager's nodejs and npm, or nodejs.org")
+            _warn("interface not built", f"it needs Node.js - install it ({how}), then run the installer again")
         else:
             typer.echo("  ...  building the interface (one time, needs Node)")
             try:

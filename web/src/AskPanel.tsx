@@ -265,9 +265,10 @@ function Answer({ turn, offer, question }: {
       ) : null}
       {offer && turn.nexts?.length && turn.status === 'done' ? (
         <div className="ask-next">
-          <span className="ask-next-lead">You could ask next</span>
+          <span className="ask-next-lead">{turn.choices ? 'Your answer' : 'You could ask next'}</span>
           {turn.nexts.map((q, i) => (
-            <button key={i} className="starter" title="Ask this" onClick={() => offer(q)}>{q}</button>
+            <button key={i} className="starter" title={turn.choices ? 'Answer this' : 'Ask this'}
+              onClick={() => offer(q)}>{q}</button>
           ))}
         </div>
       ) : null}

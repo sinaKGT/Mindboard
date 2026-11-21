@@ -48,12 +48,21 @@ practise next.
 Linux).
 
 The first run sets everything up: an isolated environment inside this folder,
-nothing installed system-wide. On a Mac it builds the interface too, so it
-needs Python 3.10+ and Node.js first (a Mac's own `python3` is 3.9):
+nothing installed system-wide, and the interface built from its source. It
+needs **Python 3.10+** and **Node.js** (for building the interface; not
+needed to run Mindboard). If Node.js is missing, the installer offers to
+install it - with winget on Windows, Homebrew on a Mac, your package manager
+on Linux. To install both yourself first:
 
 ```bash
-brew install python@3.12 node
+winget install Python.Python.3.12                     # Windows
+winget install OpenJS.NodeJS.LTS                      # Windows
+brew install python@3.12 node                         # macOS (its own python3 is 3.9)
+sudo apt-get install python3 nodejs npm               # Debian / Ubuntu
 ```
+
+Setting Mindboard up with an AI coding agent (Claude Code, Codex, Cursor)?
+Point it at [AGENTS.md](AGENTS.md).
 
 After that you get a menu:
 

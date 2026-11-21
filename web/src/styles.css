@@ -1886,3 +1886,20 @@ button.file-tab { padding: 5px 10px; gap: 5px; }
 }
 .tools-merged input { font-weight: 600; }
 .tools-merged input:focus, .tools-merged textarea:focus { outline: none; border-color: var(--mb-accent); }
+
+/* ---------------------------------------------------------------- tooltip -- */
+/* The app's own tooltip (DESIGN.md 73), in place of the browser's white box:
+   the floating-panel surface, small, after a short pause (tooltip.ts). */
+.mb-tip {
+  position: fixed; left: 0; top: 0; z-index: 10000; pointer-events: none;
+  max-width: 280px; padding: 5px 9px; border-radius: 8px;
+  font-size: 12px; line-height: 1.4; color: var(--mb-text);
+  background: var(--mb-surface-2); border: 1px solid var(--mb-border-strong);
+  box-shadow: var(--mb-shadow-lg); white-space: normal;
+  opacity: 0; visibility: hidden; transition: opacity 120ms var(--mb-ease, ease);
+}
+.mb-tip.on { opacity: 1; visibility: visible; }
+.mb-tip kbd {
+  margin-left: 8px; padding: 0 5px; border-radius: 4px; font: inherit; font-size: 11px;
+  color: var(--mb-text-dim); background: var(--mb-surface-3);
+}

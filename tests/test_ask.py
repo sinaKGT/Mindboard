@@ -221,6 +221,18 @@ def test_the_question_offered_next_comes_off_the_end():
     assert ask.split_next("Fine.\n**NEXT:** “What about wind?”") == ("Fine.", "What about wind?")
 
 
+def test_a_quiz_questions_choices_become_its_answers_to_pick():
+    # DESIGN.md 72: told to stop and wait, the model writes no NEXT lines
+    q = ("Ready for Question 1!\n\n**Which report is for the second visit?**\n"
+         "A) NTU_NCT_Second_Visit_Meeting_Report.docx\n**B)** David_Final.docx\n(c) First_Summary.docx\n\n"
+         "*(Take a moment to think...)*")
+    assert ask.choices(q) == ["A) NTU_NCT_Second_Visit_Meeting_Report.docx", "B) David_Final.docx",
+                              "C) First_Summary.docx"]
+    assert ask.choices("Plain answer.\nA) only one") == []
+    assert ask.choices("A) one\nB) two\n\n" + "A long answer after the list. " * 30) == []
+    assert ask.choices("A) one\nC) skips B") == []
+
+
 def test_only_a_last_line_is_an_offer():
     text = "Steps:\nNEXT: check the soil\nThen water it."
     assert ask.split_next(text) == (text, ""), "mid-answer, it is part of the answer"

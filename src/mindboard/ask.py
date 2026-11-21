@@ -911,6 +911,29 @@ def split_nexts(answer: str) -> tuple[str, list[str]]:
     return rest, [q for q in questions if q][:3]
 
 
+CHOICE = re.compile(r"^[ \t]*[*_]*\(?([A-Da-d])[).:][*_]*[ \t]+(.+?)[ \t]*$")
+CHOICES_TAIL = 400           # the choices must sit near the end, after the question
+
+
+def choices(answer: str) -> list[str]:
+    """The lettered choices a quiz question ends with - "A) ...", "B) ..." -
+    to offer as buttons when the model wrote no NEXT lines (DESIGN.md 72: told
+    to stop and wait for an answer, it never did). Only the last run of two to
+    four lines, close to the end; anything else gives none."""
+    lines = answer.rstrip().splitlines()
+    run: list[str] = []
+    for i in range(len(lines) - 1, -1, -1):
+        m = CHOICE.match(lines[i])
+        if m:
+            run.insert(0, f"{m.group(1).upper()}) {m.group(2).strip('*_ ').strip()}")
+        elif run:
+            break
+        elif lines[i].strip() and len("\n".join(lines[i:])) > CHOICES_TAIL:
+            return []
+    letters = [c[0] for c in run]
+    return run if 2 <= len(run) <= 4 and letters == list("ABCD"[:len(run)]) else []
+
+
 def split_next(answer: str) -> tuple[str, str]:
     """The answer, and the first question it offers next."""
     answer, questions = split_nexts(answer)
@@ -1010,9 +1033,11 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
             elif ev["type"] == "done":
                 timings = ev
     answer, questions = split_nexts("".join(text))
+    picks = [] if questions else choices(answer)     # a quiz's question: its choices to tap
     next_question = questions[0] if questions else ""
     result = check_citations(answer, set(ctx.cards))
-    yield {"event": "done", **result, "next": next_question, "nexts": questions,
+    yield {"event": "done", **result, "next": next_question, "nexts": questions or picks,
+           "choices": bool(picks),
            "stopped": bool(timings.get("stopped")),
            "tokens_per_second": timings.get("tokens_per_second")}
 
