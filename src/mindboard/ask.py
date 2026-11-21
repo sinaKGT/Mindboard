@@ -36,12 +36,19 @@ THINKING_TOKENS = 8192
 # (DESIGN.md 35). Cards chosen by hand always bring all their pictures.
 SEARCH_PICTURE_TOKENS = 2000
 BEYOND = "Beyond your board:"
-EXPLAIN = ("Explain more: I want a full explanation, not only what the cards say. Explain "
-           "it step by step, in plain words. Where the cards and our conversation fall "
-           "short, explain from your own knowledge - do not answer that the cards cannot "
-           "explain it. Give one or two concrete examples that make it clear. Cite cards for "
-           f"what comes from them, and put what comes from your own knowledge after the line "
-           f"\"{BEYOND}\". Finish with the {'NEXT:'} line as always.")
+# DESIGN.md 80: asked for "two examples", the answer opened with a paragraph
+# saying the cards had none, and cited cards beside examples it made up itself
+EXPLAIN = ("Explain more: I want a full explanation, not only what the cards say - explain "
+           "step by step, in plain words, and give what I ask for (examples, an analogy, more "
+           "detail; one or two concrete examples if I name nothing). Cite a card only for what "
+           "that card itself says. Everything else - examples, analogies, how such things "
+           f"usually work - is your own knowledge: put it after the line \"{BEYOND}\", cite "
+           "nothing there and do not tie it to a card. Before that line, only what the cards "
+           "say that answers me - never claim a card says more than it does. If the cards "
+           "hold nothing that answers me, do not say what they lack and do not repeat them: "
+           "start the answer with that line - the page marks it as beyond the board. "
+           "Say plainly when you are unsure, and do not make up names, places or figures. "
+           "Finish with the NEXT: lines as always.")
 # the model sometimes dresses the line up - **Beyond your board:**, a heading -
 # and the split then left the stray ** on both sides of it
 BEYOND_MARK = re.compile(r"(?:^[ \t]*#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*Beyond your board:[ \t]*"
@@ -837,9 +844,10 @@ def _conversation(msgs: list[dict], ctx: Context, question: str, history: list[d
         if turn.get("role") in ("user", "assistant") and str(turn.get("text", "")).strip():
             msgs.append({"role": turn["role"], "content": str(turn["text"])})
     # Explain more asks for a fuller answer; said with the question, not in
-    # the system prompt, so the start of the prompt - and its cache - stay put
-    asked = (question.strip() + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")
-             + weighing(ctx.reading) + ctx.task_note + dates_note(ctx, question))
+    # the system prompt, so the start of the prompt - and its cache - stay put;
+    # and said last, so no note after it pulls the other way (DESIGN.md 80)
+    asked = (question.strip() + weighing(ctx.reading) + ctx.task_note + dates_note(ctx, question)
+             + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else ""))
     if ctx.attached:
         # pasted pictures go with the newest question, after the cards, so the
         # start of the prompt - and what llama-server has cached - stays put
@@ -965,7 +973,14 @@ def check_citations(answer: str, allowed: set[str]) -> dict:
     # in single brackets: read it as the citation it is meant to be
     answer = LONE_ID.sub(r"[[\1]]", BEYOND_MARK.sub(BEYOND, MD_IMAGE.sub("", answer)))
     answer = re.sub(r"\n{3,}", "\n\n", answer)
-    clean = CITE.sub(keep, answer)
+    board, mark, beyond = answer.partition(BEYOND)
+    # DESIGN.md 80: what comes after the line is the model's own knowledge -
+    # a card cited there would pass it off as the person's; and a Beyond part
+    # that is only "None" is no Beyond part
+    beyond = CITE.sub("", beyond)
+    if re.fullmatch(r"\s*(?:none|n/a|nothing)\.?\s*", beyond, re.IGNORECASE):
+        mark = beyond = ""
+    clean = CITE.sub(keep, board + mark + beyond)
     clean = re.sub(r"[ \t]+([.,;:])", r"\1", clean)
     board, _, beyond = clean.partition(BEYOND)
     return {"answer": clean.strip(), "board": board.strip(), "beyond": beyond.strip(),

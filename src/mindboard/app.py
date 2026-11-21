@@ -554,8 +554,9 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 finally:
                     indexer.want(bid)
                 got.attached = pics
-                yield from tasks_mod.run(model, got, body.question, history,
-                                         board_tools(model, bid, pics))
+                if got.mode != "explain":
+                    yield from tasks_mod.run(model, got, body.question, history,
+                                             board_tools(model, bid, pics))
                 yield from answer_events(model, got, question, history, body.think, hold=False)
 
             return stream_answer(model, with_pictures, warning, request,
@@ -565,9 +566,13 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             # the request understood and its steps done first (DESIGN.md 66);
             # held for the whole answer, its loop fallback included; a question
             # asked while a picture is being described waits its turn (60)
-            tools = own_tools(model, ctx.attached) if ctx.mode == "own" \
-                else board_tools(model, bid, ctx.attached)
-            yield from tasks_mod.run(model, ctx, body.question, history, tools, known=body.task)
+            # Explain more is not read first (DESIGN.md 80): its steps searched
+            # the board it means not to search, and "two examples" read as a
+            # list to extract opened the answer with "the cards have none"
+            if ctx.mode != "explain":
+                tools = own_tools(model, ctx.attached) if ctx.mode == "own" \
+                    else board_tools(model, bid, ctx.attached)
+                yield from tasks_mod.run(model, ctx, body.question, history, tools, known=body.task)
             yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
 
         return stream_answer(model, understood, warning, request, after=lambda: indexer.want(bid), hold=True)

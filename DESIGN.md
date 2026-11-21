@@ -4017,3 +4017,68 @@ on the way and fixed: a first try ran a label's items into each other
 semicolon; and the model once made Nigel's whole "Role: ..." line a heading.
 
 299 tests.
+
+## 80. Explain more gives what it is asked for, and never cites a card for it (2026-11-21)
+
+Asked for "two examples" with Explain more on, the answer said the cards did
+not have them. Checked with the real model on *SWIFT Lab Visitors*, after "What
+is the Nottingham Digital Twin?", with the three cards that answer cited kept.
+It did give examples in every run, but:
+
+- **The request was read as a list to extract.** The task planner (§66) still
+  ran in Explain more, and took "give me two examples" as *extract* in 4 runs
+  of 4. That shape says "say plainly if some could not be found", and it was
+  said *after* the Explain more instruction, so it won: every answer opened
+  with a paragraph on what the cards lack. On "examples of how other cities
+  use a digital twin" its steps searched the board three times (9 s), the
+  board Explain more is meant not to search, and found nothing.
+- **Made-up examples cited cards.** In 4 runs of 5 the examples after
+  "Beyond your board:" carried a card citation, which passes the model's own
+  knowledge off as the person's notes. One named a city project that likely
+  does not exist ("Phoenix One").
+
+Done:
+
+- **Explain more is not planned.** No task, no steps: the request goes
+  straight to the answer (`app.py`, both the plain and the pasted-picture
+  path). The page already copes when the task events are absent.
+- **The Explain more instruction is said last**, after the step notes and
+  the dates, so nothing after it pulls the other way. It now says: give what
+  is asked for (examples, an analogy, detail); cite a card only for what that
+  card itself says; everything else goes after the line and cites nothing;
+  before the line only what the cards say that answers the question - never
+  claim a card says more; when they hold nothing, start with the line rather
+  than say what they lack; do not make up names, places or figures.
+- **Citations after the line are taken out** in `check_citations`, for every
+  kind of answer: the system prompt already said "cite nothing there", and the
+  model did not always keep to it. They are not counted as invented sources.
+  A Beyond part that is only "None" (seen in a plain answer on the same
+  board) is left out.
+
+Three wordings were tried, each on the same six questions the board cannot
+answer (two examples, twice; other cities; an analogy; a real-world use; how
+the data gets in):
+
+| wording | opens with what the cards lack | cites in Beyond (before removal) | board facts made up |
+|---|---|---|---|
+| "say so in one short sentence at most" | 6 of 6, two or three sentences | 0 | 0 |
+| "never say what the cards lack" | 2 of 6 | 4 | 1 (an EMCCA use, cited) |
+| kept: "only what the cards say ... start with the line" | 5 of 6, one or two sentences | 1 | 0 |
+
+The second cut the opening line but pushed the model to fill the part before
+the line by restating the cards, and once it invented what the EMCCA uses the
+twin for and cited a card for it. That is worse than a line saying the cards
+do not cover it, so the third was kept. A question the cards do answer ("Who
+visited from the EMCCA?") still came back from the cards, cited. Answers
+took 3-12 s with no planning (the planner alone took 1.4-1.9 s before).
+Checked in the app: the Explain more turn shows no task chip, and the
+examples sit under "Beyond your board".
+
+Not done: the short opening about what the cards lack remains in most
+answers. It comes from rule 3 of the system prompt ("if the cards do not
+answer the question, say so plainly first"), which every board answer
+shares. Changing it is a decision for the owner. The exact failure first
+reported (a refusal with no examples at all) did not happen in 24 runs
+today (5 before the change, 19 after).
+
+303 tests.
