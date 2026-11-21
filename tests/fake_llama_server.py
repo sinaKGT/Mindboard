@@ -6,6 +6,7 @@ Not a test module - pytest only collects test_*.py.
 
 import argparse
 import json
+import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -155,6 +156,15 @@ class Handler(BaseHTTPRequestHandler):
             # a quiz question as data (DESIGN.md 77)
             text = ('{"question": "What is the best angle at?", "choices": ["4 m", "9 m", "1 m"], '
                     '"answer": 0, "why": "The card says best angle at 4 m."}')
+        if isinstance(system, str) and system.startswith("You lay out an answer as a table"):
+            # an answer as a table (DESIGN.md 85): its first citation on the
+            # first row, and a row of words the answer never said
+            asked = str(body["messages"][-1]["content"])
+            cited = re.findall(r"\[\[[0-9A-Za-z]{26}\]\]", asked)
+            text = json.dumps({"columns": ["Thing", "Detail"], "rows": [
+                [f"Corner mount {cited[0] if cited else ''}".strip(), "best"],
+                ["Wind load", "Consider"],
+                ["Zeppelin hangar", "Lisbon"]]})
         if isinstance(system, str) and system.startswith("You merge several cards"):
             # merging cards into one (DESIGN.md 72), as JSON
             text = '{"title": "Merged", "text": "Best angle at 4 m, and the range is 100 m."}'

@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { AnswerFiles, filesToOffer } from './AnswerFiles'
 import { AnswerPictures, picturesToShow } from './AnswerPictures'
-import { askable, cardsInside, hasNumbers, revealCard, useAsk, type Turn } from './askStore'
+import { askable, cardsInside, hasNumbers, revealCard, tablePart, tableable, useAsk, type Turn } from './askStore'
 import { Calculated, FileStrip, FileTabs, PagesUsed, pageLink } from './FileBranch'
 import { stepLine, TaskSteps } from './TaskSteps'
 import { Icon } from './icons'
@@ -156,8 +156,11 @@ function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; 
       .filter((t) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done'))
       .slice(-6).map((t) => ({ role: t.role, text: t.text }))
     const cited = (turn.cited ?? []).filter((id) => nodes[id])
-    api.askDraft(boardId, { question, answer: turn.text, cited, candidates, history })
-      .then((draft) => place(draft))
+    // a table shown in the answer's place (DESIGN.md 85) is what goes on the card
+    const table = turn.table?.status === 'done' && turn.table.shown ? tableForCard(turn.table.table ?? '') : ''
+    api.askDraft(boardId, { question, answer: table || turn.text, cited, candidates, history })
+      // the drafter titles what is new, which a table is not: the question names it
+      .then((draft) => place(table ? { ...draft, title: question.trim().replace(/[?.!]+$/, ''), text: table } : draft))
       .catch((e) => setError(e.message || 'could not draft the card'))
     // drafted once, when asked for
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,6 +198,51 @@ function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; 
 
   if (error) return <div className="ask-error">{error}</div>
   return <div className="ask-note">Finding what is new here, and where it belongs on your board…</div>
+}
+
+/** a table as a card's text: no citation chips, which a card does not draw,
+ *  and no "Also from" line, which only names them */
+const tableForCard = (table: string) =>
+  table.replace(/\n+Also from:.*$/s, '').replace(/\s*\[\[[0-9A-Za-z]{26}\]\]/g, '').trim()
+
+/** Make a table (DESIGN.md 85): under an answer, its own words laid out as
+ *  rows and columns, shown in its place; "Show as written" brings it back. */
+function TableButton({ turn, index }: { turn: Turn; index: number }) {
+  const busy = useAsk((s) => s.busy)
+  const t = turn.table
+  if (t?.status === 'done') {
+    return (
+      <button className="ask-check" onClick={() => useAsk.getState().showTable(index, !t.shown)}>
+        <Icon name={t.shown ? 'type' : 'table'} size={11} /> {t.shown ? 'Show as written' : 'Show as a table'}
+      </button>
+    )
+  }
+  if (t?.status === 'making' || t?.status === 'none') return null
+  if (!tableable(tablePart(turn.text).text)) return null
+  return (
+    <button className="ask-check" disabled={busy}
+      title="Lay this answer out as rows and columns, from its own words"
+      onClick={() => void useAsk.getState().makeTable(index)}>
+      <Icon name="table" size={11} /> {t?.status === 'failed' || t?.status === 'stopped' ? 'Try the table again' : 'Make a table'}
+    </button>
+  )
+}
+
+/** what Make a table said, under the answer */
+function TableNote({ turn }: { turn: Turn }) {
+  const t = turn.table
+  if (!t) return null
+  if (t.status === 'making') return <div className="ask-status checking">Laying it out as a table…</div>
+  if (t.status === 'stopped') return <div className="ask-note">Table stopped.</div>
+  if (t.status === 'failed') return <div className="ask-error">{t.note || 'Could not make a table.'}</div>
+  if (t.status === 'none') return <div className="ask-note">{t.note}</div>
+  if (!t.shown) return null
+  return (
+    <div className="ask-note">
+      Laid out from the answer as written — nothing added.
+      {t.blanked ? ` ${t.blanked} cell${t.blanked === 1 ? '' : 's'} the answer does not say ${t.blanked === 1 ? 'was' : 'were'} left out.` : ''}
+    </div>
+  )
 }
 
 /** Double check (DESIGN.md 82): under an answer about a file that has a
@@ -254,8 +302,14 @@ function Answer({ turn, offer, question, index }: {
   const text = (turn.status === 'done' ? shown : hideNext(shown))
     .replace(BEYOND_MARK, BEYOND)
   const at = text.indexOf(BEYOND)
-  const board = at >= 0 ? text.slice(0, at) : text
-  const beyond = at >= 0 ? text.slice(at + BEYOND.length) : ''
+  let board = at >= 0 ? text.slice(0, at) : text
+  let beyond = at >= 0 ? text.slice(at + BEYOND.length) : ''
+  // Make a table (DESIGN.md 85): the table in place of the part it lays out
+  const tbl = turn.table
+  if (tbl?.status === 'done' && tbl.shown && tbl.table) {
+    if (tbl.part === 'beyond') beyond = tbl.table
+    else board = tbl.table
+  }
   return (
     <div className="turn answer">
       {turn.warning ? <div className="ask-warn">{turn.warning}</div> : null}
@@ -284,6 +338,7 @@ function Answer({ turn, offer, question, index }: {
       {turn.status === 'writing' ? <span className="caret" /> : null}
       {turn.status === 'done' && !fromFile ? <><CitedPictures turn={turn} /><OfferedFiles turn={turn} /></> : null}
       {fromFile ? <><Calculated turn={turn} /><CheckBox turn={turn} /><PagesUsed turn={turn} branch={branch} /></> : null}
+      <TableNote turn={turn} />
       {turn.error ? <div className="ask-error">{turn.error}</div> : null}
       {turn.status === 'stopped' ? <div className="ask-note">Stopped.</div> : null}
       {turn.mode === 'search' && turn.status && ['done', 'stopped'].includes(turn.status) ? (
@@ -313,6 +368,7 @@ function Answer({ turn, offer, question, index }: {
               <button className="ask-add" onClick={() => setAdding(true)}>
                 <Icon name="plus" size={11} /> Add to board
               </button>
+              <TableButton turn={turn} index={index} />
               {fromFile ? <CheckButton turn={turn} index={index} /> : null}
             </div>
       ) : null}

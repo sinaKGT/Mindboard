@@ -804,6 +804,89 @@ def test_beautify_route_writes_nothing(client, board, cards):
     assert client.get(f"/api/boards/{board['id']}/graph", headers=h).json()["revision"] == before["revision"]
 
 
+# ---------------------------------------------------- an answer as a table --
+
+VISITORS = ("Three people visited: Dr A. Patel from the EMCCA on 12 March [[" + "A" * 26 + "]], "
+            "J. Okafor from Nottingham City Council on 3 April [[" + "B" * 26 + "]], and L. Chen "
+            "from the BGS [[" + "C" * 26 + "]].\nNEXT: Who came first?")
+
+
+def test_an_answer_becomes_a_table_of_its_own_words():
+    """DESIGN.md 85: cells the answer does not hold are blanked, citations it
+    did not make are dropped, and it writes the markdown itself."""
+    import json as js
+    a, b, c = "A" * 26, "B" * 26, "C" * 26
+    model = DraftModel(js.dumps({"columns": ["Visitor", "From", "Date", "x" * 300], "rows": [
+        [f"Dr A. Patel [[{a}]]", "EMCCA", "12 March"],
+        [f"J. Okafor [[{b}]]", "Nottingham Council", "3 April", "extra cell", "and another"],
+        [f"L. Chen [[{c}]] [[{'Z' * 26}]]", "British Geological Survey", "7 May"],
+        "junk", ["", "", ""]]}))
+    got = ask.answer_table(model, VISITORS)
+    lines = got["table"].split("\n")
+    assert lines[0] == "| Visitor | From | Date |", "a column left with nothing in it goes"
+    assert lines[1] == "|---|---|---|"
+    assert lines[2] == f"| Dr A. Patel [[{a}]] | EMCCA | 12 March |"
+    assert lines[3] == f"| J. Okafor [[{b}]] | Nottingham Council | 3 April |", "a shortened name stays"
+    assert lines[4] == f"| L. Chen [[{c}]] | — | — |", "a name and a date it never said are blanked"
+    assert got["rows"] == 3 and got["blanked"] == 3 and got["note"] == ""
+    assert "Use only what the answer says" in model.asked[0][0]["content"]
+    assert "NEXT" not in model.asked[0][1]["content"]
+
+
+def test_a_table_shows_every_source_of_the_answer_and_says_when_there_are_no_rows():
+    import json as js
+    a, b = "A" * 26, "B" * 26
+    model = DraftModel(js.dumps({"columns": ["Visitor", "From"], "rows": [
+        ["Dr A. Patel", "EMCCA"], ["J. Okafor", "Nottingham City Council (p. 3) (p. 9)"]]}))
+    got = ask.answer_table(model, VISITORS.replace(".\nNEXT", ", as on (p. 3).\nNEXT"))
+    assert "(p. 3)" in got["table"] and "(p. 9)" not in got["table"], "a page it did not cite is dropped"
+    assert got["table"].endswith(f"Also from: [[{a}]] [[{b}]] [[{'C' * 26}]]")
+    one = ask.answer_table(DraftModel('{"columns": [], "rows": []}'), "The mount goes on the corner.")
+    assert one["table"] == "" and one["note"] == ask.NO_ROWS
+    single = DraftModel(js.dumps({"columns": ["A", "B"], "rows": [["Dr A. Patel", "EMCCA"]]}))
+    assert ask.answer_table(single, VISITORS)["note"] == ask.NO_ROWS
+    assert ask.answer_table(DraftModel("not json"), VISITORS)["note"] == ask.NOT_MADE
+    sums = DraftModel(js.dumps({"columns": ["Who", "Visits"], "rows": [["Patel", "12"], ["Okafor", "3"]]}))
+    assert "Okafor | —" in ask.answer_table(sums, "Patel visited 12 times; Okafor came too.")["table"]
+
+
+def test_a_column_of_citations_alone_goes_beside_what_it_names():
+    """DESIGN.md 85: the real model made a "Citation" column."""
+    import json as js
+    a, b = "A" * 26, "B" * 26
+    model = DraftModel(js.dumps({"columns": ["Visitor", "From", "Citation"], "rows": [
+        ["Dr A. Patel", "EMCCA", f"[[{a}]]"], ["J. Okafor", "Nottingham City Council", f"[[{b}]]"]]}))
+    lines = ask.answer_table(model, VISITORS)["table"].split("\n")
+    assert lines[:4] == ["| Visitor | From |", "|---|---|", f"| Dr A. Patel [[{a}]] | EMCCA |",
+                         f"| J. Okafor [[{b}]] | Nottingham City Council |"]
+
+
+def test_no_table_of_rows_that_name_the_same_thing():
+    """DESIGN.md 85: asked what something is, the real model tabled what the
+    cards lack, every row headed "Cards"."""
+    import json as js
+    answer = ("The cards list visitors who saw the twin [[" + "A" * 26 + "]]. They do not contain "
+              "the definition, the technical explanation or the operational details.")
+    model = DraftModel(js.dumps({"columns": ["Item", "Content"], "rows": [
+        [f"Cards [[{'A' * 26}]]", "list visitors who saw the twin"], ["Cards", "do not contain the definition"],
+        ["Cards", "do not contain the technical explanation"], ["Cards", "do not contain the operational details"]]}))
+    assert ask.answer_table(model, answer) == {"table": "", "rows": 0, "blanked": 0, "note": ask.NO_ROWS}
+
+
+def test_table_route_writes_nothing(client, board, cards, model):
+    h = {"X-Mindboard-Token": TOKEN}
+    before = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    mount = cards["mount"]
+    res = client.post(f"/api/boards/{board['id']}/table", headers=h,
+                      json={"answer": f"The corner mount is best [[{mount}]].\nBeyond your board:\nConsider wind load."})
+    assert res.status_code == 200, res.text
+    got = res.json()
+    assert got["note"] == "", got
+    assert got["table"].split("\n")[2:] == [f"| Corner mount [[{mount}]] | best |", "| Wind load | Consider |"]
+    assert got["blanked"] == 2 and got["rows"] == 2
+    assert client.get(f"/api/boards/{board['id']}/graph", headers=h).json()["revision"] == before["revision"]
+
+
 def test_quiz_route_gives_a_question(client, board, cards):
     h = {"X-Mindboard-Token": TOKEN}
     res = client.post(f"/api/boards/{board['id']}/cards/quiz", headers=h, json={"ids": [cards["mount"]]})

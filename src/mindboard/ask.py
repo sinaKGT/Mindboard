@@ -1707,3 +1707,135 @@ def describe_picture(model, dd: DataDir, conn: sqlite3.Connection, bid: str, sha
         {"type": "image_url", "image_url": {"url": got[0]}}]}],
         max_tokens=DESCRIBE_TOKENS, think=False, temperature=0.2)
     return " ".join(str(reply.get("text") or "").split())[:DESCRIBE_CHARS]
+
+
+# ---------------------------------------------------- an answer as a table --
+# DESIGN.md 85: "Make a table" under an answer. The model lays the answer's
+# own words out as rows and columns, as data; the code checks every cell
+# against the answer, keeps only the answer's own citations, and writes the
+# markdown table itself. No search, no cards: nothing can come in that the
+# answer did not say.
+
+TABLE_SYSTEM = """You lay out an answer as a table, as structured data.
+
+Reply with JSON only, no other text:
+{"columns": ["...", "..."], "rows": [["...", "..."]]}
+
+- Use only what the answer says, in its own words. Add nothing, work nothing
+  out, and do not total, count or average anything.
+- One row for each thing the answer describes; one column for each kind of
+  detail it gives about them. The first column names the thing.
+- 2 to 6 columns. Column names: a few plain words each.
+- Copy citations exactly as written - [[...]] or (p. 12) - into the cell whose
+  fact they support, most often the first cell of the row.
+- A detail the answer does not give for a row: leave its cell "".
+- Each row is a different thing the answer describes. Never make rows of
+  what the answer says is missing or not covered.
+- If the answer describes only one thing, or nothing that fits rows, reply
+  {"columns": [], "rows": []}."""
+
+TABLE_CHARS = 8000          # of the answer the model reads
+TABLE_SECONDS = 90.0        # one reply; past this it is hung up (CLAUDE.md rule 5)
+TABLE_COLUMNS = (2, 6)
+TABLE_ROWS = 40
+TABLE_CELL = 200            # characters a cell keeps
+TABLE_WORDS_KEPT = 0.6      # share of a cell's words the answer must have
+TABLE_DISTINCT = 0.6        # share of rows whose first cells must differ
+PAGE_CITE = re.compile(r"\((?:p|pp)\.\s?\d{1,4}(?:\s?[-–]\s?\d{1,4})?\)")
+_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+_WORD = re.compile(r"[^\W\d_]{3,}")
+NO_ROWS = "This answer doesn't have rows to compare."
+NOT_MADE = "Couldn't make a table this time - try again."
+
+
+def _stem(word: str) -> str:
+    w = word.lower()
+    return w[:-1] if len(w) > 3 and w.endswith("s") else w
+
+
+def _numbers(text: str) -> set[str]:
+    return {n.replace(",", "") for n in _NUMBER.findall(text)}
+
+
+def _cell_holds(cell: str, numbers: set[str], words: set[str]) -> bool:
+    """Whether a cell says only what the answer says: every number written
+    in it, and most of its words - a cell may shorten ("Nottingham City
+    Council" to "Nottingham Council"), but not bring in a name of its own."""
+    said = PAGE_CITE.sub(" ", CITE.sub(" ", cell))
+    if not _numbers(said) <= numbers:
+        return False
+    mine = [_stem(w) for w in _WORD.findall(said)]
+    return not mine or sum(w in words for w in mine) / len(mine) >= TABLE_WORDS_KEPT
+
+
+def _cell(value) -> str:
+    return " ".join(_plain(value).replace("|", "/").split())[:TABLE_CELL]
+
+
+def answer_table(model, answer: str) -> dict:
+    """An answer's own words laid out as a table: {"table": markdown,
+    "rows", "blanked", "note"}. "table" is "" and "note" says why when the
+    answer has no rows to compare or the reply could not be used. Writes
+    nothing."""
+    text = NEXT_LINE.sub("", BEYOND_MARK.sub(BEYOND, answer or "")).strip()
+    if not text:
+        return {"table": "", "rows": 0, "blanked": 0, "note": NO_ROWS}
+    cites = set(CITE.findall(text))
+    pages = {" ".join(p.split()) for p in PAGE_CITE.findall(text)}
+    plain = PAGE_CITE.sub(" ", CITE.sub(" ", text))
+    numbers, words = _numbers(plain), {_stem(w) for w in _WORD.findall(plain)}
+    try:
+        reply = model.chat([{"role": "system", "content": TABLE_SYSTEM},
+                            {"role": "user", "content": f"ANSWER\n{text[:TABLE_CHARS]}"}],
+                           max_tokens=2000, think=False, temperature=0.1, timeout=TABLE_SECONDS)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception as exc:
+        log.warning("a table could not be made: %s", exc)
+        return {"table": "", "rows": 0, "blanked": 0, "note": NOT_MADE}
+    if not isinstance(got, dict):
+        return {"table": "", "rows": 0, "blanked": 0, "note": NOT_MADE}
+    columns = [_cell(c) for c in (got.get("columns") or []) if isinstance(c, (str, int, float))]
+    columns = [c for c in columns if c][:TABLE_COLUMNS[1]]
+    if len(columns) < TABLE_COLUMNS[0]:
+        return {"table": "", "rows": 0, "blanked": 0, "note": NO_ROWS}
+
+    def keep_cites(cell: str) -> str:
+        # only the answer's own sources: a citation it did not make is dropped
+        cell = CITE.sub(lambda m: m.group(0) if m.group(1) in cites else "", cell)
+        cell = PAGE_CITE.sub(lambda m: m.group(0) if " ".join(m.group(0).split()) in pages else "", cell)
+        return " ".join(cell.split())
+
+    rows, blanked = [], 0
+    for row in (got.get("rows") or [])[:TABLE_ROWS]:
+        if not isinstance(row, list):
+            continue
+        cells = [keep_cites(_cell(c)) for c in row[:len(columns)]]
+        cells += [""] * (len(columns) - len(cells))
+        for i, c in enumerate(cells):
+            if c and not _cell_holds(c, numbers, words):
+                cells[i], blanked = "", blanked + 1
+        if any(PAGE_CITE.sub("", CITE.sub("", c)).strip() for c in cells):
+            rows.append(cells)
+    # a column of citations alone (the real model made one, "Citation") goes
+    # into the row's first cell, beside what it names
+    for i in range(len(columns) - 1, 0, -1):
+        if len(columns) > TABLE_COLUMNS[0] and all(not PAGE_CITE.sub("", CITE.sub("", r[i])).strip() for r in rows):
+            for r in rows:
+                r[0] = " ".join(f"{r[0]} {r[i]}".split())
+                del r[i]
+            del columns[i]
+    # rows must name different things: asked what something is, the real
+    # model tabled what the cards lack - "Cards | Do not contain ..." four times
+    named = [PAGE_CITE.sub("", CITE.sub("", r[0])).strip().lower() for r in rows]
+    if len(rows) < 2 or len({n for n in named if n}) < max(2, len(rows) * TABLE_DISTINCT):
+        return {"table": "", "rows": 0, "blanked": blanked, "note": NO_ROWS}
+    # a source of the answer that no cell carries is still shown, under the table
+    shown = " ".join(" ".join(r) for r in rows)
+    lost = [i for i in dict.fromkeys(CITE.findall(text)) if f"[[{i}]]" not in shown]
+    lost += [p for p in dict.fromkeys(" ".join(p.split()) for p in PAGE_CITE.findall(text)) if p not in shown]
+    lines = ["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
+    lines += ["| " + " | ".join(c or "—" for c in r) + " |" for r in rows]
+    table = "\n".join(lines)
+    if lost:
+        table += "\n\nAlso from: " + " ".join(c if c.startswith("(") else "[[" + c + "]]" for c in lost)
+    return {"table": table, "rows": len(rows), "blanked": blanked, "note": ""}

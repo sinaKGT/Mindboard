@@ -4309,3 +4309,63 @@ Not done: titles typed with asterisks on purpose are drawn without them
 too; the search index and what the model reads keep the title as written.
 
 356 tests.
+
+## 85. Make a table: an answer's own words as rows and columns (2026-11-21)
+
+Answers were prose or lists, and the system prompt says "no tables". The
+owner asked for a button under an answer that rewrites it as a table, in its
+own model step. Of three directions shown (the table in place of the answer,
+in a box under it, as a new turn), the owner chose in place.
+
+- **The button** sits under a finished answer beside Add to board: *Make a
+  table*. It shows when the part to lay out is 60 characters or more and is
+  not a table already. The part is what the board says; when there is
+  nothing before the Beyond line, what is beyond it. The other part stays
+  as it was, under its own heading.
+- **The step** (`ask.answer_table`, `POST /api/boards/{bid}/table`) takes the
+  question slot like Beautify, reads only the answer it is sent - no search,
+  no cards - and writes nothing. The model replies with columns and rows as
+  JSON; 90 s, then it is hung up.
+- **The code checks every cell against the answer.** Every number in a cell
+  must be written in the answer, and 60% of its words (three letters or more,
+  a plural's s taken off), so a cell may shorten "Nottingham City Council"
+  but not bring in a name, a date or a total of its own; a cell that fails is
+  left empty ("—"). Only the answer's own citations are kept, card and page.
+  A source of the answer no cell carries is listed under the table ("Also
+  from: ..."), so no citation is lost. A column left with nothing in it goes,
+  and a column of citations alone goes into the row's first cell. Fewer than
+  two rows, or rows whose first cells mostly repeat, is no table: the page
+  says "This answer doesn't have rows to compare." The markdown is written
+  by the code, from the checked cells.
+- **In place**: the table replaces the part it lays out; *Show as written*
+  brings the answer back, *Show as a table* the table. A note says it was
+  laid out from the answer as written, and how many cells were left out. The
+  table is kept with the conversation and survives a reload. Double check
+  (§82) clears it, since its numbers may have changed.
+- **Add to board takes the table**: with the table shown, the card's text is
+  the table (citations taken off - a card does not draw them) and its title
+  is the question. The drafter still picks the card it belongs with.
+
+With the real model on *SWIFT Lab Visitors*: visitors from the EMCCA and the
+university with their roles gave a 7-row table (Visitor, Organization,
+Role - the model's own spelling) in 6 s; every visit with its date, 7 rows, with 7 cells
+it could not hold to the answer left out (a column of purposes, dropped
+whole); organisations and dates, 7 rows in 5 s. Asked "What is the
+Nottingham Digital Twin?", the first version tabled what the cards lack -
+"Cards | Do not contain the definition" four times. The prompt now says each
+row is a different thing and never what is missing, and the code refuses
+rows that repeat; after that, the same question twice and "Who is Michael
+Gallagher?" all said no rows to compare, in 2-3 s. The first real table also
+put its citations in a column of their own ("Citation"); they now go beside
+what they name. Add to board first titled the table's card from the
+conversation ("Real-time urban simulation capabilities"), since the drafter
+names what is new; it now takes the question.
+
+Not done: the model may still choose no table for an answer that has rows,
+and say so; the board's answers are not offered tables on their own (the
+system prompt's "no tables" stays); a cell's words are checked as words,
+not as facts - "Nottingham" from one sentence beside "Derby" from another
+would pass if both are in the answer; answers in a file conversation get the
+button too but were not checked with the real model.
+
+361 tests.
