@@ -4082,3 +4082,42 @@ reported (a refusal with no examples at all) did not happen in 24 runs
 today (5 before the change, 19 after).
 
 303 tests.
+
+## 81. Explain more drops "the cards do not cover it" (2026-11-21)
+
+After §80 most Explain more answers still opened with a sentence or two on
+what the cards lack ("The cards provided do not contain examples... They
+only list visitors"). The owner chose to drop it: the page already marks
+what is beyond the board.
+
+- **Telling the model was not enough.** The Explain more instruction now
+  says by number that rule 3 of the system prompt does not apply, and never
+  to write that the cards do not contain, describe or cover something. On
+  the six questions of §80, 4 answers of 6 still opened that way. The system
+  prompt itself is left as it is: it is shared by every board answer, and
+  its start is what llama-server keeps cached.
+- **So it is done in code** (`ask.without_lack`), for Explain more answers
+  only, before the Beyond line only, and only when there is a Beyond part to
+  read instead. A sentence goes when it says the cards, notes, board or
+  "they" do not contain / describe / list / mention ... something, only list
+  / identify / mention ..., or have no specific / concrete ... examples or
+  details; or when it opens "there is no". An opening "Based on the cards
+  provided," is taken off a sentence that stays. Lines and list items are
+  kept as they were. If nothing is left before the line, the answer starts
+  with it, and the page shows only the *Beyond your board* part.
+
+Measured on the same seven questions (the six of §80 and "Who visited from
+the EMCCA?"): the model opened with what the cards lack in 2 of 6, both
+dropped, so 0 of 6 answers show it; those two start with Beyond your board.
+Every sentence that said what the cards hold stayed, in the other four and
+in the EMCCA answer. Unit tests use the sentences the model actually wrote.
+Checked in the app: asked for examples from other cities, the answer opens
+with Beyond your board and nothing above it.
+
+Not done: the line is still seen while the answer streams, and goes when it
+ends (the page shows the checked answer then). Ordinary answers keep rule 3.
+In Explain more the part before the line sometimes says a little more than
+its card ("allows users to analyse real-time data", cited, where the card
+names the domains only) - put on TODO.md.
+
+309 tests.

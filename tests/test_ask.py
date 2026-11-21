@@ -499,7 +499,37 @@ def test_explain_more_is_said_last_with_the_question(dd, board, cards):
     ctx.task_note = "\n\n(say plainly if some could not be found)"
     asked = ask.messages(ctx, "give me two examples", [])[-1]["content"]
     assert asked.endswith(f"({ask.EXPLAIN})") and asked.index("could not be found") < asked.index(ask.EXPLAIN)
-    assert "cite nothing there" in ask.EXPLAIN and "do not say what they lack" in ask.EXPLAIN
+    assert "cite nothing there" in ask.EXPLAIN and "Rule 3 does not apply" in ask.EXPLAIN
+
+
+B = "Beyond your board:\nA flood model, say."
+ID = "01M76XQDBKCQMQRNJ3Z31WD14R"
+
+
+@pytest.mark.parametrize("opening", [
+    # what the real model wrote, DESIGN.md 80
+    f"Based on the cards provided, there are no specific examples of the Nottingham Digital Twin's "
+    f"features listed. The cards only identify the project as a digital representation [[{ID}]].",
+    f"The cards provided do not contain a definition, description, or examples of what the twin is. "
+    f"They only list names of visitors and a report title [[{ID}]].",
+    f"Your board lists visitors to the SWIFT Lab, but it does not contain examples of how other "
+    f"cities use digital twins [[{ID}]].",
+    "Your cards do not contain information on how data gets into the twin.",
+    "However, there is no description of the pipeline.",
+])
+def test_explain_more_drops_what_the_cards_lack(opening):
+    assert ask.without_lack(f"{opening}\n\n{B}") == B
+
+
+def test_explain_more_keeps_what_the_cards_say():
+    kept = (f"Michael Gallagher visited on 19 October 2026 [[{ID}]]. His email address is not "
+            f"published on the record [[{ID}]].\n- He leads climate resilience.\n- 2 visits.")
+    assert ask.without_lack(f"{kept}\n\n{B}") == f"{kept}\n\n{B}", "facts, and the list, stay"
+    got = ask.without_lack(f"Based on the cards provided, the twin is a model of Nottingham [[{ID}]]. "
+                           f"The cards do not describe its data.\n\n{B}")
+    assert got == f"The twin is a model of Nottingham [[{ID}]].\n\n{B}"
+    alone = "The cards do not contain examples."
+    assert ask.without_lack(alone) == alone, "with no Beyond part, it is all there is to say"
 
 
 def test_explain_more_is_not_read_first_nor_its_steps_run(client, board, cards, model):

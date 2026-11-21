@@ -5,18 +5,18 @@ asked, what was decided, and what done looks like.
 Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
 (§72), Node.js in the installers and AGENTS.md (§74), card AI in a panel
 with a quiz as data, soft glass cards and Beautify (§75-79); all merged into
-main (PR #4); Explain more gives what it is asked for (§80); next: the rest
-of C.
+main (PR #4); Explain more gives what it is asked for, with no "the cards
+do not cover it" line (§80-81); next: the rest of C.
 
 ---
 
 ## C. Answers
 
-- **The "cards do not cover it" opening line** (from §80). Explain more now
-  gives the examples every time, under Beyond your board, but most answers
-  still open with a sentence on what the cards lack - from rule 3 of the
-  system prompt, shared by every board answer. To decide: keep it (it is
-  true and short), or let Explain more answers skip it.
+- **Board parts that say a little more than the card** (seen in §81). In
+  Explain more the part before the Beyond line sometimes dresses a card up
+  ("allows users to analyse real-time data", cited, where the card only
+  names the domains). Worth a look across ordinary answers too, before
+  deciding whether it needs anything.
 - **Tables in answers when they help**, and a **"Make a table" action under
   an answer** that rewrites it as a table (and could add it to the board as
   a card - cards already draw markdown tables, §69). Cards have Beautify now

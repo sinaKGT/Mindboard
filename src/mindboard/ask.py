@@ -44,9 +44,11 @@ EXPLAIN = ("Explain more: I want a full explanation, not only what the cards say
            "that card itself says. Everything else - examples, analogies, how such things "
            f"usually work - is your own knowledge: put it after the line \"{BEYOND}\", cite "
            "nothing there and do not tie it to a card. Before that line, only what the cards "
-           "say that answers me - never claim a card says more than it does. If the cards "
-           "hold nothing that answers me, do not say what they lack and do not repeat them: "
-           "start the answer with that line - the page marks it as beyond the board. "
+           "say that answers me - never claim a card says more than it does. Rule 3 does not "
+           "apply here: never write that the cards do not contain, describe or cover "
+           "something - the page already marks what is beyond them. If the cards hold "
+           "nothing that answers me, do not repeat them either: start the answer with that "
+           "line. "
            "Say plainly when you are unsure, and do not make up names, places or figures. "
            "Finish with the NEXT: lines as always.")
 # the model sometimes dresses the line up - **Beyond your board:**, a heading -
@@ -954,6 +956,50 @@ def split_next(answer: str) -> tuple[str, str]:
     return answer, questions[0] if questions else ""
 
 
+# DESIGN.md 80: asked for examples with Explain more on, the model kept rule 3
+# ("if the cards do not answer, say so first") whatever the instruction said -
+# an opening "The cards do not contain examples... They only list visitors" in
+# four answers of six. Explain more wants it gone: the page already marks what
+# is beyond the board. These are the sentences dropped, and only there.
+LACK = re.compile(
+    r"\b(?:cards?|notes?|board|they|context|passages?)\b[^.!?\n]{0,80}?(?:"
+    r"(?:do(?:es)?\s*n[o']t|cannot|can't)\s+(?:\w+\s+){0,2}?(?:contain|describe|include|list|"
+    r"mention|provide|explain|give|say|cover|detail|offer|specify|show|define|hold)"
+    r"|only\s+(?:list|identif(?:y|ies)|mention|describe|note|confirm|state|show|give|say|"
+    r"contain|include|refer|provide|record|name)"
+    r"|(?:there\s+(?:are|is)\s+)?no\s+(?:specific|concrete|detailed|information|examples?|"
+    r"details?|mention|description|definition))", re.IGNORECASE)
+NONE_HERE = re.compile(r"^\s*(?:however,\s*)?there\s+(?:are|is)\s+no\b", re.IGNORECASE)
+BASED_ON = re.compile(r"^\s*(?:based\s+on|according\s+to)\s+(?:the|your)\s+(?:provided\s+)?"
+                      r"(?:cards|notes|board)(?:\s+provided)?,\s*", re.IGNORECASE)
+
+
+def without_lack(answer: str) -> str:
+    """An Explain more answer without its sentences on what the cards lack,
+    before the Beyond line - and with no part before the line if nothing
+    else was there. An answer with no Beyond part is left as it is: what the
+    cards lack is then the whole of what it says."""
+    answer = BEYOND_MARK.sub(BEYOND, answer)
+    board, mark, beyond = answer.partition(BEYOND)
+    if not mark or not beyond.strip():
+        return answer
+    lines = []
+    for line in board.split("\n"):
+        if not line.strip():
+            lines.append("")
+            continue
+        kept = []
+        for s in re.split(r"(?<=[.!?])[ \t]+", line):
+            if LACK.search(s) or NONE_HERE.match(s):
+                continue
+            plain = BASED_ON.sub("", s)
+            kept.append(plain[:1].upper() + plain[1:] if plain != s else s)
+        if kept:
+            lines.append(" ".join(kept))
+    board = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return (board + "\n\n" if board else "") + mark + beyond
+
+
 def check_citations(answer: str, allowed: set[str]) -> dict:
     """Keep citations of cards that were in context; remove the rest and count
     them - that count is how often the model invents a source."""
@@ -1056,6 +1102,8 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     answer, questions = split_nexts("".join(text))
     picks = [] if questions else choices(answer)     # a quiz's question: its choices to tap
     next_question = questions[0] if questions else ""
+    if ctx.mode == "explain":
+        answer = without_lack(answer)                   # DESIGN.md 80
     result = check_citations(answer, set(ctx.cards))
     yield {"event": "done", **result, "next": next_question, "nexts": questions or picks,
            "choices": bool(picks),
