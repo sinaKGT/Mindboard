@@ -6,7 +6,8 @@ Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
 (§72), Node.js in the installers and AGENTS.md (§74), card AI in a panel
 with a quiz as data, soft glass cards and Beautify (§75-79); all merged into
 main (PR #4); Explain more gives what it is asked for, with no "the cards
-do not cover it" line (§80-81); next: the rest of C.
+do not cover it" line (§80-81); numbers in file answers - rows kept, a
+calculator and Double check (§82); next: the rest of C.
 
 ---
 
@@ -22,6 +23,13 @@ do not cover it" line (§80-81); next: the rest of C.
   a card - cards already draw markdown tables, §69). Cards have Beautify now
   (§78-79), which lays a card out as lists and bold labels but makes no
   tables, since it never moves words; the chat's answers have nothing yet.
+- **Numbers in file answers: what Double check leaves** (from §82). Rows
+  kept, a calculator and a Double check button are done; on the test set
+  every wrong number was corrected. Left: run it on a real PDF the owner
+  has seen go wrong; check a scanned page's numbers against its figure
+  description; tables whose header cells are several words ("Nitrogen
+  (mg/kg)") fall back to a weaker row check; redo a sum when a number it
+  used was corrected; a calculator for the board's answers too.
 
 ## D. The board
 

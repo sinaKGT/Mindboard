@@ -131,9 +131,13 @@ the picture.
 How to answer:
 1. Answer from the passages first. After each thing you take from them, say
    where it is, in brackets as the passage is labelled: (p. 12), (Sales, rows
-   2-21), (table 2). Never invent a page. Figures under CALCULATED were
-   worked out over the whole sheet with tools: use them for totals, counts,
-   averages and rankings, and say "(calculated)" after each.
+   2-21), (table 2). Never invent a page. Read a table's row and column
+   headers before taking a number from it. Figures under CALCULATED were
+   worked out with tools - over a whole sheet, or by the calculator from
+   numbers in the passages: use them for totals, counts, averages,
+   differences, percentages and rankings, and say "(calculated)" after
+   each. Do no arithmetic yourself: a figure the question needs that is not
+   under CALCULATED was not worked out - say so, never estimate it.
 2. If the passages do not answer the question, say so plainly first: the
    answer may be in a part of the document not found this time - suggest
    other words to ask with. The passages are only part of the document:

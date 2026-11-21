@@ -156,10 +156,14 @@ export function pageLink(branch: FileBranch | undefined) {
 export function Calculated({ turn }: { turn: Turn }) {
   const t = turn.tools
   if (!t || (!t.calls.length && !t.trouble)) return null
+  // a sheet's tools work over every row (DESIGN.md 65); the calculator, over
+  // numbers taken from the passages (DESIGN.md 82)
+  const calculator = t.calls.some((c) => c.tool === 'calculate') || (!t.calls.length && !turn.passages?.some((p) => p.page === null))
   return (
     <div className="calculated">
       <div className="calculated-lead">
-        <Icon name="numbers" size={11} /> Calculated over the whole sheet{t.why ? ` — ${t.why}` : ''}
+        <Icon name="numbers" size={11} /> {calculator ? 'Worked out by the calculator, from numbers in the file'
+          : 'Calculated over the whole sheet'}{t.why ? ` — ${t.why}` : ''}
       </div>
       {t.calls.map((c, i) => (
         <div key={i} className={`calculated-row ${c.error ? 'failed' : ''}`}>
@@ -167,7 +171,8 @@ export function Calculated({ turn }: { turn: Turn }) {
         </div>
       ))}
       {t.trouble && t.trouble !== 'stopped' ? (
-        <div className="calculated-row failed">No calculation was made: {t.trouble}. The answer comes from the matching rows only.</div>
+        <div className="calculated-row failed">No calculation was made: {t.trouble}. {calculator
+          ? 'Nothing in the answer was worked out.' : 'The answer comes from the matching rows only.'}</div>
       ) : null}
     </div>
   )

@@ -152,7 +152,11 @@ def read_pdf(path: Path) -> tuple[list[Chunk], list[int], int]:
                 page = pdf[i]
                 try:
                     tp = page.get_textpage()
-                    text = " ".join((tp.get_text_range() or "").split())
+                    # its lines kept (DESIGN.md 82): a table's row is a line, and
+                    # run together "Revenue 2.64 2.91 Cost of sales 1.12 1.27"
+                    # left the model to guess which number is whose
+                    lines = (" ".join(line.split()) for line in (tp.get_text_range() or "").splitlines())
+                    text = "\n".join(line for line in lines if line)
                     tp.close()
                     images = paths = 0
                     for seen, obj in enumerate(page.get_objects(max_depth=2)):

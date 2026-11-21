@@ -187,6 +187,43 @@ def test_asking_a_file_prepares_it_then_answers_from_its_passages(tmp_path, mode
         app.state.ask["model"].stop()
 
 
+def test_a_pdf_keeps_a_table_row_on_its_line(tmp_path):
+    """DESIGN.md 82: the page's lines are kept, so a row's numbers stay with
+    its label rather than running into the next row's."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import number_eval
+
+    p = tmp_path / "r.pdf"
+    p.write_bytes(number_eval.report_pdf())
+    chunks, _, _ = read_pdf(p)
+    page2 = "\n".join(c.text for c in chunks if c.page == 2)
+    assert "\nRevenue 2.64 2.91 3.48 3.84\n" in page2
+    assert "\nCost of sales 1.12 1.27 1.49 1.71\n" in page2
+
+
+def test_a_sum_about_a_file_is_worked_out_by_the_calculator(tmp_path, model):  # noqa: F811
+    """DESIGN.md 82: the model picks the numbers, the calculator adds them, and
+    a number not written on its page is refused, not used."""
+    dd = DataDir(tmp_path / "data")
+    app = create_app(dd, TOKEN)
+    h = {"X-Mindboard-Token": TOKEN}
+    with TestClient(app) as client:
+        pdf = text_pdf(["Riverside visitors 3,965 and 4,421 in the first two quarters."])
+        fid = client.post("/api/files", headers=h, files={"file": ("v.pdf", pdf, "application/pdf")}).json()["id"]
+        wait_ready(client, fid, h)
+        res = client.post(f"/api/files/{fid}/ask", headers=h, json={"question": "what is the total?"})
+        assert res.status_code == 200, res.text
+        tools = [d for e, d in events(res) if e == "tools"]
+        assert tools, "the calculator ran"
+        calls = tools[0]["calls"]
+        assert calls[0]["tool"] == "calculate" and "the total = 8,386" in calls[0]["said"] and not calls[0]["error"]
+        assert calls[1]["error"] and "987654" in calls[1]["said"], "a number on no page is refused"
+        plain = client.post(f"/api/files/{fid}/ask", headers=h, json={"question": "who are the visitors?"})
+        assert not [e for e, _ in events(plain) if e == "tools"], "no sum asked, no calculator"
+
+
 def test_nothing_prepared_survives_a_restart(tmp_path):
     dd = DataDir(tmp_path)
     left = dd.root / "tmp" / "filechat" / "abc"

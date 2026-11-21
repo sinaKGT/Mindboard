@@ -1993,3 +1993,30 @@ button.file-tab { padding: 5px 10px; gap: 5px; }
 .ai-quiz-end { text-align: center; padding: 12px 0; font-size: 14px; }
 .ai-quiz-score { font-size: 30px; font-weight: 700; margin-bottom: 4px; color: var(--mb-accent); }
 .tools-btn.danger:hover { color: var(--mb-danger); background: color-mix(in srgb, var(--mb-danger) 14%, transparent); }
+
+/* Double check (DESIGN.md 82): under an answer about a file, and its numbers marked */
+.ask-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.ask-check {
+  margin-top: 8px; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; color: var(--mb-text-faint);
+}
+.ask-check:hover:not(:disabled) { color: var(--mb-accent); }
+.ask-check:disabled { opacity: .5; cursor: default; }
+.ask-check.done { color: var(--mb-ok, #2f9e5b); }
+.ask-status.checking { margin-top: 8px; }
+.checked { margin-top: 8px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--mb-border);
+  background: var(--mb-surface-2); display: flex; flex-direction: column; gap: 4px; }
+.checked-lead { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--mb-text-faint, var(--mb-text-dim)); }
+.checked-lead svg { vertical-align: -1px; }
+.checked-row { font-size: 11.5px; color: var(--mb-text); font-variant-numeric: tabular-nums; }
+.checked-sign { display: inline-block; width: 1.3em; font-weight: 700; }
+.checked-row.ok .checked-sign { color: var(--mb-ok, #2f9e5b); }
+.checked-row.fixed .checked-sign { color: var(--mb-warn, #c98a12); }
+.checked-row.unchecked .checked-sign { color: var(--mb-text-faint); }
+.num-mark { border-radius: 3px; padding: 0 2px; font-variant-numeric: tabular-nums; }
+.num-mark.ok { background: color-mix(in srgb, var(--mb-ok, #2f9e5b) 14%, transparent);
+  box-shadow: inset 0 -2px 0 var(--mb-ok, #2f9e5b); }
+.num-mark.fixed { background: color-mix(in srgb, var(--mb-warn, #c98a12) 16%, transparent);
+  box-shadow: inset 0 -2px 0 var(--mb-warn, #c98a12); }
+.num-mark.fixed s { color: var(--mb-text-faint); margin-right: 3px; }
+.num-mark.unchecked { box-shadow: inset 0 -2px 0 var(--mb-text-faint); border-bottom: 0; }

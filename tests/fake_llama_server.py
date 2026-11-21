@@ -79,6 +79,20 @@ class Handler(BaseHTTPRequestHandler):
             # question, no steps - said at once, as JSON
             pieces, slow = [("content", '{"task": "answer", "about": "", "output": "", '
                                         '"reading": "You want an answer.", "steps": []}')], False
+        if isinstance(system, str) and system.startswith("You prepare the arithmetic"):
+            # the calculator's choice (DESIGN.md 82): the first two numbers of
+            # the first passage, added - and one more nobody wrote, to refuse
+            m = re.search(r"\[(p\. \d+)\] ([^\n]*)", texts)
+            nums = re.findall(r"\d[\d,]*(?:\.\d+)?", m.group(2)) if m else []
+            calcs = []
+            if len(nums) >= 2:
+                calcs = [{"label": "the total", "op": "sum", "values": [
+                    {"value": nums[0], "where": m.group(1), "what": "first"},
+                    {"value": nums[1], "where": m.group(1), "what": "second"}]},
+                    {"label": "a made-up one", "op": "difference", "values": [
+                        {"value": "987654", "where": m.group(1), "what": "nowhere"},
+                        {"value": nums[0], "where": m.group(1), "what": "first"}]}]
+            pieces, slow = [("content", json.dumps({"calculations": calcs}))], False
         if slow:
             pieces += [("content", " more")] * 400
         self.send_response(200)

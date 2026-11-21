@@ -92,6 +92,14 @@ class AskRequest(BaseModel):
     task: str = Field(default="", max_length=20)
 
 
+class CheckRequest(BaseModel):
+    """An answer about a file to double check (DESIGN.md 82): its numbers looked
+    up again on their pages, its sums worked out again by the calculator."""
+    question: str = Field(min_length=1, max_length=4000)
+    answer: str = Field(min_length=1, max_length=20000)
+    history: list[AskTurn] = Field(default_factory=list, max_length=40)
+
+
 class DraftRequest(BaseModel):
     """An answer to turn into a card for the board."""
     question: str = Field(min_length=1, max_length=4000)

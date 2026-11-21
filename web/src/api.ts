@@ -102,6 +102,10 @@ const apiCore = {
   closeFile: (id: string) => req<{ closed: boolean }>(`/files/${id}`, { method: 'DELETE' }),
   askFile: (id: string, body: unknown, onEvent: (name: string, data: any) => void, signal: AbortSignal) =>
     streamEvents(`/files/${id}/ask`, body, onEvent, signal),
+  /** Double check an answer about this file (DESIGN.md 82) */
+  checkFile: (id: string, body: { question: string; answer: string; history: { role: string; text: string }[] },
+              onEvent: (name: string, data: any) => void, signal: AbortSignal) =>
+    streamEvents(`/files/${id}/check`, body, onEvent, signal),
   fileUrl: (id: string, page?: number | null) =>
     `/api/files/${id}/raw${token ? `?t=${encodeURIComponent(token)}` : ''}${page ? `#page=${page}` : ''}`,
   filePageUrl: (id: string, page: number, size = 240) =>
