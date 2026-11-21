@@ -165,6 +165,13 @@ class Handler(BaseHTTPRequestHandler):
                 [f"Corner mount {cited[0] if cited else ''}".strip(), "best"],
                 ["Wind load", "Consider"],
                 ["Zeppelin hangar", "Lisbon"]]})
+        if isinstance(system, str) and system.startswith("You summarise an answer"):
+            # an answer summarised (DESIGN.md 87): its first citation kept,
+            # and a sentence with a number the answer never said
+            asked = str(body["messages"][-1]["content"])
+            cited = re.findall(r"\[\[[0-9A-Za-z]{26}\]\]", asked)
+            text = (f"The corner mount is best {cited[0] if cited else ''}. "
+                    "It holds 900 kg.").replace(" .", ".")
         if isinstance(system, str) and system.startswith("You merge several cards"):
             # merging cards into one (DESIGN.md 72), as JSON
             text = '{"title": "Merged", "text": "Best angle at 4 m, and the range is 100 m."}'

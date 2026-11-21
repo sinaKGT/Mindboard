@@ -242,6 +242,10 @@ const apiMore = {
   answerTable: (boardId: string, answer: string, signal?: AbortSignal) =>
     req<{ table: string; rows: number; blanked: number; note: string }>(`/boards/${boardId}/table`,
       { method: 'POST', body: JSON.stringify({ answer }), signal }),
+  /** an answer's own words summarised, each part apart (DESIGN.md 87) */
+  answerSummary: (boardId: string, answer: string, signal?: AbortSignal) =>
+    req<{ board: string; beyond: string; dropped: number; note: string }>(`/boards/${boardId}/summary`,
+      { method: 'POST', body: JSON.stringify({ answer }), signal }),
   /** a card's words with spelling and grammar fixed (DESIGN.md 56) */
   proofread: (boardId: string, body: { title: string; text: string }) =>
     req<{ title: string; text: string; changed: boolean }>(`/boards/${boardId}/proofread`,

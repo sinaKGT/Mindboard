@@ -4420,3 +4420,91 @@ it is not from it; Add to board still drafts a card from it and links it to
 a card the conversation found (§53), as before.
 
 355 tests.
+
+## 87. Summarise beside Add to board, reading while it writes, no hover text in the chat (2026-11-21)
+
+The owner asked for three things in the chat: a *Summarise* button beside
+*Add to board*; to be able to scroll up and read while an answer is still
+being written, not wait for it to finish; and no hover text over the chat's
+buttons and chips.
+
+- **Summarise** sits under a finished answer between *Add to board* and
+  *Make a table*, shown when the answer is 400 characters or more (the NEXT
+  line not counted). It works like Make a table (§85): its own step
+  (`ask.answer_summary`, `POST /api/boards/{bid}/summary`) takes the
+  question slot, reads only the answer it is sent and writes nothing; 60 s
+  for a reply, then it is hung up. The two parts - what the board says and
+  what is beyond it - are summarised apart, one call each, so the summary
+  keeps them told apart; a part under 400 characters is kept as it is. The
+  model is asked for 2 to 5 short sentences, or up to 5 points for a list,
+  in the answer's own words, citations kept.
+- **The code checks every sentence against the answer**, with the table's
+  test (§85): every number written in the answer, and 60% of its words. A
+  sentence that fails is left out, and the note under the summary says how
+  many. Only the answer's own citations are kept; a citation alone after a
+  full stop stays with its sentence. Headings, bold and a lone "Summary:"
+  are taken off. Nothing kept is "Couldn't summarise this time - try
+  again."; an answer whose parts are all short is "already short".
+- **In place**, like the table: *Show as written* brings the answer back,
+  *Show the summary* the summary. Only one of the two stands in the
+  answer's place at a time - showing the summary hides the table and the
+  other way round. Add to board, with the summary shown, drafts the card
+  from the summary. Double check (§82) clears it, as it clears a table.
+- **Reading while it writes.** §68 let go of the answer on a wheel move
+  upward, but the scroll handler took it back whenever the view was within
+  80 px of the bottom, so a small scroll up was undone by the next words,
+  and the scrollbar and touchpad never let go at all. Now any move upward
+  in the scroll position lets go (a shrinking answer, which moves the view
+  up by itself, does not count), and only coming back within 24 px of the
+  bottom follows again. The wheel no longer re-follows from 160 px away.
+- **No hover text in the chat.** The `title` tooltips are gone from the
+  chat's header buttons, context chips, bar chips, send and stop, the
+  buttons under an answer, the suggested questions, the file tabs, page
+  links and thumbnails, and the files and pictures under an answer. Buttons
+  with only an icon keep their name as `aria-label`, which shows nothing on
+  hover. Left as they were: a checked number's mark (§82) and a formula's
+  TeX in an answer, which say something the page does not.
+
+Not checked yet: the owner is checking it in the app; Summarise has not
+been tried with the real model, and the scrolling was not tried in the
+browser.
+
+357 tests.
+
+## 88. A board answer that cites no card says so (2026-11-21)
+
+Asked "what is rag fusion?" on a 141-card board, the answer was read as an
+explanation (§66) and searched the board (73 cards). Its four steps were the
+words of the board's *Multi-Query & RAG-Fusion* picture card (§39), but it
+cited nothing, and its example, which no card gives, had no Beyond line. It
+read as the model's own knowledge and was not marked as either.
+
+- **An uncited answer is said to be so.** When an answer from the board (a
+  search, or cards chosen by hand), with cards in context, cites none of
+  them, the done event carries `uncited`, and the page says under the
+  answer: "No card is cited in this answer, so nothing shows it comes from
+  your board - it may be the model's own knowledge." Not for Board off,
+  Explain more or a file. It reads the finished answer only and changes
+  nothing the model is asked.
+
+Tried and dropped: a sentence after the task's shape (`tasks.task_note`),
+for board answers - cite each card after what you use from it, a picture's
+card too, and put an example of your own after the Beyond line. With the
+real model on a copy of the RAG board, six shaped questions (explain,
+compare, summarize), each once without and once with it, the same search
+in both: cards cited 1/1/4/3/6/2 without, 4/1/5/3/13/1 with. Without it,
+"what is rag fusion?" cited only the RAG-Fusion card and gave its steps
+right; with it, the answer called RAG Fusion hybrid search (vector plus
+BM25) and cited three Hybrid Search cards beside the right one - told to
+cite each card, it drew in cards that were only near the question. Its
+made-up examples still sat in the board part, cited, in both; what went
+after the Beyond line was an added analogy. All six answers without the
+sentence cited cards, so the uncited answer seen first was not the rule.
+The sentence was taken out.
+
+Not done: a made-up example in an explanation is cited as if a card gave
+it, with or without the sentence (seen in five of six answers); a fix needs
+its own real-model comparison. The warning also shows on an answer that
+rightly says the cards do not cover a question, since that cites nothing.
+
+358 tests.

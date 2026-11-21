@@ -9,8 +9,10 @@ main (PR #4); Explain more gives what it is asked for, with no "the cards
 do not cover it" line (§80-81); numbers in file answers - rows kept, a
 calculator and Double check (§82); the card AI panel moves (§83); card
 titles in plain words (§84); Make a table under an answer (§85); Explain
-more takes nothing from the board (§86); work moved from v2 to dev; next:
-the rest of C.
+more takes nothing from the board (§86); work moved from v2 to dev;
+Summarise beside Add to board, scrolling while it writes, no hover text in
+the chat (§87); a board answer citing no card says so (§88); next: the
+rest of C.
 
 ---
 
@@ -27,6 +29,16 @@ the rest of C.
   to compare (the system prompt still says "no tables"); try the button on
   answers in a file conversation with the real model; a cell is checked word
   by word, not as a fact, so words from two sentences can still be paired.
+- **Made-up examples cited as the board's** (from §88). In explanations the
+  model gives an example of its own ("tax rules for remote workers") and
+  cites a card after it, as if the card gave it - five of six answers on the
+  RAG board. Telling it to cite each card made answers worse (RAG Fusion
+  answered as hybrid search), so any fix needs a with/without run on the
+  real model first. Also watch whether the "no card is cited" warning shows
+  on answers that rightly say the cards do not cover it.
+- **Summarise: try it with the real model** (from §87). Done with the fake
+  model only: see how often sentences are left out by the word check, and
+  whether 400 characters is the right length to offer it from.
 - **Numbers in file answers: what Double check leaves** (from §82). Rows
   kept, a calculator and a Double check button are done; on the test set
   every wrong number was corrected. Left: run it on a real PDF the owner

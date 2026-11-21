@@ -54,12 +54,12 @@ export function AnswerPictures({ pictures, onShow, className = '' }: {
       <div className={`answer-pictures ${className}`}>
         {shown.map((p) => missing.has(p.sha) ? (
           <button key={p.card} className="answer-picture is-missing" disabled={!onShow}
-            title="Picture not on this computer" onClick={() => onShow?.(p)}>
+            onClick={() => onShow?.(p)}>
             <span className="answer-picture-gone">picture file missing</span>
             <span className="answer-picture-title">{p.title}</span>
           </button>
         ) : (
-          <button key={p.card} className="answer-picture" title={`${p.title} - open it`}
+          <button key={p.card} className="answer-picture"
             onClick={() => setOpen({ p, at: Date.now() })}>
             <img src={api.thumbUrl(p.board, p.sha)} alt={p.title} loading="lazy" draggable={false}
               // no thumbnail (an unusual format): the picture itself, shrunk by the

@@ -1075,7 +1075,11 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     if ctx.mode == "explain":
         answer = _uncited(answer)                       # nothing from the board: DESIGN.md 86
     result = check_citations(answer, set(ctx.cards))
-    yield {"event": "done", **result, "next": next_question, "nexts": questions or picks,
+    # DESIGN.md 88: an answer from the board that cites no card is said to be
+    # so under it - it reads as the person's notes but nothing shows it is
+    uncited = bool(ctx.mode in ("search", "chosen") and ctx.cards and result["board"]
+                   and not result["cited"])
+    yield {"event": "done", **result, "uncited": uncited, "next": next_question, "nexts": questions or picks,
            "choices": bool(picks),
            "stopped": bool(timings.get("stopped")),
            "tokens_per_second": timings.get("tokens_per_second")}
@@ -1805,3 +1809,87 @@ def answer_table(model, answer: str) -> dict:
     if lost:
         table += "\n\nAlso from: " + " ".join(c if c.startswith("(") else "[[" + c + "]]" for c in lost)
     return {"table": table, "rows": len(rows), "blanked": blanked, "note": ""}
+
+
+SUMMARY_SYSTEM = """You summarise an answer in a few short sentences.
+
+- Use only what the answer says, in its own words. Add nothing, work nothing
+  out, and do not total, count or average anything.
+- 2 to 5 short sentences; or, when the answer is a list, up to 5 points, each
+  on its own line starting "- ". Keep the main points; leave out examples,
+  asides and repetition.
+- Keep each citation exactly as written - [[...]] or (p. 12) - after the
+  point it supports.
+- Plain text: no headings, no tables, no bold. Reply with the summary only."""
+
+SUMMARY_CHARS = 8000        # of each part the model reads
+SUMMARY_SECONDS = 60.0      # one reply; past this it is hung up (CLAUDE.md rule 5)
+SUMMARY_FROM = 400          # a part shorter than this is kept as it is
+SUMMARY_WORDS_KEPT = 0.6    # share of a sentence's words the answer must have
+NOT_SUMMARISED = "Couldn't summarise this time - try again."
+ALREADY_SHORT = "This answer is already short."
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\[(\"'])|\n+")
+
+
+def _summary_part(model, text: str) -> tuple[str, int]:
+    """One part of an answer summarised: (summary, sentences dropped). A
+    sentence that brings in a number, or mostly words, the part never said is
+    dropped; a citation the part did not make is taken out (DESIGN.md 87)."""
+    cites = set(CITE.findall(text))
+    pages = {" ".join(p.split()) for p in PAGE_CITE.findall(text)}
+    plain = PAGE_CITE.sub(" ", CITE.sub(" ", text))
+    numbers, words = _numbers(plain), {_stem(w) for w in _WORD.findall(plain)}
+    reply = model.chat([{"role": "system", "content": SUMMARY_SYSTEM},
+                        {"role": "user", "content": f"ANSWER\n{text[:SUMMARY_CHARS]}"}],
+                       max_tokens=800, think=False, temperature=0.2, timeout=SUMMARY_SECONDS)["text"]
+    reply = NEXT_LINE.sub("", BEYOND_MARK.sub("", reply or "")).replace("**", "").strip()
+    lines, dropped = [], 0
+    for line in reply.splitlines():
+        point = re.match(r"^\s*(?:[-*•]|\d+[.)])\s+", line)
+        body = line[point.end():] if point else line.strip()
+        # a heading of its own ("Summary:") is not a point of the answer
+        if not body.strip() or body.lstrip().startswith("#") or re.fullmatch(r"\s*summary:?\s*", body, re.I):
+            continue
+        kept = []
+        for s in _SENTENCE.split(body):
+            s = CITE.sub(lambda m: m.group(0) if m.group(1) in cites else "", s)
+            s = PAGE_CITE.sub(lambda m: m.group(0) if " ".join(m.group(0).split()) in pages else "", s)
+            s = re.sub(r"\s+([.,;:!?])", r"\1", " ".join(s.split()))
+            if not PAGE_CITE.sub("", CITE.sub("", s)).strip():
+                if s and kept:          # "... best. [[id]]": the citation stays with it
+                    kept[-1] += " " + s
+                continue
+            if _cell_holds(s, numbers, words):
+                kept.append(s)
+            else:
+                dropped += 1
+        if kept:
+            lines.append(("- " if point else "") + " ".join(kept))
+    return "\n".join(lines), dropped
+
+
+def answer_summary(model, answer: str) -> dict:
+    """An answer's own words summarised, each part apart - what the board
+    says, and what is beyond it - so the two stay told apart: {"board",
+    "beyond", "dropped", "note"}. A part too short to summarise comes back as
+    it is; "note" says why when nothing could be made. Writes nothing."""
+    text = NEXT_LINE.sub("", BEYOND_MARK.sub(BEYOND, answer or "")).strip()
+    at = text.find(BEYOND)
+    parts = {"board": (text[:at] if at >= 0 else text).strip(),
+             "beyond": text[at + len(BEYOND):].strip() if at >= 0 else ""}
+    if all(len(p) < SUMMARY_FROM for p in parts.values()):
+        return {"board": "", "beyond": "", "dropped": 0, "note": ALREADY_SHORT}
+    got, dropped = {}, 0
+    for name, part in parts.items():
+        if len(part) < SUMMARY_FROM:
+            got[name] = part
+            continue
+        try:
+            got[name], lost = _summary_part(model, part)
+        except Exception as exc:
+            log.warning("an answer could not be summarised: %s", exc)
+            return {"board": "", "beyond": "", "dropped": 0, "note": NOT_SUMMARISED}
+        dropped += lost
+        if not got[name]:
+            return {"board": "", "beyond": "", "dropped": dropped, "note": NOT_SUMMARISED}
+    return {"board": got["board"], "beyond": got["beyond"], "dropped": dropped, "note": ""}

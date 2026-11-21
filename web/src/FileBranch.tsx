@@ -33,18 +33,18 @@ export function FileTabs() {
   return (
     <div className="file-tabs" role="tablist" aria-label="Conversations">
       <button role="tab" aria-selected={active === null} className={`file-tab ${active === null ? 'on' : ''}`}
-        disabled={busy && active !== null} onClick={() => ask.show(null)} title="The board's conversation">
+        disabled={busy && active !== null} onClick={() => ask.show(null)}>
         <Icon name="grid" size={11} /> Board
       </button>
       {branches.map((b) => (
         <span key={b.id} className={`file-tab ${active === b.id ? 'on' : ''} ${b.status}`}>
           <button role="tab" aria-selected={active === b.id} disabled={busy && active !== b.id}
-            onClick={() => ask.show(b.id)} title={`Ask ${b.name}`}>
+            onClick={() => ask.show(b.id)}>
             <span className="file-tab-badge">{extOf(b.name)}</span>
             <span className="file-tab-name">{b.name}</span>
             {b.status === 'preparing' ? <span className="file-tab-dot" aria-label="preparing" /> : null}
           </button>
-          <button className="file-tab-x" title="Close file"
+          <button className="file-tab-x"
             aria-label={`Close ${b.name}`} onClick={() => ask.closeBranch(b.id)}>
             <Icon name="x" size={9} />
           </button>
@@ -147,8 +147,7 @@ export function FileStrip({ branch }: { branch: FileBranch }) {
 export function pageLink(branch: FileBranch | undefined) {
   if (!branch || branch.kind !== 'pdf' || branch.status !== 'ready') return undefined
   return (page: number, label: string) => (
-    <a className="page-cite" href={api.fileUrl(branch.id, page)} target="_blank" rel="noreferrer"
-      title={`Open page ${page}`}>{label}</a>
+    <a className="page-cite" href={api.fileUrl(branch.id, page)} target="_blank" rel="noreferrer">{label}</a>
   )
 }
 
@@ -196,8 +195,7 @@ export function PagesUsed({ turn, branch }: { turn: Turn; branch: FileBranch | u
             const pictured = turn.passages!.some((x) => x.page === p && x.pictured)
             return (
               <a key={p} className={`page-thumb ${pictured ? 'pictured' : ''}`} href={api.fileUrl(branch.id, p)}
-                target="_blank" rel="noreferrer"
-                title={`Page ${p}`}>
+                target="_blank" rel="noreferrer">
                 <img src={api.filePageUrl(branch.id, p)} alt={`Page ${p}`} loading="lazy" />
                 <span>p. {p}</span>
               </a>

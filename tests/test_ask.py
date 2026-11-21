@@ -1266,3 +1266,62 @@ def test_board_off_asks_the_model_alone(client, board, cards, model):
     msgs = ask.messages(ask.own_context(), "q", [])
     assert msgs[0]["content"] == ask.OWN_SYSTEM and "board" not in msgs[-1]["content"].lower()
     assert "CARDS" not in ask.OWN_SYSTEM
+
+
+LONG_ANSWER = ("The corner mount is best for the camera because it sees both doors and the yard, "
+               "and it stays out of reach [[" + "A" * 26 + "]]. The wall mount was cheaper at 40 pounds "
+               "but it misses the gate, and it shakes in the wind on the north side [[" + "B" * 26 + "]]. "
+               "The pole mount needs a concrete base and a permit, which takes weeks to arrange, so it was "
+               "left aside for now. All three take the same bracket and the same cable run back to the "
+               "house.\nNEXT: Which is cheapest?")
+
+
+def test_an_answer_is_summarised_in_its_own_words():
+    """DESIGN.md 87: a sentence with a number the answer never said is dropped,
+    a citation it did not make is taken out, and the Beyond part stays apart."""
+    a, z = "A" * 26, "Z" * 26
+    model = DraftModel(f"**Summary**\n- The corner mount is best [[{a}]] [[{z}]].\n"
+                       "- The wall mount cost 75 pounds.\n- The wall mount misses the gate. [[" + "B" * 26 + "]]\n"
+                       "NEXT: Why?")
+    got = ask.answer_summary(model, LONG_ANSWER + "\nBeyond your board:\nConsider wind load.")
+    assert got["board"] == (f"- The corner mount is best [[{a}]].\n"
+                            "- The wall mount misses the gate. [[" + "B" * 26 + "]]")
+    assert got["beyond"] == "Consider wind load.", "a short part is kept as it is"
+    assert got["dropped"] == 1 and got["note"] == ""
+    assert "Use only what the answer says" in model.asked[0][0]["content"]
+    assert len(model.asked) == 1, "only the long part is summarised"
+    assert "NEXT" not in model.asked[0][1]["content"]
+    assert ask.answer_summary(model, "Short.")["note"] == ask.ALREADY_SHORT
+    assert ask.answer_summary(DraftModel("It weighs 900 kg."), LONG_ANSWER)["note"] == ask.NOT_SUMMARISED
+
+    class Hung:
+        def chat(self, *a, **kw):
+            raise TimeoutError("hung up")
+    assert ask.answer_summary(Hung(), LONG_ANSWER)["note"] == ask.NOT_SUMMARISED
+
+
+def test_summary_route_writes_nothing(client, board, cards, model):
+    h = {"X-Mindboard-Token": TOKEN}
+    before = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    mount = cards["mount"]
+    answer = LONG_ANSWER.replace("A" * 26, mount)
+    res = client.post(f"/api/boards/{board['id']}/summary", headers=h, json={"answer": answer})
+    assert res.status_code == 200, res.text
+    got = res.json()
+    assert got == {"board": f"The corner mount is best [[{mount}]].", "beyond": "", "dropped": 1, "note": ""}
+    assert client.get(f"/api/boards/{board['id']}/graph", headers=h).json()["revision"] == before["revision"]
+
+
+def test_a_board_answer_that_cites_no_card_says_so():
+    """DESIGN.md 88: an answer from the board with no citation is marked."""
+    class Plain:
+        def stream(self, *a, **kw):
+            yield {"type": "text", "text": "RAG Fusion merges several searches.\nNEXT: Why?"}
+            yield {"type": "done"}
+    a = "A" * 26
+    ctx = ask.Context([a], f"CARDS\n[{a}] (image) Multi-Query & RAG-Fusion", mode="search")
+    done = [e for e in ask.answer_events(Plain(), ctx, "what is rag fusion?", []) if e["event"] == "done"][0]
+    assert done["uncited"] is True and done["cited"] == []
+    own = ask.Context([], "", mode="own")
+    done = [e for e in ask.answer_events(Plain(), own, "what is rag fusion?", []) if e["event"] == "done"][0]
+    assert done["uncited"] is False, "Board off cites nothing by design"

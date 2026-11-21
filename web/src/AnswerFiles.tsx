@@ -44,8 +44,8 @@ export function AnswerFiles({ files, onShow, onAsk, className = '' }: {
       {files.map((f) => (
         <div key={f.card} className="answer-file">
           <span className="answer-file-badge">PDF</span>
-          <span className="answer-file-name" title={f.name}>{f.name}</span>
-          {onAsk ? <button className="answer-file-btn ask" title="Ask this file"
+          <span className="answer-file-name">{f.name}</span>
+          {onAsk ? <button className="answer-file-btn ask"
             onClick={() => onAsk(f)}>Ask this file</button> : null}
           <button className="answer-file-btn" onClick={() => open(f)}>Open</button>
           {onShow ? <button className="answer-file-btn" onClick={() => onShow(f)}>Show on its board</button> : null}

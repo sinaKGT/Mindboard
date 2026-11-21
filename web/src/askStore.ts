@@ -27,6 +27,8 @@ export interface Turn {
   /** an answer: what it cited, what was removed, its two voices */
   cited?: string[]
   dropped?: number
+  /** an answer from the board that cites no card (DESIGN.md 88) */
+  uncited?: boolean
   board?: string
   beyond?: string
   thinking?: string
@@ -69,7 +71,25 @@ export interface Turn {
   check?: DoubleCheck
   /** Make a table (DESIGN.md 85): the answer's own words as rows and columns */
   table?: AnswerTable
+  /** Summarise (DESIGN.md 87): the answer's own words, shorter */
+  summary?: AnswerSummary
 }
+
+export interface AnswerSummary {
+  status: 'making' | 'done' | 'none' | 'failed' | 'stopped'
+  /** each part summarised; a part too short to summarise comes back as it was */
+  board?: string
+  beyond?: string
+  /** sentences left out because the answer does not say them */
+  dropped?: number
+  note?: string
+  /** shown in place of the answer, or the answer as written */
+  shown?: boolean
+}
+
+/** worth offering a summary: an answer of some length */
+export const summarisable = (text: string) =>
+  text.replace(/^[ \t*_>#-]*NEXT:.*$/gm, '').trim().length >= 400
 
 export interface AnswerTable {
   status: 'making' | 'done' | 'none' | 'failed' | 'stopped'
@@ -192,6 +212,10 @@ interface Ask {
   makeTable(index: number): Promise<void>
   /** between the table and the answer as written */
   showTable(index: number, shown: boolean): void
+  /** the answer at this place summarised, shown in its place (DESIGN.md 87) */
+  summarise(index: number): Promise<void>
+  /** between the summary and the answer as written */
+  showSummary(index: number, shown: boolean): void
   /** file conversations, and which is shown - null for the board's own */
   branches: FileBranch[]
   active: string | null
@@ -384,7 +408,7 @@ export const useAsk = create<Ask>()((set, get) => ({
               if (t) turns[index] = { ...t, text,
                 board: at >= 0 ? text.slice(0, at).trim() : text, beyond: at >= 0 ? text.slice(at + 18).trim() : '',
                 check: { status: 'done', summary: data.summary, marks: data.marks, marked: data.marked, original },
-                table: undefined }   // a table of the old numbers is out of date
+                table: undefined, summary: undefined }   // a table or summary of the old numbers is out of date
               return { turns }
             })
           } else if (name === 'error') {
@@ -433,7 +457,49 @@ export const useAsk = create<Ask>()((set, get) => ({
     set((st) => {
       const turns = st.turns.slice()
       const t = turns[index]
-      if (t?.table?.status === 'done') turns[index] = { ...t, table: { ...t.table, shown } }
+      // one in the answer's place at a time: the table, or the summary
+      if (t?.table?.status === 'done') turns[index] = { ...t, table: { ...t.table, shown },
+        summary: shown && t.summary ? { ...t.summary, shown: false } : t.summary }
+      return { turns }
+    })
+    save(get())
+  },
+
+  async summarise(index) {
+    const s = get()
+    const turn = s.turns[index]
+    if (!s.boardId || s.busy || !turn || turn.role !== 'assistant' || turn.status !== 'done' || turn.error) return
+    if (!summarisable(turn.text)) return
+    const controller = new AbortController()
+    const patch = (p: AnswerSummary) => set((st) => {
+      const turns = st.turns.slice()
+      const t = turns[index]
+      if (t) turns[index] = { ...t, summary: p,
+        table: p.shown && t.table ? { ...t.table, shown: false } : t.table }
+      return { turns }
+    })
+    set({ busy: true, controller })
+    patch({ status: 'making' })
+    try {
+      const got = await api.answerSummary(s.boardId, turn.text, controller.signal)
+      patch(got.board || got.beyond
+        ? { status: 'done', board: got.board, beyond: got.beyond, dropped: got.dropped, shown: true }
+        : { status: got.note.startsWith("Couldn't") ? 'failed' : 'none', note: got.note })
+    } catch (err: any) {
+      patch(controller.signal.aborted ? { status: 'stopped' }
+        : { status: 'failed', note: err.message || 'could not summarise' })
+    } finally {
+      set({ busy: false, controller: null })
+      save(get())
+    }
+  },
+
+  showSummary(index, shown) {
+    set((st) => {
+      const turns = st.turns.slice()
+      const t = turns[index]
+      if (t?.summary?.status === 'done') turns[index] = { ...t, summary: { ...t.summary, shown },
+        table: shown && t.table ? { ...t.table, shown: false } : t.table }
       return { turns }
     })
     save(get())
@@ -537,7 +603,8 @@ export const useAsk = create<Ask>()((set, get) => ({
             patch({ text: last().text + data.text, status: 'writing' })
           } else if (name === 'done') {
             patch({ text: data.answer, board: data.board, beyond: data.beyond,
-                    cited: data.cited, dropped: data.dropped.length, next: data.next || undefined,
+                    cited: data.cited, dropped: data.dropped.length, uncited: !!data.uncited || undefined,
+                    next: data.next || undefined,
                     nexts: data.nexts?.length ? data.nexts : data.next ? [data.next] : undefined,
                     choices: !!data.choices || undefined,
                     status: data.stopped ? 'stopped' : 'done' })

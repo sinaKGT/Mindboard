@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { AnswerFiles, filesToOffer } from './AnswerFiles'
 import { AnswerPictures, picturesToShow } from './AnswerPictures'
-import { askable, cardsInside, hasNumbers, revealCard, tablePart, tableable, useAsk, type Turn } from './askStore'
+import { askable, cardsInside, hasNumbers, revealCard, summarisable, tablePart, tableable, useAsk, type Turn } from './askStore'
 import { Calculated, FileStrip, FileTabs, PagesUsed, pageLink } from './FileBranch'
 import { stepLine, TaskSteps } from './TaskSteps'
 import { Icon } from './icons'
@@ -38,7 +38,7 @@ const BEYOND_MARK = /(^[ \t]*#{1,6}[ \t]*)?(\*\*|__)?[ \t]*Beyond your board:[ \
 function Cite({ id }: { id: string }) {
   const node = useStore((s) => s.nodes[id])
   return (
-    <button className="cite" title="Go to this card" onClick={() => revealCard(id)}>
+    <button className="cite" aria-label="Go to this card" onClick={() => revealCard(id)}>
       {node ? (plainTitle(node.title) || 'Untitled') : 'a card no longer here'}
     </button>
   )
@@ -158,7 +158,10 @@ function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; 
     const cited = (turn.cited ?? []).filter((id) => nodes[id])
     // a table shown in the answer's place (DESIGN.md 85) is what goes on the card
     const table = turn.table?.status === 'done' && turn.table.shown ? tableForCard(turn.table.table ?? '') : ''
-    api.askDraft(boardId, { question, answer: table || turn.text, cited, candidates, history })
+    // so is a summary shown in its place (DESIGN.md 87)
+    const sum = turn.summary?.status === 'done' && turn.summary.shown ? turn.summary : null
+    const summary = sum ? [sum.board, sum.beyond ? `Beyond your board:\n${sum.beyond}` : ''].filter(Boolean).join('\n') : ''
+    api.askDraft(boardId, { question, answer: table || summary || turn.text, cited, candidates, history })
       // the drafter titles what is new, which a table is not: the question names it
       .then((draft) => place(table ? { ...draft, title: question.trim().replace(/[?.!]+$/, ''), text: table } : draft))
       .catch((e) => setError(e.message || 'could not draft the card'))
@@ -221,10 +224,47 @@ function TableButton({ turn, index }: { turn: Turn; index: number }) {
   if (!tableable(tablePart(turn.text).text)) return null
   return (
     <button className="ask-check" disabled={busy}
-      title="Lay this answer out as rows and columns, from its own words"
       onClick={() => void useAsk.getState().makeTable(index)}>
       <Icon name="table" size={11} /> {t?.status === 'failed' || t?.status === 'stopped' ? 'Try the table again' : 'Make a table'}
     </button>
+  )
+}
+
+/** Summarise (DESIGN.md 87): beside Add to board, the answer's own words
+ *  shorter, shown in its place; "Show as written" brings it back. */
+function SummaryButton({ turn, index }: { turn: Turn; index: number }) {
+  const busy = useAsk((s) => s.busy)
+  const m = turn.summary
+  if (m?.status === 'done') {
+    return (
+      <button className="ask-check" onClick={() => useAsk.getState().showSummary(index, !m.shown)}>
+        <Icon name="type" size={11} /> {m.shown ? 'Show as written' : 'Show the summary'}
+      </button>
+    )
+  }
+  if (m?.status === 'making' || m?.status === 'none') return null
+  if (!summarisable(turn.text)) return null
+  return (
+    <button className="ask-check" disabled={busy} onClick={() => void useAsk.getState().summarise(index)}>
+      <Icon name="type" size={11} /> {m?.status === 'failed' || m?.status === 'stopped' ? 'Summarise again' : 'Summarise'}
+    </button>
+  )
+}
+
+/** what Summarise said, under the answer */
+function SummaryNote({ turn }: { turn: Turn }) {
+  const m = turn.summary
+  if (!m) return null
+  if (m.status === 'making') return <div className="ask-status checking">Summarising the answer…</div>
+  if (m.status === 'stopped') return <div className="ask-note">Summary stopped.</div>
+  if (m.status === 'failed') return <div className="ask-error">{m.note || 'Could not summarise.'}</div>
+  if (m.status === 'none') return <div className="ask-note">{m.note}</div>
+  if (!m.shown) return null
+  return (
+    <div className="ask-note">
+      Summarised from the answer as written — nothing added.
+      {m.dropped ? ` ${m.dropped} sentence${m.dropped === 1 ? '' : 's'} the answer does not say ${m.dropped === 1 ? 'was' : 'were'} left out.` : ''}
+    </div>
   )
 }
 
@@ -253,13 +293,12 @@ function CheckButton({ turn, index }: { turn: Turn; index: number }) {
   const branch = useBranch()
   const c = turn.check
   if (c?.status === 'done') {
-    return <span className="ask-check done" title={c.summary}><Icon name="check" size={11} /> Double checked</span>
+    return <span className="ask-check done"><Icon name="check" size={11} /> Double checked</span>
   }
   if (c?.status === 'checking') return null
   if (!hasNumbers(turn.check?.original ?? turn.text)) return null
   return (
     <button className="ask-check" disabled={busy || branch?.status !== 'ready'}
-      title="Look up each number again on its page, and work the sums out again with the calculator"
       onClick={() => void useAsk.getState().doubleCheck(index)}>
       <Icon name="check" size={11} /> {c?.status === 'failed' || c?.status === 'stopped' ? 'Double check again' : 'Double check numbers'}
     </button>
@@ -310,6 +349,12 @@ function Answer({ turn, offer, question, index }: {
     if (tbl.part === 'beyond') beyond = tbl.table
     else board = tbl.table
   }
+  // Summarise (DESIGN.md 87): each part's summary in its place
+  const sum = turn.summary
+  if (sum?.status === 'done' && sum.shown) {
+    board = sum.board ?? board
+    beyond = sum.beyond ?? beyond
+  }
   return (
     <div className="turn answer">
       {turn.warning ? <div className="ask-warn">{turn.warning}</div> : null}
@@ -340,6 +385,7 @@ function Answer({ turn, offer, question, index }: {
       {turn.status === 'writing' ? <span className="caret" /> : null}
       {turn.status === 'done' && !fromFile ? <><CitedPictures turn={turn} /><OfferedFiles turn={turn} /></> : null}
       {fromFile ? <><Calculated turn={turn} /><CheckBox turn={turn} /><PagesUsed turn={turn} branch={branch} /></> : null}
+      <SummaryNote turn={turn} />
       <TableNote turn={turn} />
       {turn.error ? <div className="ask-error">{turn.error}</div> : null}
       {turn.status === 'stopped' ? <div className="ask-note">Stopped.</div> : null}
@@ -355,6 +401,12 @@ function Answer({ turn, offer, question, index }: {
           question small enough — add a picture's card to the context to include it.
         </div>
       ) : null}
+      {turn.uncited && turn.status === 'done' ? (
+        <div className="ask-warn">
+          No card is cited in this answer, so nothing shows it comes from your board — it may be
+          the model's own knowledge.
+        </div>
+      ) : null}
       {turn.dropped ? (
         <div className="ask-note">
           Removed {turn.dropped} citation{turn.dropped === 1 ? '' : 's'} of cards that were not
@@ -367,6 +419,7 @@ function Answer({ turn, offer, question, index }: {
               <button className="ask-add" onClick={() => setAdding(true)}>
                 <Icon name="plus" size={11} /> Add to board
               </button>
+              <SummaryButton turn={turn} index={index} />
               <TableButton turn={turn} index={index} />
               {fromFile ? <CheckButton turn={turn} index={index} /> : null}
             </div>
@@ -375,7 +428,7 @@ function Answer({ turn, offer, question, index }: {
         <div className="ask-next">
           <span className="ask-next-lead">{turn.choices ? 'Your answer' : 'You could ask next'}</span>
           {turn.nexts.map((q, i) => (
-            <button key={i} className="starter" title={turn.choices ? 'Answer this' : 'Ask this'}
+            <button key={i} className="starter"
               onClick={() => offer(q)}>{q}</button>
           ))}
         </div>
@@ -424,23 +477,27 @@ export function AskPanel() {
     const el = scroller.current
     if (el && following.current) el.scrollTop = el.scrollHeight
   }, [turns, open, expanded])
-  // back at the bottom picks the answer up again; only the reader's own
-  // moves upward (below) let it go - our own scrolls never do
+  // Any move upward lets go - wheel, scrollbar, touchpad or keys - and only
+  // coming right back to the bottom picks the answer up again. Our own
+  // scrolls only ever go down. Before, being within 80 px of the bottom took
+  // it back, so a small scroll up was undone at once and the reader had to
+  // wait for the answer to finish (DESIGN.md 87).
+  const last = useRef({ top: 0, height: 0 })
   const onScroll = () => {
     const el = scroller.current
-    // a few lines' grace: the answer may have grown since the scroll began
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) following.current = true
+    if (!el) return
+    // an answer that shrank moves the view up by itself: not the reader
+    const up = el.scrollTop < last.current.top - 1 && el.scrollHeight >= last.current.height
+    last.current = { top: el.scrollTop, height: el.scrollHeight }
+    if (up) following.current = false
+    else if (el.scrollHeight - el.scrollTop - el.clientHeight < 24) following.current = true
   }
   // Scrolling up lets go at once. Read from the scroll position alone it did
   // not: a smooth wheel scroll moves a few pixels at a time, the next words
   // arrived first and pulled the view back down, and it could never get away
   // while an answer was being written (DESIGN.md 68).
   const letGo = () => { following.current = false }
-  const onWheel = (e: React.WheelEvent) => {
-    const el = scroller.current
-    if (e.deltaY < 0) letGo()
-    else if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) following.current = true
-  }
+  const onWheel = (e: React.WheelEvent) => { if (e.deltaY < 0) letGo() }
   const onKeyScroll = (e: React.KeyboardEvent) => {
     if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) letGo()
   }
@@ -532,33 +589,31 @@ export function AskPanel() {
             <span className="ask-head-actions">
               {!expanded ? (
                 <button className={`icon-btn ${explain ? 'on' : ''}`} aria-pressed={explain}
-                  title={explain ? 'Explain more: on'
-                    : 'Explain more'}
+                  aria-label="Explain more"
                   onClick={() => ask.setExplain(!explain)}>
                   <Icon name="explain" size={14} />
                 </button>
               ) : null}
               <button className={`icon-btn pin-btn ${pinned ? 'on' : ''}`} aria-pressed={pinned}
-                title={pinned ? 'Unpin'
-                  : 'Pin open'}
+                aria-label={pinned ? 'Unpin' : 'Pin open'}
                 onClick={() => ask.setPinned(!pinned)}>
                 <PinIcon on={pinned} />
               </button>
-              <button className="icon-btn" title="Clear the conversation" disabled={!turns.length}
+              <button className="icon-btn" aria-label="Clear the conversation" disabled={!turns.length}
                 onClick={() => setClearing(true)}>
                 <Icon name="trash" size={14} />
               </button>
               {!expanded ? (
-                <button className="icon-btn" title={side === 'left' ? 'Move to middle' : 'Move to left'}
+                <button className="icon-btn" aria-label={side === 'left' ? 'Move to middle' : 'Move to left'}
                   onClick={() => ask.setSide(side === 'left' ? 'center' : 'left')}>
                   <Icon name={side === 'left' ? 'dock-center' : 'dock-left'} size={14} />
                 </button>
               ) : null}
-              <button className="icon-btn" title={expanded ? 'Back to the board' : 'Expand the chat'}
+              <button className="icon-btn" aria-label={expanded ? 'Back to the board' : 'Expand the chat'}
                 onClick={() => ask.setExpanded(!expanded)}>
                 <Icon name={expanded ? 'shrink' : 'fit'} size={14} />
               </button>
-              <button className="icon-btn" title="Close  (Esc)" onClick={() => ask.setOpen(false)}>
+              <button className="icon-btn" aria-label="Close" onClick={() => ask.setOpen(false)}>
                 <Icon name="x" size={14} />
               </button>
             </span>
@@ -574,7 +629,7 @@ export function AskPanel() {
                 knowledge and this conversation — nothing from the board is sent.</span>
             ) : present.length === 0 ? (
               <>
-                <span className="ctx-chip whole" title="Every card on this board">
+                <span className="ctx-chip whole">
                   <span className="ctx-name"><Icon name="grid" size={11} /> Whole board
                     <span className="ctx-count"> · {everything} cards</span></span>
                 </span>
@@ -589,13 +644,13 @@ export function AskPanel() {
                   const n = nodes[id]
                   const count = cardsInside(id)
                   return (
-                    <span key={id} className="ctx-chip" title={n.title || 'Untitled'}>
+                    <span key={id} className="ctx-chip">
                       <button className="ctx-name" onClick={() => revealCard(id)}>
                         {n.type === 'meta' ? <Icon name="layers" size={11} /> : null}
                         {n.title || 'Untitled'}
                         {count > 1 ? <span className="ctx-count"> · {count} cards</span> : null}
                       </button>
-                      <button className="ctx-x" title="Take out of context" onClick={() => ask.remove(id)}>
+                      <button className="ctx-x" aria-label="Take out of context" onClick={() => ask.remove(id)}>
                         <Icon name="x" size={10} />
                       </button>
                     </span>
@@ -662,8 +717,7 @@ export function AskPanel() {
         onDrop={(e) => {
           const docs = docsIn(e.dataTransfer?.files)
           if (docs.length) { e.preventDefault(); e.stopPropagation(); openFiles(docs) } else pasted.onDrop(e)
-        }}
-        title={awake ? undefined : `Ask your board  (${/mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+J)`}>
+        }}>
         <PastedStrip pictures={pasted.pictures} reading={pasted.reading} remove={pasted.remove} />
         <span className="bar-mark" aria-hidden><Icon name="ankh" size={15} /></span>
         <textarea ref={box} rows={1} value={draft} aria-label="Ask your board"
@@ -688,28 +742,25 @@ export function AskPanel() {
         <div className="bar-tools">
           <PickPicture add={pasted.add} className="bar-chip icon-only" size={12} />
           {expanded && open ? (
-            <label className={`bar-chip ${explain ? 'on' : ''}`}
-              title="Explain more">
+            <label className={`bar-chip ${explain ? 'on' : ''}`}>
               <input type="checkbox" checked={explain} onChange={(e) => ask.setExplain(e.target.checked)} />
               <Icon name="bullets" size={12} /> Explain more
             </label>
           ) : null}
-          {!branch ? <label className={`bar-chip own-chip ${own ? 'on' : ''}`}
-            title={own ? 'Board off'
-              : 'Answer without the board'}>
+          {!branch ? <label className={`bar-chip own-chip ${own ? 'on' : ''}`}>
             <input type="checkbox" checked={own} onChange={(e) => ask.setOwn(e.target.checked)} />
             <Icon name="grid" size={12} /> {own ? 'Board off' : 'Board on'}
           </label> : null}
-          <label className={`bar-chip ${think ? 'on' : ''}`} title="Think deeper">
+          <label className={`bar-chip ${think ? 'on' : ''}`}>
             <input type="checkbox" checked={think} onChange={(e) => ask.setThink(e.target.checked)} />
             <Icon name="bulb" size={12} /> Think deeper
           </label>
           {busy ? (
-            <button className="send stop" title="Stop" onClick={() => ask.stop()}>
+            <button className="send stop" aria-label="Stop" onClick={() => ask.stop()}>
               <Icon name="stop" size={13} />
             </button>
           ) : (
-            <button className={`send ${ready ? 'ready' : ''}`} title="Ask  (Enter)"
+            <button className={`send ${ready ? 'ready' : ''}`} aria-label="Ask"
               disabled={!ready} onClick={() => send(draft)}>
               <Icon name="send" size={14} />
             </button>
