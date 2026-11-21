@@ -4590,3 +4590,30 @@ Not done: a formula the model writes without dollar signs is not known to
 be one, so a bar in it still splits the row.
 
 361 tests.
+
+## 91. Add to board keeps a table the answer wrote (2026-11-21)
+
+Asked for the differences between context engineering and prompt
+engineering, the answer was a comparison table the model wrote itself (the
+compare shape, §66), every cell cited, with a line on which fits when. Add
+to board drafts "what this answer adds" (§34, §53) - made for Explain more
+answers - and turned it into a short paragraph titled "Context Engineering
+as System Optimization Science": the table was gone, and one clause ("ensuring
+performance remains stable even as data scales") was not in the answer.
+Make a table already put its table on the card as it is (§85); a table in
+the answer as written did not.
+
+- **The card holds the answer as written** when its part before the Beyond
+  line has a markdown table (a row of cells and a separator row): the words
+  around the table too, card citations taken off, as for §85. The title is
+  the question; the drafter still chooses the card it belongs with and how
+  they relate.
+- **Which wins**: a Make a table table shown in the answer's place, then a
+  summary shown (§87), then a table in the answer as written, then the
+  drafted card as before. Answers without a table are drafted as before.
+
+Not done: the drafter can still add a clause the answer does not say, in
+the cards it drafts for answers without a table; nothing checks a drafted
+card against the answer.
+
+361 tests.

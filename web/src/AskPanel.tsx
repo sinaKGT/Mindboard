@@ -161,9 +161,14 @@ function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; 
     // so is a summary shown in its place (DESIGN.md 87)
     const sum = turn.summary?.status === 'done' && turn.summary.shown ? turn.summary : null
     const summary = sum ? [sum.board, sum.beyond ? `Beyond your board:\n${sum.beyond}` : ''].filter(Boolean).join('\n') : ''
-    api.askDraft(boardId, { question, answer: table || summary || turn.text, cited, candidates, history })
+    // and so is an answer the model wrote as a table itself - a comparison
+    // (DESIGN.md 91): drafted as "what is new", it became a short paragraph
+    // that dropped the table and said a thing the answer did not
+    const written = !table && !summary ? writtenTable(turn) : ''
+    const keep = table || written
+    api.askDraft(boardId, { question, answer: keep || summary || turn.text, cited, candidates, history })
       // the drafter titles what is new, which a table is not: the question names it
-      .then((draft) => place(table ? { ...draft, title: question.trim().replace(/[?.!]+$/, ''), text: table } : draft))
+      .then((draft) => place(keep ? { ...draft, title: question.trim().replace(/[?.!]+$/, ''), text: keep } : draft))
       .catch((e) => setError(e.message || 'could not draft the card'))
     // drafted once, when asked for
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,6 +212,16 @@ function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; 
  *  and no "Also from" line, which only names them */
 const tableForCard = (table: string) =>
   table.replace(/\n+Also from:.*$/s, '').replace(/\s*\[\[[0-9A-Za-z]{26}\]\]/g, '').trim()
+
+/** An answer that holds a markdown table of its own (DESIGN.md 91): its
+ *  part before the Beyond line, as written, for a card - the words around
+ *  the table kept, citations off (a card does not draw them), and a gap
+ *  left before a stop where a citation was. "" when there is no table. */
+const writtenTable = (turn: Turn) => {
+  const part = (turn.board ?? tablePart(turn.text).text).trim()
+  if (!/^\s*\|.*\|\s*$/m.test(part) || !/^\s*\|?\s*:?-{3,}:?\s*\|/m.test(part)) return ''
+  return part.replace(/[ \t]*\[\[[0-9A-Za-z]{26}\]\]/g, '').replace(/[ \t]+([.,;:])/g, '$1').trim()
+}
 
 /** Make a table (DESIGN.md 85): under an answer, its own words laid out as
  *  rows and columns, shown in its place; "Show as written" brings it back. */

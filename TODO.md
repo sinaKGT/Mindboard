@@ -14,7 +14,7 @@ Summarise beside Add to board, scrolling while it writes, no hover text in
 the chat (§87); a board answer citing no card says so (§88); Explain more
 understands, plans and answers, in a file's conversation too, and page
 lists are links (§89); tables with formulas keep their columns (§90);
-next: the rest of C.
+Add to board keeps a table the answer wrote (§91); next: the rest of C.
 
 ---
 
@@ -42,6 +42,10 @@ next: the rest of C.
   a paper copy its bracketed reference numbers ("[1147, 405, 340]") as if
   they were sources. Decide whether to take them out of passages or answers
   without touching real brackets (code, lists).
+- **Add to board: check a drafted card against the answer** (from §91). The
+  drafter wrote "ensuring performance remains stable even as data scales",
+  which the answer did not say. A word check like the summary's (§87) could
+  drop such a clause; try it with the real model first.
 - **Summarise: try it with the real model** (from §87). Done with the fake
   model only: see how often sentences are left out by the word check, and
   whether 400 characters is the right length to offer it from.
