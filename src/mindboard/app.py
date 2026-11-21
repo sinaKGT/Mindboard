@@ -27,7 +27,7 @@ from .bundle import (
     restore_backup,
 )
 from .ids import ulid
-from .models import (AskRequest, BoardCreate, BoardPatch, DraftRequest, ExpertBody,
+from .models import (AskRequest, BoardCreate, CheckRequest, BoardPatch, DraftRequest, ExpertBody,
                      GuideRequest, OpsRequest, SpeakRequest)
 from .ops import apply_envelopes, read_graph
 from .paths import DataDir
@@ -554,8 +554,9 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 finally:
                     indexer.want(bid)
                 got.attached = pics
-                yield from tasks_mod.run(model, got, body.question, history,
-                                         board_tools(model, bid, pics))
+                if got.mode != "explain":
+                    yield from tasks_mod.run(model, got, body.question, history,
+                                             board_tools(model, bid, pics))
                 yield from answer_events(model, got, question, history, body.think, hold=False)
 
             return stream_answer(model, with_pictures, warning, request,
@@ -565,15 +566,20 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             # the request understood and its steps done first (DESIGN.md 66);
             # held for the whole answer, its loop fallback included; a question
             # asked while a picture is being described waits its turn (60)
-            tools = own_tools(model, ctx.attached) if ctx.mode == "own" \
-                else board_tools(model, bid, ctx.attached)
-            yield from tasks_mod.run(model, ctx, body.question, history, tools, known=body.task)
+            # Explain more is not read first (DESIGN.md 80): its steps searched
+            # the board it means not to search, and "two examples" read as a
+            # list to extract opened the answer with "the cards have none"
+            if ctx.mode != "explain":
+                tools = own_tools(model, ctx.attached) if ctx.mode == "own" \
+                    else board_tools(model, bid, ctx.attached)
+                yield from tasks_mod.run(model, ctx, body.question, history, tools, known=body.task)
             yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
 
         return stream_answer(model, understood, warning, request, after=lambda: indexer.want(bid), hold=True)
 
     # ------------------------------------------------- what steps can do --
     # DESIGN.md 66: the tools a task's steps use, where the question is asked
+    from . import calc as calc_mod
     from . import tasks as tasks_mod
 
     READ_PICTURE = ("Write out all the text in this picture exactly, in reading order, keeping its "
@@ -788,11 +794,12 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             picked, how = files.find(s, body.question, search_model("embed"), search_model("rerank"))
             ctx = files.context(s, picked, how)
             ctx.attached = pasted
-            return model, ctx, model.memory_note()
+            return model, ctx, model.memory_note(), picked
 
-        model, ctx, warning = await run_in_threadpool(prepare)
+        model, ctx, warning, picked = await run_in_threadpool(prepare)
 
         def run():
+            worked = ""
             # a spreadsheet (DESIGN.md 65): the model first decides whether the
             # question needs calculating over whole sheets, and the tools run
             if s.book is not None:
@@ -809,11 +816,51 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                        "calls": [{"tool": r.get("tool"), "label": r.get("label", ""),
                                   "said": r["said"], "error": r.get("error", "")} for r in results]}
                 ctx.text = calculated_text(results, trouble) + ctx.text
+            elif calc_mod.needs(body.question):
+                # any other file (DESIGN.md 82): the model picks the numbers and
+                # the operation, the calculator works it out - never the model
+                calcs, trouble = calc_mod.decide(model, body.question, history, ctx.text)
+                if model.cancelled():
+                    return
+                pages = calc_mod.page_texts(picked)
+                results = [calc_mod.run(c, pages) for c in calcs]
+                if results or trouble:
+                    yield {"event": "tools", "why": "", "trouble": trouble,
+                           "calls": [{"tool": "calculate", "label": r["label"], "said": r["said"],
+                                      "error": r.get("error", "")} for r in results]}
+                    # said with the question, last - before the passages, the
+                    # answer twice did its own sum beside the calculator's
+                    worked = calc_mod.calculated_text(results, trouble)
             # the request understood and its steps done (DESIGN.md 66)
             yield from tasks_mod.run(model, ctx, body.question, history, file_tools(model, s, ctx.attached))
+            if worked:
+                ctx.task_note = (ctx.task_note or "") + "\n\n(" + worked.strip() + ")"
             yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
 
         return stream_answer(model, run, warning, request, hold=True)
+
+    @app.post("/api/files/{fid}/check")
+    async def api_file_check(fid: str, body: CheckRequest, request: Request):
+        """Double check an answer about this file (DESIGN.md 82): each number
+        looked up again on its page, each sum worked out again. Reads only;
+        streamed as "check" events and a final "checked"."""
+        from . import doublecheck
+
+        s = file_or_404(fid)
+        if s.status != "ready" or s.index is None:
+            raise HTTPException(409, s.error or "the file is still being prepared")
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Ask your board is not set up yet")
+        history = [t.model_dump() for t in body.history]
+
+        def find(question: str):
+            return files.find(s, question, search_model("embed"), search_model("rerank"))[0]
+
+        def run():
+            yield from doublecheck.check(model, s, body.question, body.answer, history, find)
+
+        return stream_answer(model, run, model.memory_note(), request, hold=True)
 
     def file_tools(model, s, pics) -> "tasks_mod.Tools":
         def search(query: str):

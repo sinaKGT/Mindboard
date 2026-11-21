@@ -5,22 +5,31 @@ asked, what was decided, and what done looks like.
 Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
 (§72), Node.js in the installers and AGENTS.md (§74), card AI in a panel
 with a quiz as data, soft glass cards and Beautify (§75-79); all merged into
-main (PR #4); next: C.
+main (PR #4); Explain more gives what it is asked for, with no "the cards
+do not cover it" line (§80-81); numbers in file answers - rows kept, a
+calculator and Double check (§82); next: the rest of C.
 
 ---
 
 ## C. Answers
 
-- **Explain more should use the model's own knowledge when the board has
-  nothing.** Asked for "two examples" with Explain more on, it says the
-  context does not have them. It should give them from what it knows, marked
-  plainly as not from your cards (rule 3 still holds: board facts cited,
-  general knowledge labelled, never passed off as the board's).
+- **Board parts that say a little more than the card** (seen in §81). In
+  Explain more the part before the Beyond line sometimes dresses a card up
+  ("allows users to analyse real-time data", cited, where the card only
+  names the domains). Worth a look across ordinary answers too, before
+  deciding whether it needs anything.
 - **Tables in answers when they help**, and a **"Make a table" action under
   an answer** that rewrites it as a table (and could add it to the board as
   a card - cards already draw markdown tables, §69). Cards have Beautify now
   (§78-79), which lays a card out as lists and bold labels but makes no
   tables, since it never moves words; the chat's answers have nothing yet.
+- **Numbers in file answers: what Double check leaves** (from §82). Rows
+  kept, a calculator and a Double check button are done; on the test set
+  every wrong number was corrected. Left: run it on a real PDF the owner
+  has seen go wrong; check a scanned page's numbers against its figure
+  description; tables whose header cells are several words ("Nitrogen
+  (mg/kg)") fall back to a weaker row check; redo a sum when a number it
+  used was corrected; a calculator for the board's answers too.
 
 ## D. The board
 

@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { AnswerFiles, filesToOffer } from './AnswerFiles'
 import { AnswerPictures, picturesToShow } from './AnswerPictures'
-import { askable, cardsInside, revealCard, useAsk, type Turn } from './askStore'
+import { askable, cardsInside, hasNumbers, revealCard, useAsk, type Turn } from './askStore'
 import { Calculated, FileStrip, FileTabs, PagesUsed, pageLink } from './FileBranch'
 import { stepLine, TaskSteps } from './TaskSteps'
 import { Icon } from './icons'
@@ -196,14 +196,61 @@ function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; 
   return <div className="ask-note">Finding what is new here, and where it belongs on your board…</div>
 }
 
-function Answer({ turn, offer, question }: {
-  turn: Turn; offer?: (question: string) => void; question: string
+/** Double check (DESIGN.md 82): under an answer about a file that has a
+ *  number in it - its numbers looked up again on their pages, its sums worked
+ *  out again by the calculator. Asked for, never automatic: it takes a while. */
+function CheckButton({ turn, index }: { turn: Turn; index: number }) {
+  const busy = useAsk((s) => s.busy)
+  const branch = useBranch()
+  const c = turn.check
+  if (c?.status === 'done') {
+    return <span className="ask-check done" title={c.summary}><Icon name="check" size={11} /> Double checked</span>
+  }
+  if (c?.status === 'checking') return null
+  if (!hasNumbers(turn.check?.original ?? turn.text)) return null
+  return (
+    <button className="ask-check" disabled={busy || branch?.status !== 'ready'}
+      title="Look up each number again on its page, and work the sums out again with the calculator"
+      onClick={() => void useAsk.getState().doubleCheck(index)}>
+      <Icon name="check" size={11} /> {c?.status === 'failed' || c?.status === 'stopped' ? 'Double check again' : 'Double check numbers'}
+    </button>
+  )
+}
+
+/** what Double check found, under the answer */
+function CheckBox({ turn }: { turn: Turn }) {
+  const c = turn.check
+  if (!c) return null
+  if (c.status === 'checking') return <div className="ask-status checking">{c.doing ?? 'Double checking…'}</div>
+  if (c.status === 'failed') return <div className="ask-error">Double check failed: {c.error}</div>
+  if (c.status === 'stopped') return <div className="ask-note">Double check stopped.</div>
+  const marks = c.marks ?? []
+  if (!marks.length) return <div className="ask-note">{c.summary ?? 'No numbers to check.'}</div>
+  const sign = { ok: '✓', fixed: '✎', unchecked: '?' } as const
+  return (
+    <div className="checked">
+      <div className="checked-lead"><Icon name="check" size={11} /> Double checked — {c.summary}</div>
+      {marks.map((m, i) => (
+        <div key={i} className={`checked-row ${m.status}`}>
+          <span className="checked-sign">{sign[m.status]}</span>
+          {m.status === 'fixed' ? <><b>{m.text}</b>, not {m.was}</> : <b>{m.text}</b>}
+          {' — '}{m.status === 'unchecked' ? `${m.note}; take it as unchecked` : m.note}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Answer({ turn, offer, question, index }: {
+  turn: Turn; offer?: (question: string) => void; question: string; index: number
 }) {
   const [adding, setAdding] = useState(false)
   const [showThinking, setShowThinking] = useState(false)
   const branch = useBranch()
   const fromFile = turn.mode === 'file'
-  const text = (turn.status === 'done' ? turn.text : hideNext(turn.text))
+  // checked (DESIGN.md 82): its numbers drawn as checked, corrected or not checked
+  const shown = turn.check?.status === 'done' && turn.check.marked ? turn.check.marked : turn.text
+  const text = (turn.status === 'done' ? shown : hideNext(shown))
     .replace(BEYOND_MARK, BEYOND)
   const at = text.indexOf(BEYOND)
   const board = at >= 0 ? text.slice(0, at) : text
@@ -235,7 +282,7 @@ function Answer({ turn, offer, question }: {
       ) : null}
       {turn.status === 'writing' ? <span className="caret" /> : null}
       {turn.status === 'done' && !fromFile ? <><CitedPictures turn={turn} /><OfferedFiles turn={turn} /></> : null}
-      {fromFile ? <><Calculated turn={turn} /><PagesUsed turn={turn} branch={branch} /></> : null}
+      {fromFile ? <><Calculated turn={turn} /><CheckBox turn={turn} /><PagesUsed turn={turn} branch={branch} /></> : null}
       {turn.error ? <div className="ask-error">{turn.error}</div> : null}
       {turn.status === 'stopped' ? <div className="ask-note">Stopped.</div> : null}
       {turn.mode === 'search' && turn.status && ['done', 'stopped'].includes(turn.status) ? (
@@ -261,9 +308,12 @@ function Answer({ turn, offer, question }: {
       ) : null}
       {turn.status === 'done' && turn.text.trim() && !turn.error ? (
         adding ? <AddToBoard question={question} turn={turn} onDone={() => setAdding(false)} />
-          : <button className="ask-add" onClick={() => setAdding(true)}>
-              <Icon name="plus" size={11} /> Add to board
-            </button>
+          : <div className="ask-acts">
+              <button className="ask-add" onClick={() => setAdding(true)}>
+                <Icon name="plus" size={11} /> Add to board
+              </button>
+              {fromFile ? <CheckButton turn={turn} index={index} /> : null}
+            </div>
       ) : null}
       {offer && turn.nexts?.length && turn.status === 'done' ? (
         <div className="ask-next">
@@ -524,7 +574,7 @@ export function AskPanel() {
               t.role === 'user'
                 ? <div key={i} className="turn question"><AskedWith thumbs={t.images} />{t.text}</div>
                 // only the latest answer offers its next question
-                : <Answer key={i} turn={t} question={turns[i - 1]?.text ?? ''}
+                : <Answer key={i} index={i} turn={t} question={turns[i - 1]?.text ?? ''}
                     offer={i === turns.length - 1 && canSend ? send : undefined} />
             ))}
           </div>

@@ -65,7 +65,27 @@ export interface Turn {
   tools?: { why: string; trouble: string; calls: { tool: string; label: string; said: string; error: string }[] }
   /** the request understood, and its steps as they run (DESIGN.md 66) */
   task?: TaskPlan
+  /** Double check (DESIGN.md 82): its numbers looked up again, its sums redone */
+  check?: DoubleCheck
 }
+
+export interface CheckMark { text: string; status: 'ok' | 'fixed' | 'unchecked'; note: string; was?: string }
+export interface DoubleCheck {
+  status: 'checking' | 'done' | 'failed' | 'stopped'
+  /** what it is doing: how many numbers, which page */
+  doing?: string
+  summary?: string
+  marks?: CheckMark[]
+  /** the answer with its numbers wrapped for drawing */
+  marked?: string
+  /** the answer as it was, before corrections */
+  original?: string
+  error?: string
+}
+
+/** an answer about a file with a number in it worth a Double check */
+export const hasNumbers = (text: string) => /(?<![\w.\-/])\d[\d,]*(?:\.\d+)?/.test(
+  text.replace(/\((?:p|pp|page)\.?\s*\d+[^)]*\)/gi, ''))
 
 export interface TaskStep { do: string; what: string; status: 'waiting' | 'running' | 'done' | 'failed' | 'stopped'; note?: string }
 export interface TaskPlan { task: string; about: string; output: string; reading: string; steps: TaskStep[] }
@@ -139,6 +159,8 @@ interface Ask {
    *  own conversation with the board on, and the question in plain words */
   askAbout(ids: string[], question: string, action?: CardAction): void
   stop(): void
+  /** Double check the answer at this place in the shown file conversation (DESIGN.md 82) */
+  doubleCheck(index: number): Promise<void>
   /** file conversations, and which is shown - null for the board's own */
   branches: FileBranch[]
   active: string | null
@@ -158,8 +180,10 @@ const savedSide = (): 'center' | 'left' => {
 const HISTORY_TURNS = 10
 
 // an answer cut off by a refresh is kept as far as it got
-const settled = (turns: Turn[]) => turns.map((t) => (t.status && t.status !== 'done'
-  ? { ...t, status: 'stopped' as const } : t))
+const settled = (turns: Turn[]) => turns.map((t) => {
+  const out = t.status && t.status !== 'done' ? { ...t, status: 'stopped' as const } : t
+  return out.check?.status === 'checking' ? { ...out, check: { ...out.check, status: 'stopped' as const } } : out
+})
 
 function save(s: Ask) {
   if (!s.boardId) return
@@ -290,6 +314,59 @@ export const useAsk = create<Ask>()((set, get) => ({
     set({ context: ids, own: false, open: true })
     save(get())
     void get().send(question, [], true, action)
+  },
+
+  async doubleCheck(index) {
+    const s = get()
+    const branch = s.active ? s.branches.find((b) => b.id === s.active) : undefined
+    const turn = s.turns[index]
+    const asked = s.turns[index - 1]
+    if (!branch || branch.status !== 'ready' || s.busy || !turn || turn.role !== 'assistant'
+        || turn.status !== 'done' || !asked || asked.role !== 'user') return
+    const original = turn.check?.original ?? turn.text
+    const history = s.turns.slice(0, index - 1)
+      .filter((t) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done'))
+      .slice(-HISTORY_TURNS).map((t) => ({ role: t.role, text: t.prompt ?? t.text }))
+    const controller = new AbortController()
+    const patch = (p: Partial<DoubleCheck>) => set((st) => {
+      const turns = st.turns.slice()
+      const t = turns[index]
+      if (t) turns[index] = { ...t, check: { ...(t.check ?? { status: 'checking' }), ...p } }
+      return { turns }
+    })
+    set({ busy: true, controller })
+    patch({ status: 'checking', doing: 'Finding the numbers…', original, error: undefined })
+    try {
+      await api.checkFile(branch.id, { question: asked.prompt ?? asked.text, answer: original, history },
+        (name, data) => {
+          if (name === 'check') {
+            if (data.stage === 'start') patch({ doing: `Checking ${data.numbers} number${data.numbers === 1 ? '' : 's'}`
+                                                       + (data.pages?.length ? ` against ${data.pages.join(', ')}` : '') + '…' })
+            else if (data.stage === 'page') patch({ doing: `Reading ${data.page} again…` })
+            else if (data.stage === 'calculate') patch({ doing: 'Working the sums out again with the calculator…' })
+          } else if (name === 'checked') {
+            const text: string = data.answer
+            const at = text.indexOf('Beyond your board:')
+            set((st) => {
+              const turns = st.turns.slice()
+              const t = turns[index]
+              if (t) turns[index] = { ...t, text,
+                board: at >= 0 ? text.slice(0, at).trim() : text, beyond: at >= 0 ? text.slice(at + 18).trim() : '',
+                check: { status: 'done', summary: data.summary, marks: data.marks, marked: data.marked, original } }
+              return { turns }
+            })
+          } else if (name === 'error') {
+            patch({ status: 'failed', error: data.message })
+          }
+        }, controller.signal)
+      const now = get().turns[index]?.check
+      if (now?.status === 'checking') patch({ status: 'stopped' })
+    } catch (err: any) {
+      patch(controller.signal.aborted ? { status: 'stopped' } : { status: 'failed', error: err.message || 'could not check' })
+    } finally {
+      set({ busy: false, controller: null })
+      save(get())
+    }
   },
 
   async send(question, pictures = [], fresh = false, action) {

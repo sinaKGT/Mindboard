@@ -76,7 +76,7 @@ export function blocks(src: string, breaks = false): Block[] {
 }
 
 // maths first (DESIGN.md 61): a formula's _ and * are not italics
-const INLINE = new RegExp(`(${MATH_SOURCE}|` + String.raw`\((?:p|pp)\.\s?\d{1,4}(?:\s?[-–]\s?\d{1,4})?\)|\[[^\]\n]{1,200}\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'"]|~~[^~\n]+~~|\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|` + '`[^`\\n]+`' + String.raw`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))`, 'g')
+const INLINE = new RegExp(`(${MATH_SOURCE}|` + String.raw`⟦[^⟦⟧\n]{1,400}⟧|\((?:p|pp)\.\s?\d{1,4}(?:\s?[-–]\s?\d{1,4})?\)|\[[^\]\n]{1,200}\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'"]|~~[^~\n]+~~|\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|` + '`[^`\\n]+`' + String.raw`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))`, 'g')
 
 /** one line's light formatting; citations through `cite` */
 type PageCite = (page: number, label: string) => ReactNode
@@ -88,6 +88,18 @@ function inline(text: string, cite: (id: string) => ReactNode, key = '', page?: 
     const k = `${key}${j}`
     if (!piece) return null
     if (j % 2 && texOf(piece)) return <Tex key={k} piece={piece} />
+    // a number Double check looked up (DESIGN.md 82), as "⟦status|number|was|note⟧"
+    const mk = j % 2 ? piece.match(/^⟦(ok|fixed|unchecked)\|([^|]*)\|([^|]*)\|([^|]*)⟧$/) : null
+    if (mk) {
+      const [, status, num, was, note] = mk
+      const title = status === 'ok' ? `Checked: ${note}` : status === 'fixed'
+        ? `Corrected from ${was}: ${note}` : `Not checked: ${note}`
+      return (
+        <span key={k} className={`num-mark ${status}`} title={title}>
+          {status === 'fixed' && was ? <s>{was}</s> : null}{num}
+        </span>
+      )
+    }
     // a file's page, cited "(p. 12)" (DESIGN.md 64): a link to it, where there is one
     const pg = j % 2 ? piece.match(/^\((?:p|pp)\.\s?(\d{1,4})/) : null
     if (pg) return <Fragment key={k}>{page ? page(Number(pg[1]), piece) : piece}</Fragment>

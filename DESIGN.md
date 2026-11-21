@@ -4017,3 +4017,206 @@ on the way and fixed: a first try ran a label's items into each other
 semicolon; and the model once made Nigel's whole "Role: ..." line a heading.
 
 299 tests.
+
+## 80. Explain more gives what it is asked for, and never cites a card for it (2026-11-21)
+
+Asked for "two examples" with Explain more on, the answer said the cards did
+not have them. Checked with the real model on *SWIFT Lab Visitors*, after "What
+is the Nottingham Digital Twin?", with the three cards that answer cited kept.
+It did give examples in every run, but:
+
+- **The request was read as a list to extract.** The task planner (§66) still
+  ran in Explain more, and took "give me two examples" as *extract* in 4 runs
+  of 4. That shape says "say plainly if some could not be found", and it was
+  said *after* the Explain more instruction, so it won: every answer opened
+  with a paragraph on what the cards lack. On "examples of how other cities
+  use a digital twin" its steps searched the board three times (9 s), the
+  board Explain more is meant not to search, and found nothing.
+- **Made-up examples cited cards.** In 4 runs of 5 the examples after
+  "Beyond your board:" carried a card citation, which passes the model's own
+  knowledge off as the person's notes. One named a city project that likely
+  does not exist ("Phoenix One").
+
+Done:
+
+- **Explain more is not planned.** No task, no steps: the request goes
+  straight to the answer (`app.py`, both the plain and the pasted-picture
+  path). The page already copes when the task events are absent.
+- **The Explain more instruction is said last**, after the step notes and
+  the dates, so nothing after it pulls the other way. It now says: give what
+  is asked for (examples, an analogy, detail); cite a card only for what that
+  card itself says; everything else goes after the line and cites nothing;
+  before the line only what the cards say that answers the question - never
+  claim a card says more; when they hold nothing, start with the line rather
+  than say what they lack; do not make up names, places or figures.
+- **Citations after the line are taken out** in `check_citations`, for every
+  kind of answer: the system prompt already said "cite nothing there", and the
+  model did not always keep to it. They are not counted as invented sources.
+  A Beyond part that is only "None" (seen in a plain answer on the same
+  board) is left out.
+
+Three wordings were tried, each on the same six questions the board cannot
+answer (two examples, twice; other cities; an analogy; a real-world use; how
+the data gets in):
+
+| wording | opens with what the cards lack | cites in Beyond (before removal) | board facts made up |
+|---|---|---|---|
+| "say so in one short sentence at most" | 6 of 6, two or three sentences | 0 | 0 |
+| "never say what the cards lack" | 2 of 6 | 4 | 1 (an EMCCA use, cited) |
+| kept: "only what the cards say ... start with the line" | 5 of 6, one or two sentences | 1 | 0 |
+
+The second cut the opening line but pushed the model to fill the part before
+the line by restating the cards, and once it invented what the EMCCA uses the
+twin for and cited a card for it. That is worse than a line saying the cards
+do not cover it, so the third was kept. A question the cards do answer ("Who
+visited from the EMCCA?") still came back from the cards, cited. Answers
+took 3-12 s with no planning (the planner alone took 1.4-1.9 s before).
+Checked in the app: the Explain more turn shows no task chip, and the
+examples sit under "Beyond your board".
+
+Not done: the short opening about what the cards lack remains in most
+answers. It comes from rule 3 of the system prompt ("if the cards do not
+answer the question, say so plainly first"), which every board answer
+shares. Changing it is a decision for the owner. The exact failure first
+reported (a refusal with no examples at all) did not happen in 24 runs
+today (5 before the change, 19 after).
+
+303 tests.
+
+## 81. Explain more drops "the cards do not cover it" (2026-11-21)
+
+After §80 most Explain more answers still opened with a sentence or two on
+what the cards lack ("The cards provided do not contain examples... They
+only list visitors"). The owner chose to drop it: the page already marks
+what is beyond the board.
+
+- **Telling the model was not enough.** The Explain more instruction now
+  says by number that rule 3 of the system prompt does not apply, and never
+  to write that the cards do not contain, describe or cover something. On
+  the six questions of §80, 4 answers of 6 still opened that way. The system
+  prompt itself is left as it is: it is shared by every board answer, and
+  its start is what llama-server keeps cached.
+- **So it is done in code** (`ask.without_lack`), for Explain more answers
+  only, before the Beyond line only, and only when there is a Beyond part to
+  read instead. A sentence goes when it says the cards, notes, board or
+  "they" do not contain / describe / list / mention ... something, only list
+  / identify / mention ..., or have no specific / concrete ... examples or
+  details; or when it opens "there is no". An opening "Based on the cards
+  provided," is taken off a sentence that stays. Lines and list items are
+  kept as they were. If nothing is left before the line, the answer starts
+  with it, and the page shows only the *Beyond your board* part.
+
+Measured on the same seven questions (the six of §80 and "Who visited from
+the EMCCA?"): the model opened with what the cards lack in 2 of 6, both
+dropped, so 0 of 6 answers show it; those two start with Beyond your board.
+Every sentence that said what the cards hold stayed, in the other four and
+in the EMCCA answer. Unit tests use the sentences the model actually wrote.
+Checked in the app: asked for examples from other cities, the answer opens
+with Beyond your board and nothing above it.
+
+Not done: the line is still seen while the answer streams, and goes when it
+ends (the page shows the checked answer then). Ordinary answers keep rule 3.
+In Explain more the part before the line sometimes says a little more than
+its card ("allows users to analyse real-time data", cited, where the card
+names the domains only) - put on TODO.md.
+
+309 tests.
+
+## 82. Numbers in file answers: rows kept, a calculator, and Double check (2026-11-21)
+
+Asked about a PDF, an answer now and then got a number wrong. The owner asked
+for two things: any calculation done by a calculator tool, never the model;
+and a separate step, asked for under an answer, that double checks its
+numbers. Of three directions shown (a button under the answer, a switch for
+the file, both), the owner chose the button.
+
+**A test set first** (`scripts/number_eval.py`, committed: it names nothing of
+the owner's). Three PDFs written by hand - a report with four tables, a lab
+table of ten samples, and a ten-page council budget with a wide monthly table,
+two-line headers, brackets for overspends, two council tax tables a year
+apart, a table whose text comes out column by column, and a scanned table -
+with numbers one swapped digit apart (3.48 beside 3.84). 43 questions with
+answers worked out from the tables themselves: lookups, totals, differences,
+averages, percentages, ratios. Run against a live Mindboard, it scores
+whether the right number is in each answer; `--check` also presses Double
+check.
+
+**What was wrong**, two runs before any change: 39 and 40 of 43 right. Of the
+seven wrong numbers, five came from the wrong row or column (S-02's
+phosphorus answered with S-01's 34.8; Car parks in October with 895, not
+282), two from sums done in the model's head (a "total" of 48,672 for
+18,382; an average pH of 6.54 for 6.64). One answer cited p. 12 of a
+four-page file.
+
+1. **A PDF's lines are kept.** pdfium gives a page's text line by line - a
+   table's row is a line - and the reader joined it all into one line,
+   "Revenue 2.64 2.91 Cost of sales 1.12 ...". Now each line stays.
+   39 and 42 of 43; wrong cells 5 to 3.
+2. **The calculator** (`calc.py`), for every file but a spreadsheet (which
+   has its sheet tools, §65), when the question reads as needing arithmetic.
+   The model only chooses: an operation (sum, difference, percent change,
+   percent of, ratio, average, product, min, max) and the numbers, each
+   copied with its passage's label. The code checks every number is written
+   in the passages, as a whole number (not the 1 of "Q1"), works the result
+   out exactly with decimals, and hands it to the answer as CALCULATED. A
+   number not found refuses that calculation, said as NOT CALCULATED. The
+   file prompt now says to do no arithmetic: a figure not calculated is said
+   to be not worked out.
+   First tried, almost every calculation was refused: the model writes
+   "Table 1" where the passage's label goes. A number now counts on the page
+   cited, or else on the one page that has it (on two pages, none cited: it
+   cannot be told which, and is refused). Then 31 of 32 calculations were
+   right and one refused - but the answer twice did its own sum beside the
+   calculator's, because the results sat before the passages. Said last,
+   with the question (rule 6), the 15 arithmetic questions went 30 of 30 in
+   two runs, where the same questions had 4 wrong in 60 before.
+3. **Double check** (`doublecheck.py`, `POST /api/files/{fid}/check`), a
+   button under an answer about a file that has a number in it. For each
+   number - not a year, a page, a list's number, a label's ("Table 4.1",
+   "Band D", "Q2", the "000" of "GBP 000"), nor one the question names -
+   it finds the pages its sentence cites, else the answer's, else a search's
+   (a page the file does not have is no page). Each page is read again: its
+   text with rows kept and, for a PDF, a sharper picture (1,600 pixels a
+   side). The model is shown each sentence with its number blanked out -
+   "spent on Registrars in June is ___" - and copies the number the page
+   gives, with its row and column. The code judges: where the table lines
+   up (a header line whose cells match the row line's numbers), it reads the
+   named cell itself; otherwise the copy must be on the page, on the line of
+   the row named. It then matches the answer (checked) or replaces it
+   (corrected). A number written on no page is worked out again by the
+   calculator from the pages' own numbers. Everything else is marked not
+   checked, with why. The answer comes back with each number marked, drawn
+   by Prose from a text token (never HTML): green checked, amber corrected
+   with the old number struck through, grey not checked; a box under it
+   lists each number and where it was found.
+
+How Double check got there, each on the full set:
+
+| version | wrong before | wrong after | right numbers made wrong | check time (median / max) |
+|---|---|---|---|---|
+| shown the answer's number | 3 | 1 | 0, but the years 2022-2025 of a list "corrected" into values, "Table 2" into 6,840 | 7.8 s / 29.6 s |
+| labels skipped, row checked, blind | 3 | 1 | 1 (Waste, Nov: 148 to 465, another month) | 7.2 s / 17.5 s |
+| the named cell read by the code | 1 | 0 | 0 | 7.1 s / 13.7 s |
+
+Shown the answer's number, the look found that number and agreed - told
+the answer's 763 (December) for June, it copied 763 and wrote "Dec". Blind,
+it found the right cells for three wrong answers out of three, but once
+misread the month; reading the cell in code fixed that. In the last run 106
+numbers were checked, one corrected (Registrars, June: 602 to 389) and 11
+left not checked: the column-by-column staff table (no row line to hold a
+number to), the scanned page (its text is a figure description, which the
+check does not read), and a figure rescaled by the answer (0.36m as
+360,000). Checked in the app on the soil results: asked for two values and
+a difference, Double check said "Reading p. 2 again", then the calculator,
+and marked all three checked, by row and column and by the calculator.
+
+Not done: a scanned page's numbers are not checked (the figure description
+could be held to like a page's text); tables whose cells do not line up
+with their header by spaces ("Nitrogen (mg/kg)" is two words) fall back to
+the row check; a corrected number's sums are not redone unless they are on
+no page themselves; the board's answers have no calculator yet; the test
+set is made by hand and is no real report - worth running on a real PDF the
+owner has seen go wrong. While the answer streams, a number the model
+labelled "(calculated)" may be its own sum; Double check is what catches it.
+
+346 tests.
