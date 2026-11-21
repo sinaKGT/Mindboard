@@ -36,21 +36,6 @@ THINKING_TOKENS = 8192
 # (DESIGN.md 35). Cards chosen by hand always bring all their pictures.
 SEARCH_PICTURE_TOKENS = 2000
 BEYOND = "Beyond your board:"
-# DESIGN.md 80: asked for "two examples", the answer opened with a paragraph
-# saying the cards had none, and cited cards beside examples it made up itself
-EXPLAIN = ("Explain more: I want a full explanation, not only what the cards say - explain "
-           "step by step, in plain words, and give what I ask for (examples, an analogy, more "
-           "detail; one or two concrete examples if I name nothing). Cite a card only for what "
-           "that card itself says. Everything else - examples, analogies, how such things "
-           f"usually work - is your own knowledge: put it after the line \"{BEYOND}\", cite "
-           "nothing there and do not tie it to a card. Before that line, only what the cards "
-           "say that answers me - never claim a card says more than it does. Rule 3 does not "
-           "apply here: never write that the cards do not contain, describe or cover "
-           "something - the page already marks what is beyond them. If the cards hold "
-           "nothing that answers me, do not repeat them either: start the answer with that "
-           "line. "
-           "Say plainly when you are unsure, and do not make up names, places or figures. "
-           "Finish with the NEXT: lines as always.")
 # the model sometimes dresses the line up - **Beyond your board:**, a heading -
 # and the split then left the stray ** on both sides of it
 BEYOND_MARK = re.compile(r"(?:^[ \t]*#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*Beyond your board:[ \t]*"
@@ -122,6 +107,24 @@ Finish with three lines, each starting exactly "{NEXT}", each holding one
 question the person could ask next: short, in their words - one going deeper,
 one putting it to use, one on a neighbouring idea."""
 
+
+# Explain more (DESIGN.md 86): the model's own knowledge and the conversation,
+# nothing from the board. With the conversation's cards still sent (DESIGN.md
+# 34, 80), the answer opened by restating them, cited, and put the explanation
+# asked for under "Beyond your board"; the owner wants the board out of it.
+EXPLAIN_SYSTEM = f"""You are a clear, careful teacher. The person has asked you to explain more:
+answer from your own knowledge, building on the conversation so far. Do not
+mention cards, notes or a board, and cite nothing.
+
+Start with the explanation itself. Explain step by step, in plain words, and
+give what they ask for - examples, an analogy, more detail; one or two concrete
+examples if they name nothing. Say plainly when you are unsure or something may
+be out of date, and do not make up names, places or figures. Write a formula in
+LaTeX between dollar signs, like $E = mc^2$.
+
+Finish with three lines, each starting exactly "{NEXT}", each holding one
+question the person could ask next: short, in their words - one going deeper,
+one putting it to use, one on a neighbouring idea."""
 
 FILE_SYSTEM = f"""You answer questions about one document, from PASSAGES found in it for
 each question - its best-matching parts, not the whole document. A page given
@@ -610,15 +613,16 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
     `keep` are the cards earlier answers in this conversation drew on (DESIGN
     34): they stay in context, first - so the model's prompt cache still holds
     them - and a search fills the rest of the budget. With `explain` (Explain
-    more) there is no search at all: the answer comes from those cards and the
-    conversation."""
+    more) nothing from the board goes in at all (DESIGN.md 86)."""
     graph = read_graph(conn, bid)
     nodes = {n["id"]: n for n in graph["nodes"]}
+    if explain:
+        # DESIGN.md 86: nothing from the board - the conversation and the
+        # model's own knowledge, whatever cards are chosen
+        return Context([], "", mode="explain", total=len(nodes))
     whole = not chosen
     kept = [i for i in dict.fromkeys(keep or []) if i in nodes]
-    if whole and explain:
-        ids, mode, how = expand(nodes, kept), "explain", ""
-    elif whole:
+    if whole:
         if not nodes:
             raise AskError("this board has no cards yet")
         if not question.strip():
@@ -667,9 +671,6 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
     if mode == "search":
         text = (f"BOARD OUTLINE (its groups)\n{retrieve.outline(nodes)}\n\n"
                 f"CARDS (the {len(ids)} of the board's {len(nodes)} that match the question)\n")
-    elif mode == "explain":
-        text = ("CARDS (from this conversation so far)\n" if ids
-                else "CARDS\n(none yet - answer from the conversation)\n")
     else:
         text = "CARDS\n"
     text += "\n\n".join(blocks[i] for i in ids)
@@ -819,8 +820,8 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     The short reply after the cards keeps the turns alternating, as the chat
     template expects. Change the cards and the start changes - and they are
     read again, as they should be."""
-    if ctx.mode == "own":
-        msgs = [{"role": "system", "content": OWN_SYSTEM}]
+    if ctx.mode in ("own", "explain"):
+        msgs = [{"role": "system", "content": OWN_SYSTEM if ctx.mode == "own" else EXPLAIN_SYSTEM}]
         return _conversation(msgs, ctx, question, history)
     if ctx.mode == "file":
         # one file's passages (DESIGN.md 64), and its pages better seen than read
@@ -848,16 +849,17 @@ def _conversation(msgs: list[dict], ctx: Context, question: str, history: list[d
     newest question last, with any pictures pasted into it."""
     for turn in history:
         if turn.get("role") in ("user", "assistant") and str(turn.get("text", "")).strip():
-            msgs.append({"role": turn["role"], "content": str(turn["text"])})
-    # Explain more asks for a fuller answer; said with the question, not in
-    # the system prompt, so the start of the prompt - and its cache - stay put;
-    # and said last, so no note after it pulls the other way (DESIGN.md 80)
-    asked = (question.strip() + weighing(ctx.reading) + ctx.task_note + dates_note(ctx, question)
-             + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else ""))
+            said = str(turn["text"])
+            if ctx.mode == "explain":
+                # earlier answers' card citations would pull the board back in (DESIGN.md 86)
+                said = _uncited(said)
+            msgs.append({"role": turn["role"], "content": said})
+    asked = question.strip() + weighing(ctx.reading) + ctx.task_note + dates_note(ctx, question)
     if ctx.attached:
         # pasted pictures go with the newest question, after the cards, so the
         # start of the prompt - and what llama-server has cached - stays put
-        pasted: list[dict[str, Any]] = [{"type": "text", "text": PASTED_HEAD}]
+        head = PASTED_HEAD if ctx.mode not in ("own", "explain") else PASTED_ALONE
+        pasted: list[dict[str, Any]] = [{"type": "text", "text": head}]
         for p in ctx.attached:
             pasted.append({"type": "image_url", "image_url": {"url": p.data_url}})
         msgs.append({"role": "user", "content": pasted + [{"type": "text", "text": asked}]})
@@ -868,6 +870,14 @@ def _conversation(msgs: list[dict], ctx: Context, question: str, history: list[d
 
 PASTED_HEAD = ("PASTED with this question (not on the board): the picture below. Answer about it, "
                "and bring in the cards wherever they bear on it - cite them as usual.")
+# with no board in the answer (Board off, Explain more), nothing to bring in
+PASTED_ALONE = "PASTED with this question: the picture below. Answer about it."
+
+
+def _uncited(text: str) -> str:
+    """Text with its card citations taken out, with the space before each -
+    and nothing else touched: a nested list keeps its indentation."""
+    return re.sub(r"[ \t]*\[\[[0-9A-Za-z]{26}\]\]", "", text).strip()
 
 
 def check_fits(ctx: Context, question: str, history: list[dict], think: bool) -> int:
@@ -958,50 +968,6 @@ def split_next(answer: str) -> tuple[str, str]:
     """The answer, and the first question it offers next."""
     answer, questions = split_nexts(answer)
     return answer, questions[0] if questions else ""
-
-
-# DESIGN.md 80: asked for examples with Explain more on, the model kept rule 3
-# ("if the cards do not answer, say so first") whatever the instruction said -
-# an opening "The cards do not contain examples... They only list visitors" in
-# four answers of six. Explain more wants it gone: the page already marks what
-# is beyond the board. These are the sentences dropped, and only there.
-LACK = re.compile(
-    r"\b(?:cards?|notes?|board|they|context|passages?)\b[^.!?\n]{0,80}?(?:"
-    r"(?:do(?:es)?\s*n[o']t|cannot|can't)\s+(?:\w+\s+){0,2}?(?:contain|describe|include|list|"
-    r"mention|provide|explain|give|say|cover|detail|offer|specify|show|define|hold)"
-    r"|only\s+(?:list|identif(?:y|ies)|mention|describe|note|confirm|state|show|give|say|"
-    r"contain|include|refer|provide|record|name)"
-    r"|(?:there\s+(?:are|is)\s+)?no\s+(?:specific|concrete|detailed|information|examples?|"
-    r"details?|mention|description|definition))", re.IGNORECASE)
-NONE_HERE = re.compile(r"^\s*(?:however,\s*)?there\s+(?:are|is)\s+no\b", re.IGNORECASE)
-BASED_ON = re.compile(r"^\s*(?:based\s+on|according\s+to)\s+(?:the|your)\s+(?:provided\s+)?"
-                      r"(?:cards|notes|board)(?:\s+provided)?,\s*", re.IGNORECASE)
-
-
-def without_lack(answer: str) -> str:
-    """An Explain more answer without its sentences on what the cards lack,
-    before the Beyond line - and with no part before the line if nothing
-    else was there. An answer with no Beyond part is left as it is: what the
-    cards lack is then the whole of what it says."""
-    answer = BEYOND_MARK.sub(BEYOND, answer)
-    board, mark, beyond = answer.partition(BEYOND)
-    if not mark or not beyond.strip():
-        return answer
-    lines = []
-    for line in board.split("\n"):
-        if not line.strip():
-            lines.append("")
-            continue
-        kept = []
-        for s in re.split(r"(?<=[.!?])[ \t]+", line):
-            if LACK.search(s) or NONE_HERE.match(s):
-                continue
-            plain = BASED_ON.sub("", s)
-            kept.append(plain[:1].upper() + plain[1:] if plain != s else s)
-        if kept:
-            lines.append(" ".join(kept))
-    board = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-    return (board + "\n\n" if board else "") + mark + beyond
 
 
 def check_citations(answer: str, allowed: set[str]) -> dict:
@@ -1107,7 +1073,7 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
     picks = [] if questions else choices(answer)     # a quiz's question: its choices to tap
     next_question = questions[0] if questions else ""
     if ctx.mode == "explain":
-        answer = without_lack(answer)                   # DESIGN.md 80
+        answer = _uncited(answer)                       # nothing from the board: DESIGN.md 86
     result = check_citations(answer, set(ctx.cards))
     yield {"event": "done", **result, "next": next_question, "nexts": questions or picks,
            "choices": bool(picks),

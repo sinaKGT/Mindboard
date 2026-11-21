@@ -8,18 +8,19 @@ with a quiz as data, soft glass cards and Beautify (§75-79); all merged into
 main (PR #4); Explain more gives what it is asked for, with no "the cards
 do not cover it" line (§80-81); numbers in file answers - rows kept, a
 calculator and Double check (§82); the card AI panel moves (§83); card
-titles in plain words (§84); Make a table under an answer (§85); next: the
-rest of C.
+titles in plain words (§84); Make a table under an answer (§85); Explain
+more takes nothing from the board (§86); work moved from v2 to dev; next:
+the rest of C.
 
 ---
 
 ## C. Answers
 
-- **Board parts that say a little more than the card** (seen in §81). In
-  Explain more the part before the Beyond line sometimes dresses a card up
-  ("allows users to analyse real-time data", cited, where the card only
-  names the domains). Worth a look across ordinary answers too, before
-  deciding whether it needs anything.
+- **Answers that say a little more than the card** (seen in §81). An
+  answer dressed a card up ("allows users to analyse real-time data", cited,
+  where the card only names the domains). Explain more no longer uses cards
+  (§86); worth a look across ordinary answers before deciding whether it
+  needs anything.
 - **Tables: what Make a table leaves** (from §85). The button under an
   answer is done, in place, with every cell checked against the answer.
   Left: whether the board's answers may use a table on their own when asked

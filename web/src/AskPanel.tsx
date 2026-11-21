@@ -323,9 +323,11 @@ function Answer({ turn, offer, question, index }: {
       {!turn.text && statusLine(turn)
         ? <div className="ask-status">{statusLine(turn)}</div> : null}
       {board.trim() ? (
-        <div className={`voice board ${turn.mode === 'own' ? 'own' : ''}`}>
+        <div className={`voice board ${turn.mode === 'own' || turn.mode === 'explain' ? 'own' : ''}`}>
           {turn.mode === 'own'
-            ? <div className="voice-head">Not from your board — the model's own knowledge</div> : null}
+            ? <div className="voice-head">Not from your board — the model's own knowledge</div>
+            : turn.mode === 'explain'
+              ? <div className="voice-head">Explain more — the model's own knowledge, not your board</div> : null}
           <Rich text={board.trim()} page={fromFile ? pageLink(branch) : undefined} />
         </div>
       ) : null}
@@ -358,9 +360,6 @@ function Answer({ turn, offer, question, index }: {
           Removed {turn.dropped} citation{turn.dropped === 1 ? '' : 's'} of cards that were not
           in context.
         </div>
-      ) : null}
-      {turn.mode === 'explain' && turn.status === 'done' ? (
-        <div className="ask-note">Explained from this conversation — the board was not searched.</div>
       ) : null}
       {turn.status === 'done' && turn.text.trim() && !turn.error ? (
         adding ? <AddToBoard question={question} turn={turn} onDone={() => setAdding(false)} />
@@ -571,8 +570,8 @@ export function AskPanel() {
               <span className="ask-empty"><b>Board off:</b> answers come from the model's own
                 knowledge — the board is not searched or sent. Switch it back on in the bar below.</span>
             ) : explaining ? (
-              <span className="ask-empty">Explain more is on: answers come from this conversation,
-                and the board is not searched.</span>
+              <span className="ask-empty"><b>Explain more:</b> answers come from the model's own
+                knowledge and this conversation — nothing from the board is sent.</span>
             ) : present.length === 0 ? (
               <>
                 <span className="ctx-chip whole" title="Every card on this board">

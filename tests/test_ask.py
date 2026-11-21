@@ -477,70 +477,51 @@ def test_asking_with_nothing_chosen_asks_the_whole_board(client, board, cards):
 
 # ----------------------------------------------------------- conversation --
 
-def test_explain_more_answers_from_the_conversation_without_searching(dd, board, cards, monkeypatch):
-    from mindboard import retrieve
-
-    monkeypatch.setattr(retrieve, "search", lambda *a, **k: pytest.fail("searched the board"))
-    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "explain it more",
-                    keep=[cards["mount"], "0" * 26], explain=True)
-    assert ctx.mode == "explain" and ctx.cards == [cards["mount"]], "gone cards drop out"
-    msgs = ask.messages(ctx, "explain it more", [])
-    assert ask.EXPLAIN in msgs[-1]["content"] and "examples" in msgs[-1]["content"]
-    assert ask.EXPLAIN not in msgs[0]["content"], "the start of the prompt stays put"
-    nothing = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "and why?", explain=True)
-    assert nothing.cards == [] and "answer from the conversation" in nothing.text
-
-
-def test_explain_more_is_said_last_with_the_question(dd, board, cards):
-    """DESIGN.md 80: a note said after it - the task's shape, the dates - pulled
-    the answer back to "the cards have none"."""
-    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [], "give me two examples",
-                    keep=[cards["mount"]], explain=True)
-    ctx.task_note = "\n\n(say plainly if some could not be found)"
-    asked = ask.messages(ctx, "give me two examples", [])[-1]["content"]
-    assert asked.endswith(f"({ask.EXPLAIN})") and asked.index("could not be found") < asked.index(ask.EXPLAIN)
-    assert "cite nothing there" in ask.EXPLAIN and "Rule 3 does not apply" in ask.EXPLAIN
-
-
-B = "Beyond your board:\nA flood model, say."
 ID = "01M76XQDBKCQMQRNJ3Z31WD14R"
 
 
-@pytest.mark.parametrize("opening", [
-    # what the real model wrote, DESIGN.md 80
-    f"Based on the cards provided, there are no specific examples of the Nottingham Digital Twin's "
-    f"features listed. The cards only identify the project as a digital representation [[{ID}]].",
-    f"The cards provided do not contain a definition, description, or examples of what the twin is. "
-    f"They only list names of visitors and a report title [[{ID}]].",
-    f"Your board lists visitors to the SWIFT Lab, but it does not contain examples of how other "
-    f"cities use digital twins [[{ID}]].",
-    "Your cards do not contain information on how data gets into the twin.",
-    "However, there is no description of the pipeline.",
-])
-def test_explain_more_drops_what_the_cards_lack(opening):
-    assert ask.without_lack(f"{opening}\n\n{B}") == B
+def test_explain_more_sends_nothing_from_the_board(dd, board, cards, monkeypatch):
+    """DESIGN.md 86: the model's own knowledge and the conversation - no
+    search, no cards, not even those chosen or kept."""
+    from mindboard import retrieve
+
+    monkeypatch.setattr(retrieve, "search", lambda *a, **k: pytest.fail("searched the board"))
+    ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [cards["plan"]], "explain it more",
+                    keep=[cards["mount"]], explain=True)
+    assert ctx.mode == "explain" and ctx.cards == [] and ctx.text == "" and ctx.pictures == []
+    history = [{"role": "user", "text": "where does it go?"},
+               {"role": "assistant", "text": f"On the corner [[{ID}]].\n  - at 4 m [[{ID}]], facing south."}]
+    msgs = ask.messages(ctx, "give me two examples", history)
+    assert msgs[0] == {"role": "system", "content": ask.EXPLAIN_SYSTEM}
+    assert "cite nothing" in ask.EXPLAIN_SYSTEM and "board" in ask.EXPLAIN_SYSTEM
+    assert msgs[2]["content"] == "On the corner.\n  - at 4 m, facing south.", "citations out, indents kept"
+    assert msgs[-1]["role"] == "user" and msgs[-1]["content"].startswith("give me two examples")
+    assert not any("CARDS" in str(m["content"]) for m in msgs)
 
 
-def test_explain_more_keeps_what_the_cards_say():
-    kept = (f"Michael Gallagher visited on 19 October 2026 [[{ID}]]. His email address is not "
-            f"published on the record [[{ID}]].\n- He leads climate resilience.\n- 2 visits.")
-    assert ask.without_lack(f"{kept}\n\n{B}") == f"{kept}\n\n{B}", "facts, and the list, stay"
-    got = ask.without_lack(f"Based on the cards provided, the twin is a model of Nottingham [[{ID}]]. "
-                           f"The cards do not describe its data.\n\n{B}")
-    assert got == f"The twin is a model of Nottingham [[{ID}]].\n\n{B}"
-    alone = "The cards do not contain examples."
-    assert ask.without_lack(alone) == alone, "with no Beyond part, it is all there is to say"
+def test_an_explain_more_answer_cites_nothing():
+    ctx = ask.Context([], "", mode="explain")
+
+    class Talk:
+        waiting = False
+
+        def stream(self, *a, **k):
+            yield {"type": "text", "text": f"A twin mirrors a city [[{ID}]].\nNEXT: How?"}
+            yield {"type": "done"}
+
+    done = [e for e in ask.answer_events(Talk(), ctx, "what is it?", [], False) if e["event"] == "done"][0]
+    assert done["answer"] == "A twin mirrors a city." and done["dropped"] == [], "taken out, not counted as invented"
 
 
 def test_explain_more_is_not_read_first_nor_its_steps_run(client, board, cards, model):
-    """DESIGN.md 80: the request is not planned - no task, no steps searching
-    a board Explain more means not to search."""
+    """DESIGN.md 80, 86: the request is not planned - no task, no steps
+    searching a board Explain more means not to use."""
     res = client.post(ask_url(board["id"]), headers={"X-Mindboard-Token": TOKEN},
                       json={"question": "give me two examples", "explain": True, "keep": [cards["mount"]]})
     assert res.status_code == 200, res.text
     got = events(res, tasks=True)
     assert not [e for e, _ in got if e in TASK_EVENTS]
-    assert got[0][1]["mode"] == "explain" and got[-1][0] == "done"
+    assert got[0][1]["mode"] == "explain" and got[0][1]["cards"] == [] and got[-1][0] == "done"
 
 
 def test_cards_an_answer_drew_on_stay_in_the_conversation(dd, board, cards, monkeypatch):

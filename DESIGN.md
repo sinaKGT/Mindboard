@@ -4369,3 +4369,54 @@ would pass if both are in the answer; answers in a file conversation get the
 button too but were not checked with the real model.
 
 361 tests.
+
+## 86. Explain more: the model's own knowledge and the conversation, nothing from the board (2026-11-21)
+
+With Explain more on, the cards from earlier in the conversation were still
+sent (§34, §80). Asked "compare graph knowledge with ontology for me", the
+answer opened with a sentence restating cards ("They focus specifically on
+reasoning, the Systematicity Principle..."), cited twice, and put the
+comparison asked for under *Beyond your board*. The owner wants Explain more
+to show nothing from the board: the model's own knowledge and the
+conversation, shown the ordinary way.
+
+- **Nothing from the board is sent.** `ask.build` returns an empty context
+  for Explain more - no search, no cards, not even cards chosen by hand or
+  kept from earlier answers - and the request is not planned (as in §80).
+- **Its own system prompt**, `EXPLAIN_SYSTEM`, beside Board off's
+  (`OWN_SYSTEM`, §63): answer from your own knowledge, building on the
+  conversation; do not mention cards, notes or a board and cite nothing;
+  explain step by step, give what is asked for (examples, an analogy, more
+  detail), say when unsure, make up no names or figures. It takes the place
+  of the long instruction said with the question (§80): with no cards there
+  is no Beyond line to keep things apart.
+- **The conversation goes in without card citations**: earlier answers'
+  `[[card]]` marks are taken out (indentation kept), so they cannot pull the
+  board back in. Citations the model writes anyway are taken out of the
+  answer too, quietly - they are not counted as invented sources.
+- **A pasted picture** goes in with a plain head ("Answer about it"), not
+  the board's "bring in the cards", in Board off as well.
+- **On the page** an Explain more answer is drawn like a Board off answer:
+  an ordinary answer with a small heading, "Explain more - the model's own
+  knowledge, not your board"; no chips, no Beyond part. The top of the chat
+  says "Explain more: answers come from the model's own knowledge and this
+  conversation - nothing from the board is sent."
+- **Removed**: the Explain more instruction of §80 and `without_lack` (§81),
+  which dropped sentences on what the cards lack from the part before the
+  Beyond line. That part no longer exists.
+
+With the real model on *SWIFT Lab Visitors*, after "Who visited from the
+EMCCA?": "compare graph knowledge with ontology for me" with Explain more
+on gave a 2,800-character comparison in 11 s, no citation chips and no
+Beyond part. "Why might the EMCCA people you named care about a digital
+twin? Give me two examples." answered from the conversation - Michael
+Gallagher and his role, from the answer before - with two examples (flood
+defences, and one more), no citations, in 8 s. Both ran beside the owner's
+own Mindboard, which held the graphics card, so the page warned of slower
+answers.
+
+Not done: an Explain more answer cannot be checked against the board, since
+it is not from it; Add to board still drafts a card from it and links it to
+a card the conversation found (§53), as before.
+
+355 tests.
