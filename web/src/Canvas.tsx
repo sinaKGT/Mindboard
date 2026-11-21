@@ -16,7 +16,7 @@ import { revealCard, useAsk } from './askStore'
 import { edgeTypes } from './edges'
 import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
-import { CLICK_SLOP, nodeTypes } from './nodes'
+import { CardBar, CLICK_SLOP, nodeTypes } from './nodes'
 import { ancestorAtLevel, currentParent, useStore } from './store'
 import { PlacedCheck } from './PlacedCheck'
 import { Shortcuts } from './Shortcuts'
@@ -156,7 +156,15 @@ function CanvasInner() {
   const [rfNodes, setRfNodes] = useState<Node[]>(level.rfNodes)
   const rfNodesRef = useRef<Node[]>(level.rfNodes)
   rfNodesRef.current = rfNodes
-  useEffect(() => { setRfNodes(level.rfNodes) }, [level.rfNodes])
+  // a change to the board rebuilds the level; the cards in hand stay in hand,
+  // or a colour picked for the selected card would put its tools away
+  // (DESIGN.md 71)
+  useEffect(() => {
+    const held = new Set(useUI.getState().selected)
+    setRfNodes(held.size
+      ? level.rfNodes.map((n) => (held.has(n.id) ? { ...n, selected: true } : n))
+      : level.rfNodes)
+  }, [level.rfNodes])
 
   // entering or leaving a meta-node lands you looking at its contents - unless
   // the move was to go to one card, which then gets the view to itself
@@ -891,6 +899,9 @@ function CanvasInner() {
             }} />
         )}
       </ReactFlow>
+      {/* one card in hand: its actions in a pill at the top (DESIGN.md 71) */}
+      {selectedIds.length === 1 && nodes[selectedIds[0]] && !linking
+        ? <CardBar key={selectedIds[0]} id={selectedIds[0]} /> : null}
 
       <Shortcuts />
 

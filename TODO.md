@@ -1,47 +1,66 @@
 # Mindboard — work still to do
 
-What is left from the v2 conversations, in the order we planned to take it.
-Each item says what was asked, what was decided, and what done looks like.
-Last updated 2026-11-08 - everything planned is done; what is left is optional.
+Only what is left, in the order we plan to take it. Each item says what was
+asked, what was decided, and what done looks like.
+Last updated 2026-11-21 - A and B done (DESIGN.md §70-71); next: C.
 
 ---
 
-## 1. The conversation — done (DESIGN.md §34)
+## C. Answers
 
-Chat bar, expand, Explain more, remembered cards and Add to board are built.
-Worth watching in daily use: whether the drafted card's link and relationship
-are usually right, and whether the bar's light feels calm rather than busy.
+- **Explain more should use the model's own knowledge when the board has
+  nothing.** Asked for "two examples" with Explain more on, it says the
+  context does not have them. It should give them from what it knows, marked
+  plainly as not from your cards (rule 3 still holds: board facts cited,
+  general knowledge labelled, never passed off as the board's).
+- **Tables in answers when they help**, and a **"Make a table" action under
+  an answer** that rewrites it as a table (and could add it to the board as
+  a card - cards already draw markdown tables, §69).
 
-## 2. Planning - for experts, done; for search, measured and not adopted (DESIGN.md §37, §47)
+## D. The board
 
-Planning before searching made search worse on the test set (MRR 0.94 ->
-0.87) and 1.5 s slower; multi-hop questions gained nothing. Experts now plan
-the other way (§47): simple questions are left alone, the steps search beside
-the question and work something out at each step, and the answer is written
-from their findings. Still open: measure the planned context on the test set
-as §37 did, and decide whether Ask your board should plan too.
+- **@ in card text to link another card.** Typing @ while writing a card
+  opens a picker of cards; choosing one puts a link in the text (opens that
+  card when clicked) and adds a link between the two cards - as ops.
+  To decide: whether the board link is always added or only offered.
+- **Export picture wrong when the board is zoomed** (`exportImage.ts`).
+  To confirm when we start: what exactly goes wrong (cut off, blurred,
+  shifted) and whether this is the export or something else.
 
-## 3. Pictures that can be searched - done (DESIGN.md §38-39)
+## E. Search
 
-Described once, searchable, and given to the answering model in words when a
-picture itself is left out of a question.
+- **The effect of groups on retrieval.** Measure whether a card's group
+  should count when searching: e.g. the group's title added to its cards'
+  text, or a hit spreading to the other cards in its group (as links do).
+  Measured on the test set as in §37 (MRR, time) before adopting anything.
+- **Planning for Ask your board** (from §37, §47): measure the planned
+  context on the test set as §37 did, and decide whether Ask your board
+  should plan the way experts do.
 
-## 4. A fast canvas for big levels - done as far as it needs to go (DESIGN.md §35-36, §39)
+## F. Tools and the person
 
-3,000 cards on one level zoom at 17-18 frames a second (2 before); boards in
-groups are fast at 10,000 cards. A far-out view drawn on a canvas would go
-further, but only matters if huge flat levels - not groups - become how
-boards are used. Not planned until then.
+- **More work on Mindboard's tools** (sheets §65, steps §66, file chat
+  §64). To decide together: which tools are missing or weak - a list to make
+  before any building.
+- **Knowing the person.** A local profile: name, preferences, how they like
+  to be taught; Mindboard learns some of it from the conversation (shown and
+  editable, never hidden) and can talk in an educator's manner that follows
+  it. Stays on this computer like everything else.
 
-## 6. Experts - done (DESIGN.md §40-42)
+## G. Installing and releasing
 
-Experts, their voice (Kokoro) and speaking to them (whisper.cpp) are built,
-all on this computer.
+- **Node.js in the installation** (`install.sh`, `install.ps1`, `mindboard
+  update`), for building the interface.
+- **A guide for coding agents** (`AGENTS.md`): how an AI agent installs and
+  sets up Mindboard on a new computer by itself - steps, checks, what to ask
+  the person.
+- **Merge `v2` into `main`** - after the fixes above, with the tests and
+  build passing.
 
-## 5. Housekeeping
+---
 
-- ~~Delete the unused 27B model files~~ — done, 15 GB freed.
-- **Scratch test data**: the 10,000-card test board lives in the session's
-  scratchpad, not in your data folder; nothing to clean in Mindboard itself.
-- Not committed on purpose: `.claude/` (test-server settings), your `docs/`
-  folder, `web/package-lock.json`.
+## Later, only if needed
+
+- **A far-out view drawn on a canvas** for huge flat levels (§35-36, §39).
+  Boards in groups are already fast at 10,000 cards; only worth doing if
+  huge flat levels, not groups, become how boards are used.

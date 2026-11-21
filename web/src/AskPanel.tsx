@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { AnswerFiles, filesToOffer } from './AnswerFiles'
 import { AnswerPictures, picturesToShow } from './AnswerPictures'
-import { askable, cardsInside, FILE_ACCEPT, revealCard, useAsk, type Turn } from './askStore'
+import { askable, cardsInside, revealCard, useAsk, type Turn } from './askStore'
 import { Calculated, FileStrip, FileTabs, PagesUsed, pageLink } from './FileBranch'
 import { stepLine, TaskSteps } from './TaskSteps'
 import { Icon } from './icons'
@@ -339,21 +339,42 @@ export function AskPanel() {
   // grow the box with what is typed, up to a few lines - and again whenever
   // its width changes: the bar opens from a small pill, and text measured
   // while it is narrow wraps into lines it no longer needs once it is wide
+  //
+  // A question that does not fit on one line beside the tools takes a row of
+  // its own, the full width of the bar, with the tools under it (DESIGN.md 70)
+  // - beside the chips it was squeezed into a column a few letters wide. The
+  // test is the text's width against the room one row would leave, which is
+  // the same whichever layout is showing, so the bar does not flip between
+  // the two; it is taken again as the bar widens while it opens.
+  const [tall, setTall] = useState(false)
+  const ruler = useRef<CanvasRenderingContext2D | null>(null)
   const fit = () => {
     const el = box.current
     if (!el) return
     el.style.height = '0px'
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+    const text = el.value
+    const bar = el.parentElement
+    const tools = bar?.querySelector<HTMLElement>('.bar-tools')
+    if (!text || !bar || !tools || !tools.offsetWidth) { setTall(false); return }
+    if (text.includes('\n')) { setTall(true); return }
+    ruler.current ??= document.createElement('canvas').getContext('2d')
+    const r = ruler.current
+    if (!r) return
+    r.font = getComputedStyle(el).font
+    // one row: the bar less its padding (11), the ankh (36), the tools and two gaps (16)
+    const room = bar.clientWidth - 11 - 36 - tools.offsetWidth - 16
+    setTall(r.measureText(text).width > room - 6)
   }
-  useEffect(fit, [draft])
+  useEffect(fit, [draft, tall])   // again after moving rows: the box's width changed
   useEffect(() => {
-    const el = box.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    let width = el.clientWidth
+    const bar = box.current?.parentElement
+    if (!bar || typeof ResizeObserver === 'undefined') return
+    let width = bar.clientWidth
     const ro = new ResizeObserver(() => {
-      if (el.clientWidth !== width) { width = el.clientWidth; fit() }
+      if (bar.clientWidth !== width) { width = bar.clientWidth; fit() }
     })
-    ro.observe(el)
+    ro.observe(bar)
     return () => ro.disconnect()
   }, [])
 
@@ -523,7 +544,7 @@ export function AskPanel() {
       {/* the one way in: always at the bottom of the board. At rest a small
           "Ask me" pill; it opens to the full bar under the pointer, while you
           type, and while a conversation or an answer is going */}
-      <div className={`ask-bar nodrag nopan ${awake ? 'awake' : 'rest'} ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''} ${pasted.pictures.length || pasted.reading ? 'has-pictures' : ''}`}
+      <div className={`ask-bar nodrag nopan ${awake ? 'awake' : 'rest'} ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''} ${pasted.pictures.length || pasted.reading ? 'has-pictures' : ''} ${tall && awake ? 'tall' : ''}`}
         onKeyDown={escape}
         onMouseEnter={() => { window.clearTimeout(cool.current); setHot(true) }}
         onMouseLeave={() => { cool.current = window.setTimeout(() => setHot(false), 160) }}
@@ -557,12 +578,6 @@ export function AskPanel() {
           }} />
         <div className="bar-tools">
           <PickPicture add={pasted.add} className="bar-chip icon-only" size={12} />
-          <label className="bar-chip icon-only pick-file" title="Ask a file - PDF, Word, Excel, CSV or text. It is prepared, then searched on its own"
-            onClick={(e) => e.stopPropagation()}>
-            <input type="file" accept={FILE_ACCEPT} multiple hidden
-              onChange={(e) => { openFiles(docsIn(e.target.files)); e.target.value = '' }} />
-            <Icon name="upload" size={12} />
-          </label>
           {expanded && open ? (
             <label className={`bar-chip ${explain ? 'on' : ''}`}
               title="Answer from this conversation, with examples, without searching the board">

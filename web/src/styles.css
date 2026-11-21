@@ -421,40 +421,139 @@ a.btn { text-decoration: none; }
 .mb-node.ghost:hover { opacity: 1; }
 .mb-node.ghost .body { padding: 7px 10px; }
 
-.node-tools {
-  position: absolute; bottom: calc(100% + 8px); left: 0;
-  display: flex; flex-direction: column; align-items: stretch; gap: 0;
-  width: max-content; padding: 5px 7px;
-  background: var(--mb-surface-2); border: 1px solid var(--mb-border);
-  border-radius: 11px; box-shadow: var(--mb-shadow-lg);
-  opacity: 0; pointer-events: none; transition: opacity var(--mb-dur) var(--mb-ease);
-  z-index: 4;
+/* The selected card's actions (DESIGN.md 71): a slim pill that comes down
+   from the top of the canvas, centred - not a panel three rows tall over the
+   cards above the selected one. Raised, not flat: a lit top edge, a darker
+   lower one, and a soft shadow below, so it reads as an object over the
+   board; its buttons rise under the pointer and press in when clicked. */
+.card-bar, .looks-strip {
+  --lift-hi: color-mix(in srgb, #fff 14%, transparent);
+  --lift-lo: color-mix(in srgb, #000 28%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 7%, transparent), transparent 55%),
+    color-mix(in srgb, var(--mb-surface-2) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mb-border-strong) 80%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--lift-hi),
+    inset 0 -1px 0 var(--lift-lo),
+    0 1px 2px color-mix(in srgb, #000 25%, transparent),
+    0 10px 24px -8px color-mix(in srgb, #000 45%, transparent),
+    0 22px 48px -18px color-mix(in srgb, var(--mb-accent) 35%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
 }
-/* A row per group - colour, then text, then what happens to the card. Laid out
-   rather than left to wrap, so a control never drifts into the wrong company. */
-.node-tools .tool-row {
-  display: flex; align-items: center; gap: 3px; padding: 4px 0; min-height: 34px;
+.card-bar {
+  position: absolute; top: 14px; left: 50%; z-index: 7;
+  display: flex; align-items: center; gap: 3px; padding: 5px 7px;
+  border-radius: 999px; white-space: nowrap;
+  transform: translateX(-50%);
+  animation: cardBarIn 200ms cubic-bezier(.2, .9, .25, 1.15);
 }
-.node-tools .tool-row + .tool-row { border-top: 1px solid var(--mb-border); }
-.node-tools .grow { flex: 1 1 auto; min-width: 18px; }
-/* The toolbar belongs to the *selected* card, not merely a hovered one.
-   Hovering opened it, which meant an opaque panel three rows tall sat over
-   whatever was above that card and swallowed clicks meant for it - on a busy
-   board you could not reach the node above without going round. Hovering still
-   shows the ports, which is what you reach for mid-thought; the toolbar is one
-   click away and stays put while you use it. */
-.react-flow__node.selected .node-tools, .node-tools:hover {
-  opacity: 1; pointer-events: auto;
+@keyframes cardBarIn {
+  from { opacity: 0; transform: translate(-50%, -14px) scale(.96); }
 }
-/* With several cards in hand the per-card toolbars would all open at once and
-   bury the one bar that acts on the group of them. */
-.stage.multi .node-tools { opacity: 0 !important; pointer-events: none !important; }
-/* The node toolbar is the app's only dense control cluster - it needs real
-   targets, not 16px dots. */
-.node-tools .icon-btn { width: 30px; height: 30px; border-radius: 8px; }
-.node-tools .swatch { width: 20px; height: 20px; border-radius: 50%; border: 1px solid #0005; }
-.node-tools .sep { width: 1px; align-self: stretch; margin: 3px 5px; background: var(--mb-border); }
-.node-tools .icon-btn.on .swatch { box-shadow: 0 0 0 2px var(--mb-surface-2), 0 0 0 3.5px currentColor; }
+.card-bar .icon-btn, .looks-strip .icon-btn {
+  position: relative; color: var(--mb-text-dim);
+  transition: transform 140ms var(--mb-ease), background 140ms var(--mb-ease),
+    box-shadow 140ms var(--mb-ease), color 140ms var(--mb-ease);
+}
+.card-bar .icon-btn { width: 34px; height: 34px; border-radius: 999px; }
+.card-bar .icon-btn:hover, .looks-strip .icon-btn:hover {
+  color: var(--mb-text); transform: translateY(-1.5px);
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 10%, var(--mb-surface-3)), var(--mb-surface-3));
+  box-shadow: inset 0 1px 0 var(--lift-hi), 0 4px 10px -4px color-mix(in srgb, #000 55%, transparent);
+}
+.card-bar .icon-btn:active, .looks-strip .icon-btn:active {
+  transform: translateY(0) scale(.94);
+  box-shadow: inset 0 2px 4px color-mix(in srgb, #000 40%, transparent);
+}
+.card-bar .icon-btn.on, .looks-strip .icon-btn.on {
+  color: var(--mb-accent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mb-accent) 24%, transparent),
+    color-mix(in srgb, var(--mb-accent) 12%, transparent));
+  box-shadow: inset 0 1px 0 var(--lift-hi), 0 0 0 1px color-mix(in srgb, var(--mb-accent) 45%, transparent);
+}
+.card-bar .sep, .looks-sep {
+  background: linear-gradient(var(--lift-lo), var(--lift-lo)) left / 1px 100% no-repeat,
+    linear-gradient(var(--lift-hi), var(--lift-hi)) right / 1px 100% no-repeat;
+}
+.card-bar .sep { width: 2px; height: 20px; margin: 0 4px; }
+.card-bar .icon-btn.danger:hover {
+  color: var(--mb-danger);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mb-danger) 22%, transparent),
+    color-mix(in srgb, var(--mb-danger) 10%, transparent));
+}
+
+/* The card's look: a dot off its top right corner, in its colour, and the
+   strip it opens - kept at one size at any zoom by xyflow's node toolbar.
+   The dot and the swatches are drawn as small glossy beads: a highlight up
+   and to the left, the colour, a darker rim, a shadow under. */
+.card-looks { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; z-index: 6; }
+.looks-dot, .looks-swatch {
+  --sw: var(--node-color);
+  background:
+    radial-gradient(circle at 34% 28%, color-mix(in srgb, #fff 75%, transparent) 0 8%, transparent 42%),
+    radial-gradient(circle at 50% 60%, var(--sw) 45%, color-mix(in srgb, var(--sw) 62%, #000) 100%);
+  box-shadow:
+    inset 0 -2px 3px color-mix(in srgb, #000 30%, transparent),
+    0 2px 4px color-mix(in srgb, #000 40%, transparent),
+    0 4px 10px -3px color-mix(in srgb, var(--sw) 60%, transparent);
+}
+.looks-dot {
+  width: 20px; height: 20px; border-radius: 50%; padding: 0; border: 0;
+  transition: transform 160ms var(--mb-spring, var(--mb-ease)), box-shadow 160ms var(--mb-ease);
+}
+.looks-dot:hover { transform: translateY(-1px) scale(1.15); }
+.looks-dot.on {
+  box-shadow: inset 0 -2px 3px color-mix(in srgb, #000 30%, transparent),
+    0 0 0 2px var(--mb-surface-2), 0 0 0 4px var(--mb-accent), 0 6px 14px -4px var(--mb-accent);
+}
+.looks-strip {
+  --lift-hi: color-mix(in srgb, #fff 14%, transparent);
+  --lift-lo: color-mix(in srgb, #000 28%, transparent);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: 80px; padding: 10px 7px; border-radius: 18px;
+  animation: stripIn 180ms cubic-bezier(.2, .9, .25, 1.15); transform-origin: top left;
+}
+@keyframes stripIn { from { opacity: 0; transform: translateY(-6px) scale(.94); } }
+.looks-colours { display: grid; grid-template-columns: repeat(2, 24px); gap: 9px; justify-content: center; }
+.looks-swatch {
+  position: relative; width: 24px; height: 24px; border-radius: 50%; padding: 0; border: 0;
+  display: grid; place-items: center; cursor: pointer; color: var(--mb-text-dim);
+  transition: transform 160ms var(--mb-spring, var(--mb-ease)), box-shadow 160ms var(--mb-ease);
+}
+.looks-swatch:hover { transform: translateY(-2px) scale(1.12); }
+.looks-swatch:active { transform: scale(.92); }
+.looks-swatch.on {
+  box-shadow: inset 0 -2px 3px color-mix(in srgb, #000 30%, transparent),
+    0 0 0 2px var(--mb-surface-2), 0 0 0 3.5px var(--mb-accent),
+    0 4px 10px -3px color-mix(in srgb, var(--sw) 60%, transparent);
+}
+.looks-swatch.any:not(.on) {
+  background:
+    radial-gradient(circle at 34% 28%, color-mix(in srgb, #fff 75%, transparent) 0 8%, transparent 42%),
+    radial-gradient(circle, transparent 50%, color-mix(in srgb, #000 30%, transparent) 100%),
+    conic-gradient(#f97583, #f6c177, #9ece6a, #4fd1c5, #7aa2f7, #bb9af7, #f97583);
+}
+.looks-swatch.any input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; border: 0; padding: 0; }
+.looks-swatch.none {
+  --sw: var(--mb-surface-3);
+  color: var(--mb-text);
+}
+.looks-sep { width: 100%; height: 2px;
+  background: linear-gradient(var(--lift-lo), var(--lift-lo)) top / 100% 1px no-repeat,
+    linear-gradient(var(--lift-hi), var(--lift-hi)) bottom / 100% 1px no-repeat; }
+.looks-strip .tone-group { padding: 0; gap: 4px; }
+.looks-strip .tone-chip {
+  width: 19px; height: 19px; border-radius: 6px;
+  box-shadow: inset 0 1px 0 var(--lift-hi), 0 2px 4px -1px color-mix(in srgb, #000 45%, transparent);
+}
+.looks-strip .tone-chip:hover { transform: translateY(-1.5px) scale(1.08); }
+.looks-strip .size-group { gap: 0; }
+.looks-strip .size-group .icon-btn { width: 22px; height: 26px; border-radius: 8px; }
+.looks-strip .size-group .size-value { min-width: 24px; padding: 0 2px; }
+.looks-strip .size-menu { top: 0; left: calc(100% + 12px); transform: none; }
+.looks-lists { display: flex; gap: 4px; }
+.looks-lists .icon-btn { width: 30px; height: 30px; border-radius: 10px; }
 
 /* ----------------------------------------------------------------- edges -- */
 .mb-edge-path { fill: none; stroke: var(--mb-edge); stroke-width: 1.6;
@@ -649,7 +748,7 @@ a.btn { text-decoration: none; }
 .mb-node.meta .badge { transition: transform 200ms var(--mb-spring); }
 .react-flow__node:hover .mb-node.meta .badge { transform: translateX(2px); }
 
-.board-card, .mb-node, .card-tools, .node-tools { will-change: transform; }
+.board-card, .mb-node, .card-tools { will-change: transform; }
 
 @media (prefers-reduced-motion: reduce) {
   .mini-nodes circle, .mini-edges path, .board-card, .mb-node, .launcher-head .dot {
@@ -786,7 +885,8 @@ a.btn { text-decoration: none; }
 
 /* ----------------------------------------------------------- image export -- */
 /* Chrome, ports and live video have no business in an exported picture. */
-.stage.exporting .node-tools,
+.stage.exporting .card-bar,
+.stage.exporting .react-flow__node-toolbar,
 .stage.exporting .react-flow__handle,
 .stage.exporting .react-flow__node[data-id^="ghost:"],
 .stage.exporting .breadcrumb,
@@ -1621,7 +1721,13 @@ a.btn { text-decoration: none; }
 /* Pictures pasted into a chat box (DESIGN.md 62): waiting in a row on top of
    the bar until the question goes, then small in the question itself. */
 .ask-bar.has-pictures { flex-wrap: wrap; border-radius: 22px; row-gap: 6px; }
-.pasted-strip { flex-basis: 100%; order: -1; display: flex; align-items: center; gap: 8px;
+/* a question longer than one line: the text on a row of its own across the
+   bar, the ankh and the tools under it (DESIGN.md 70) */
+.ask-bar.awake.tall { flex-wrap: wrap; border-radius: 22px; row-gap: 4px; padding: 8px 6px 6px 8px; }
+.ask-bar.tall textarea { flex-basis: 100%; order: -1; padding: 2px 6px; }
+.ask-bar.tall .bar-mark { width: 30px; height: 30px; }
+.ask-bar.tall .bar-tools { margin-left: auto; }
+.pasted-strip { flex-basis: 100%; order: -2; display: flex; align-items: center; gap: 8px;
   padding: 4px 2px 0; flex-wrap: wrap; cursor: default; }
 .pasted-pic { position: relative; width: 52px; height: 52px; border-radius: 10px; overflow: hidden;
   border: 1px solid var(--mb-border-strong); background: var(--mb-surface-2); flex: none;

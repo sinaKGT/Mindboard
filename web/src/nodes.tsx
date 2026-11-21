@@ -1,4 +1,4 @@
-import { Handle, NodeResizer, Position, useStore as useFlow, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, NodeToolbar, Position, useStore as useFlow, type NodeProps } from '@xyflow/react'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
@@ -212,110 +212,150 @@ const TONES: { key: NodeTone; label: string }[] = [
 
 const SIZES = [11, 12, 13, 14, 16, 18, 20, 24, 28, 34]
 
-function Tools({ node }: { node: MNode }) {
-  const enter = useStore((s) => s.enter)
-  const size = sizeOf(node)
+/** What a selected card's colour and text look like (DESIGN.md 71): a small
+ *  dot just off the card's top right corner, in the card's colour, that opens
+ *  a narrow strip under it - colours, any colour, fill, text size, lists. In
+ *  xyflow's node toolbar, so it keeps its size at any zoom, and only while
+ *  this card alone is selected. */
+function Looks({ node, selected }: { node: MNode; selected?: boolean }) {
+  const [open, setOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)
+  const any = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (!selected) { setOpen(false); setSizeOpen(false) } }, [selected])
+  // the full picker commits once, when it is closed - not an op for every
+  // step of a drag across the colour field
+  useEffect(() => {
+    const el = any.current
+    if (!el) return
+    const done = () => setStyle(node, { color: el.value })
+    el.addEventListener('change', done)
+    return () => el.removeEventListener('change', done)
+  })
+  const size = sizeOf(node)
   const listKind = detectList(bodyText(node))
   const tone: NodeTone = node.style.tone ?? 'accent'
+  const colour = node.style.color
+  const own = !!colour && !NODE_COLOURS.slice(0, 6).includes(colour)
   return (
-    <div className="node-tools nodrag nopan" onDoubleClick={(e) => e.stopPropagation()}
-      onMouseLeave={() => setSizeOpen(false)}>
-      {/* One row per thing you might be doing: how it looks, what the words do,
-          what happens to the card. Nothing wraps into a row it does not belong to. */}
-      <div className="tool-row">
-        {NODE_COLOURS.slice(0, 6).map((c) => (
-          <button key={c} className={`icon-btn ${node.style.color === c ? 'on' : ''}`}
-            title="Colour" onClick={() => setStyle(node, { color: c })}>
-            <span className="swatch" style={{ background: c }} />
-          </button>
-        ))}
-        <button className="icon-btn" title="Default colour"
-          onClick={() => setStyle(node, { color: undefined })}>
-          <Icon name="x" size={14} />
-        </button>
-        <span className="sep" />
-        <span className="tone-group" title="How far the colour carries">
-          {TONES.map((t) => (
-            <button key={t.key} className={`tone-chip ${t.key} ${tone === t.key ? 'on' : ''}`}
-              title={t.label} aria-label={t.label}
-              style={{ ['--node-color' as string]: accentOf(node) }}
-              onClick={() => setStyle(node, { tone: t.key })} />
-          ))}
-        </span>
-      </div>
-
-      <div className="tool-row">
-        <span className="size-group">
-          <button className="icon-btn" title="Smaller text" aria-label="Smaller text"
-            onClick={() => setStyle(node, { fontSize: Math.max(11, size - 1) })}>
-            <span className="size-a small">A</span>
-          </button>
-          <button className="size-value" title="Pick a text size"
-            onClick={() => setSizeOpen((v) => !v)}>{size}</button>
-          <button className="icon-btn" title="Larger text" aria-label="Larger text"
-            onClick={() => setStyle(node, { fontSize: Math.min(34, size + 1) })}>
-            <span className="size-a big">A</span>
-          </button>
-          {sizeOpen && (
-            <div className="size-menu">
-              {SIZES.map((s) => (
-                <button key={s} className={s === size ? 'on' : ''}
-                  onClick={() => { setStyle(node, { fontSize: s }); setSizeOpen(false) }}>
-                  <span className="sample" style={{ fontSize: Math.min(s, 19) }}>A</span>
-                  <span className="n">{s}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </span>
-        <span className="sep" />
-        <button className={`icon-btn ${listKind === 'bullet' ? 'on' : ''}`} title="Bullet list"
-          onClick={() => setBodyList(node, listKind === 'bullet' ? 'none' : 'bullet')}>
-          <Icon name="bullets" size={15} />
-        </button>
-        <button className={`icon-btn ${listKind === 'number' ? 'on' : ''}`} title="Numbered list"
-          onClick={() => setBodyList(node, listKind === 'number' ? 'none' : 'number')}>
-          <Icon name="numbers" size={15} />
-        </button>
-      </div>
-
-      <div className="tool-row">
-        {node.type === 'meta' && (
-          <>
-            <button className="icon-btn" title="Open" onClick={() => enter(node.id)}>
-              <Icon name="enter" size={15} />
+    <NodeToolbar position={Position.Right} align="start" offset={8}
+      className="card-looks nodrag nopan">
+      <button className={`looks-dot ${open ? 'on' : ''}`} title="Colour and text"
+        aria-label="Colour and text" aria-expanded={open}
+        style={{ ['--node-color' as string]: accentOf(node) }}
+        onClick={() => setOpen((v) => !v)} />
+      {open && (
+        <div className="looks-strip" onMouseLeave={() => setSizeOpen(false)}>
+          <div className="looks-colours">
+            {NODE_COLOURS.slice(0, 6).map((c) => (
+              <button key={c} className={`looks-swatch ${colour === c ? 'on' : ''}`}
+                title="Colour" style={{ ['--sw' as string]: c }}
+                onClick={() => setStyle(node, { color: c })} />
+            ))}
+            <label className={`looks-swatch any ${own ? 'on' : ''}`} title="Any colour"
+              style={own ? { ['--sw' as string]: colour } : undefined}>
+              <input ref={any} type="color" value={colour && colour.startsWith('#') ? colour : '#8a8f98'}
+                onChange={() => { /* committed on change, above */ }} />
+            </label>
+            <button className="looks-swatch none" title="Default colour"
+              onClick={() => setStyle(node, { color: undefined })}>
+              <Icon name="x" size={11} />
             </button>
-            <button className="icon-btn" title="Ungroup" onClick={() => unwrapMeta(node.id)}>
-              <Icon name="layers" size={15} />
+          </div>
+          <span className="looks-sep" />
+          <span className="tone-group" title="How far the colour carries">
+            {TONES.map((t) => (
+              <button key={t.key} className={`tone-chip ${t.key} ${tone === t.key ? 'on' : ''}`}
+                title={t.label} aria-label={t.label}
+                style={{ ['--node-color' as string]: accentOf(node) }}
+                onClick={() => setStyle(node, { tone: t.key })} />
+            ))}
+          </span>
+          <span className="looks-sep" />
+          <span className="size-group">
+            <button className="icon-btn" title="Smaller text" aria-label="Smaller text"
+              onClick={() => setStyle(node, { fontSize: Math.max(11, size - 1) })}>
+              <span className="size-a small">A</span>
             </button>
-            <span className="sep" />
-          </>
-        )}
-        <FixButton node={node} />
-        <AskButton id={node.id} group={node.type === 'meta'} />
-        <button className="icon-btn" title="Connect to another node — then click it  (c)"
-          onClick={() => useUI.getState().set('linking', { sourceId: node.id })}>
-          <Icon name="link" size={15} />
-        </button>
-        <button className="icon-btn" title="Add connected node" onClick={() => addConnected(node)}>
-          <Icon name="branch" size={15} />
-        </button>
-        {node.parent && (
-          <button className="icon-btn" title="Move out of this group"
-            onClick={() => moveOut(node.id)}>
-            <Icon name="up" size={15} />
+            <button className="size-value" title="Pick a text size"
+              onClick={() => setSizeOpen((v) => !v)}>{size}</button>
+            <button className="icon-btn" title="Larger text" aria-label="Larger text"
+              onClick={() => setStyle(node, { fontSize: Math.min(34, size + 1) })}>
+              <span className="size-a big">A</span>
+            </button>
+            {sizeOpen && (
+              <div className="size-menu">
+                {SIZES.map((s) => (
+                  <button key={s} className={s === size ? 'on' : ''}
+                    onClick={() => { setStyle(node, { fontSize: s }); setSizeOpen(false) }}>
+                    <span className="sample" style={{ fontSize: Math.min(s, 19) }}>A</span>
+                    <span className="n">{s}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+          <span className="looks-sep" />
+          <span className="looks-lists">
+            <button className={`icon-btn ${listKind === 'bullet' ? 'on' : ''}`} title="Bullet list"
+              onClick={() => setBodyList(node, listKind === 'bullet' ? 'none' : 'bullet')}>
+              <Icon name="bullets" size={15} />
+            </button>
+            <button className={`icon-btn ${listKind === 'number' ? 'on' : ''}`} title="Numbered list"
+              onClick={() => setBodyList(node, listKind === 'number' ? 'none' : 'number')}>
+              <Icon name="numbers" size={15} />
+            </button>
+          </span>
+        </div>
+      )}
+    </NodeToolbar>
+  )
+}
+
+/** What can be done to the selected card (DESIGN.md 71): a slim pill that
+ *  comes down from the top of the canvas while one card is selected - not a
+ *  panel over the cards above it. New card actions join this bar. */
+export function CardBar({ id }: { id: string }) {
+  const node = useStore((s) => s.nodes[id])
+  const enter = useStore((s) => s.enter)
+  if (!node) return null
+  return (
+    <div className="card-bar nodrag nopan" role="toolbar" aria-label="This card"
+      onDoubleClick={(e) => e.stopPropagation()}>
+      {node.type === 'meta' && (
+        <>
+          <button className="icon-btn" title="Open" onClick={() => enter(node.id)}>
+            <Icon name="enter" size={15} />
           </button>
-        )}
-        <button className="icon-btn" title="Duplicate (Ctrl+D)"
-          onClick={() => void duplicateNodes([node.id])}>
-          <Icon name="copy" size={15} />
+          <button className="icon-btn" title="Ungroup" onClick={() => unwrapMeta(node.id)}>
+            <Icon name="layers" size={15} />
+          </button>
+          <span className="sep" />
+        </>
+      )}
+      <FixButton node={node} />
+      <AskButton id={node.id} group={node.type === 'meta'} />
+      <span className="sep" />
+      <button className="icon-btn" title="Connect to another node — then click it  (c)"
+        onClick={() => useUI.getState().set('linking', { sourceId: node.id })}>
+        <Icon name="link" size={15} />
+      </button>
+      <button className="icon-btn" title="Add connected node" onClick={() => addConnected(node)}>
+        <Icon name="branch" size={15} />
+      </button>
+      {node.parent && (
+        <button className="icon-btn" title="Move out of this group"
+          onClick={() => moveOut(node.id)}>
+          <Icon name="up" size={15} />
         </button>
-        <span className="grow" />
-        <button className="icon-btn danger" title="Delete" onClick={() => deleteNodes([node.id])}>
-          <Icon name="trash" size={15} />
-        </button>
-      </div>
+      )}
+      <button className="icon-btn" title="Duplicate (Ctrl+D)"
+        onClick={() => void duplicateNodes([node.id])}>
+        <Icon name="copy" size={15} />
+      </button>
+      <span className="sep" />
+      <button className="icon-btn danger" title="Delete  (Del)" onClick={() => deleteNodes([node.id])}>
+        <Icon name="trash" size={15} />
+      </button>
     </div>
   )
 }
@@ -386,7 +426,7 @@ function Shell({ node, selected, resizable, children }: {
           handleStyle={{ width: 7, height: 7, borderRadius: 2, background: 'var(--mb-accent)' }}
           onResizeEnd={(_, p) => updateNode(node.id, { size: [p.width, p.height] })} />
       )}
-      <Tools node={node} />
+      <Looks node={node} selected={selected} />
       <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''}`
         + ` tone-${node.style.tone ?? 'accent'}${node.style.color ? ' has-colour' : ''}`
         + `${sparked ? ' spark' : ''}${node.size[1] ? ' sized-h' : ''}`

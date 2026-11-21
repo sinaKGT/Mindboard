@@ -3556,3 +3556,72 @@ strikethrough, a formula, a table and both kinds of link drew each one; each
 pattern drew on the canvas and the choice was saved with the board.
 
 282 tests.
+
+## 70. A long question takes its own row; no file button in the chat (2026-11-21)
+
+- **A long question.** The open bar is one row: the ankh, the question box,
+  then the tools (picture, Explain more, Board on, Think deeper, send). On a
+  window 1,024 px wide the bar is 424 px, the tools take 280 px, and the box
+  was left 77 px - a long question stood in a column a few letters wide
+  inside a tall pill. Now a question that does not fit on one line beside
+  the tools, or that has a line break, moves to a row of its own across the
+  whole bar, with the ankh and the tools under it; the bar's ends round to
+  22 px instead of a pill. The box still grows to five lines (120 px) and
+  then scrolls inside itself.
+  The test is the text's measured width against the room one row would
+  leave (the bar less its padding, the ankh, the tools and the gaps), not
+  the box's own height: the height depends on which layout is showing, so a
+  first try that used it stuck in two rows - and while the bar opens from
+  the small pill the box measured many lines. The test is taken again
+  whenever the bar's width changes.
+- **The file button is gone.** "Ask a file" sat beside the picture button
+  and was clicked by mistake while working. A file is still asked by
+  dragging or pasting it into the chat, or from a file card on the board.
+
+Checked in the browser at 1,024 and 1,600 px wide: a 21-character question
+stays on one row at 1,600 (two at 1,024, where one row leaves 77 px); an
+89-character question and one with a line break move to two rows and come
+back when shortened; a 2,000-character question shows five lines with a
+scroll bar, the tools beneath; clearing the box returns the bar to its pill.
+
+282 tests.
+
+## 71. The card's tools: a pill at the top, a colour dot on the card (2026-11-21)
+
+A selected card opened a panel above it, three rows tall: colours and fill,
+text size and lists, then fix the writing, context, connect, add connected,
+move out, duplicate, delete. It covered the cards above the selected one and
+grew with every new action. Layout "B" from the mock-up, built:
+
+- **Actions in a pill at the top of the canvas**, centred, rounded ends,
+  shown while one card is selected (`CardBar` in `nodes.tsx`, drawn by
+  `Canvas.tsx` outside the board's transform, so it keeps its size and place
+  at any zoom). Groups add Open and Ungroup at the front; a card inside a
+  group adds Move out. New card actions join this bar. Hidden while a link
+  is being drawn and in exported pictures.
+- **The look stays with the card**: a small dot just off its top right
+  corner, in the card's colour, opens a narrow strip under it - six colours,
+  any colour, default colour; fill (bar, tinted, solid); text size; bullet and
+  numbered lists. Both sit in xyflow's `NodeToolbar`, which keeps them one
+  size at any zoom and shows them only while that card alone is selected.
+- **Any colour**: a rainbow bead opens the system colour picker; the choice is
+  kept in `style.color` like the others, and is applied once, when the picker
+  closes, not as an op for every step of a drag across it. A custom colour
+  shows in that bead.
+- **Depth, asked for after the first build looked flat**: the pill and the
+  strip are raised glass - a lit top edge, a darker lower one, a soft shadow
+  with a faint glow of the board's accent; buttons rise under the pointer and
+  press in when clicked; the dot and the swatches are glossy beads. Built from
+  the theme's own colours, so every theme, light or dark, keeps it.
+- **A fix found on the way**: any change to the board rebuilt the canvas's
+  list of cards without their selection, so picking a colour deselected the
+  card and put its tools away. The cards in hand are now kept selected when
+  the level is rebuilt.
+
+Keyboard and undo are as before; every change is still an op. Checked in the
+browser on a dark and a light theme: the pill centred at the top; the strip
+at one size at 12 % and 29 % zoom; a colour, a custom colour (one op) and
+Ctrl+Z each changed the card while it stayed selected. The old panel and its
+styles are gone.
+
+282 tests.
