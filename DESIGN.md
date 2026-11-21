@@ -3750,3 +3750,30 @@ selection could not be confirmed). Summarise these, on the same two cards:
 4.5 s, the people, the visits and the reports.
 
 291 tests.
+
+## 73. The app's own tooltip (2026-11-21)
+
+Every button names itself with `title`, about a hundred of them, and the
+browser drew each as its own plain white box - foreign beside the app's
+panels, and the same on a dark board as on a light one.
+
+Rather than edit each button, one small module (`tooltip.ts`, installed in
+`main.tsx`) takes them over. On the first hover over an element with a
+`title`, the title moves to `data-tip`, so the browser's box never appears;
+an element with no other name keeps it as its `aria-label`, so screen readers
+lose nothing. After 450 ms of resting on it, the words are drawn in a small
+panel with the floating-panel surface, border and shadow (`.mb-tip`), in the
+board's theme, below the element - above it when there is no room below -
+and always inside the window. A shortcut written after two spaces in
+brackets ("Fit to view  (Ctrl+0)") is set apart as a key. A press, a key, a
+scroll, a wheel or leaving the element hides it; touch gets none. A title
+React writes again later is taken over on the next hover.
+
+Not chosen: removing the titles - the icon-only buttons (the card bar's,
+the dock's) would then say nothing at all.
+
+Checked in the browser on a light and a dark theme: hovering "Fit to view"
+showed the panel above the dock with Ctrl+0 as a key, the button kept no
+`title` and gained its `aria-label`; "Minimap" on the dark theme drew dark.
+
+291 tests.
