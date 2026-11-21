@@ -3,8 +3,9 @@
 Only what is left, in the order we plan to take it. Each item says what was
 asked, what was decided, and what done looks like.
 Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
-(§72), v2 merged into main (PR #2), Node.js in the installers and
-AGENTS.md (§74); next: C.
+(§72), Node.js in the installers and AGENTS.md (§74), card AI in a panel
+with a quiz as data, soft glass cards and Beautify (§75-79); all merged into
+main (PR #4); next: C.
 
 ---
 
@@ -17,7 +18,9 @@ AGENTS.md (§74); next: C.
   general knowledge labelled, never passed off as the board's).
 - **Tables in answers when they help**, and a **"Make a table" action under
   an answer** that rewrites it as a table (and could add it to the board as
-  a card - cards already draw markdown tables, §69).
+  a card - cards already draw markdown tables, §69). Cards have Beautify now
+  (§78-79), which lays a card out as lists and bold labels but makes no
+  tables, since it never moves words; the chat's answers have nothing yet.
 
 ## D. The board
 
@@ -35,6 +38,15 @@ AGENTS.md (§74); next: C.
 - **A way to move a card out of its group.** "Move out of this group" lost its
   button with the card bar's "more" menu (§71); nothing else does it now.
   To decide: where it goes (dragging out, a key, or back on the bar).
+
+## D2. Card AI - loose ends (from §72-79)
+
+- **Break it into cards: a report cut off.** "When I click on break it down
+  it shows..." - the rest of the sentence never came. The list-text fix
+  (§77) may have been it. To do: ask what it showed, and try it on a few cards.
+- **Fun fact still slips sometimes.** Without today's date and told to work
+  nothing out (§78), one run in three still called a date "future" from the
+  card's own words. Worth a few more runs on richer cards before deciding.
 
 ## E. Search
 
