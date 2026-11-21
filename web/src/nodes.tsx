@@ -220,18 +220,35 @@ const NAMED_SIZES: { label: string; size: number }[] = [
 type Menu = 'colour' | 'text' | 'ai'
 
 /** What the chat is asked, in words the person sees in it (DESIGN.md 72). */
-const ASK_ABOUT = {
-  summary: 'Summarise this card in a few short lines.',
-  explain: 'Explain this card in plain words, with an example or two.',
-  quiz: "Let's play a fun quiz on this card! Ask me question 1 of 3 right now - just that "
-    + 'one question (multiple choice with exactly one right choice, or a short answer), then '
-    + 'stop and wait for my answer. '
-    + 'When I answer, tell me cheerfully whether I got it right, explain briefly from the '
-    + 'card, keep score, and ask the next. After question 3, give my final score.',
-  funfact: 'Tell me one fun fact from this card, in one or two playful sentences - only from '
-    + 'what the card itself says. If the card does not hold enough for a fun fact, say so '
-    + 'instead in one short, funny line that ends with an emoji (like 🤷 or 🙈) - and make '
-    + 'nothing up.',
+/** A card's AI actions through the chat (DESIGN.md 75): the task, known, so
+ *  the request is not read first; a short line the chat shows; what it says
+ *  while it works; and the request itself - short, because the task's shape
+ *  (tasks.SHAPES) carries the rules. */
+type Act = 'summarize' | 'explain' | 'quiz' | 'funfact'
+const ACT: Record<Act, { label: string; doing: string; ask: (what: string, many: boolean) => string }> = {
+  summarize: { label: 'Summarise', doing: 'Summarising…',
+    ask: (w, m) => `Summarise ${w}${m ? ' together' : ''}.` },
+  explain: { label: 'Explain', doing: 'Explaining…',
+    ask: (w) => `Explain ${w} in plain words, with an example or two.` },
+  quiz: { label: 'Quiz me', doing: 'Making your quiz…',
+    ask: (w, m) => `Quiz me on ${w} - ${m ? 'four' : 'three'} questions, one at a time.` },
+  funfact: { label: 'Fun fact', doing: 'Finding a fun fact…',
+    ask: (w) => `One fun fact from ${w}.` },
+}
+
+/** Sends a card action for these cards: their titles name them in the request
+ *  and in the chat's short line - "this card" alone was read as whichever card
+ *  the conversation was last about (DESIGN.md 72). */
+function askCards(ids: string[], act: Act) {
+  const nodes = useStore.getState().nodes
+  const titles = ids.map((i) => (nodes[i]?.title || '').trim().slice(0, 80)).filter(Boolean)
+  const many = ids.length > 1
+  const what = many
+    ? (titles.length ? `these cards: ${titles.map((t) => `"${t}"`).join(', ')}` : 'these cards')
+    : (titles[0] ? `the card "${titles[0]}"` : 'this card')
+  const shown = many ? `${ids.length} cards` : (titles[0] || 'this card')
+  useAsk.getState().askAbout(ids, ACT[act].ask(what, many),
+    { task: act, label: `${ACT[act].label}: ${shown}`, doing: ACT[act].doing })
 }
 
 type AiView =
@@ -242,15 +259,6 @@ type AiView =
   | { at: 'related'; cards: { id: string; title: string; snippet: string }[]; linked: string[] }
   | { at: 'said'; note: string }
 
-/** What the chat is asked about several cards (DESIGN.md 72). */
-const ASK_ABOUT_MANY = {
-  summary: 'Summarise these cards together in a few short lines.',
-  quiz: "Let's play a fun quiz on these cards! Ask me question 1 of 4 right now - just that "
-    + 'one question (multiple choice with exactly one right choice, or a short answer), then '
-    + 'stop and wait for my answer. '
-    + 'When I answer, tell me cheerfully whether I got it right, explain briefly from the '
-    + 'cards, keep score, and ask the next. After question 4, give my final score.',
-}
 
 type ManyView =
   | { at: 'menu' }
@@ -270,7 +278,7 @@ export function SelectionAi({ ids }: { ids: string[] }) {
   const textual = picked.filter((n) => n.type !== 'meta')
   const canMerge = picked.length >= 2 && textual.length === picked.length && picked.length <= 8
   const shut = () => { setOpen(false); setView({ at: 'menu' }) }
-  const ask = (q: string) => { shut(); useAsk.getState().askAbout(ids, q) }
+  const ask = (act: Act) => { shut(); askCards(ids, act) }
   const root = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const m = root.current
@@ -327,10 +335,10 @@ export function SelectionAi({ ids }: { ids: string[] }) {
         <div ref={root} className={`tools-menu list ai ${view.at === 'menu' ? '' : 'wide'} sel-ai-menu`}>
           {view.at === 'menu' && (
             <>
-              <button className="tools-item" onClick={() => ask(ASK_ABOUT_MANY.summary)}>
+              <button className="tools-item" onClick={() => ask('summarize')}>
                 <Icon name="type" size={15} /> Summarise these
               </button>
-              <button className="tools-item" onClick={() => ask(ASK_ABOUT_MANY.quiz)}>
+              <button className="tools-item" onClick={() => ask('quiz')}>
                 <Icon name="bulb" size={15} /> Quiz me on these
               </button>
               <span className="tools-rule" />
@@ -383,10 +391,7 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
   const [view, setView] = useState<AiView>({ at: 'menu' })
   const boardId = useStore((s) => s.boardId)
   const hasText = !!(node.title.trim() || String(node.content.text ?? '').trim())
-  // the card named by its title: "this card" alone was read as whichever card
-  // the conversation was last about
-  const named = node.title.trim() ? `the card "${node.title.trim().slice(0, 80)}"` : 'this card'
-  const ask = (q: string) => { close(); useAsk.getState().askAbout([node.id], q.replace(/this card/g, named)) }
+  const ask = (act: Act) => { close(); askCards([node.id], act) }
   // above the bar unless the window's top would cut it off (as CardTools does)
   const root = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -499,16 +504,16 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
   )
   return (
     <div ref={root} className="tools-menu list ai">
-      <button className="tools-item" disabled={!hasText} onClick={() => ask(ASK_ABOUT.summary)}>
+      <button className="tools-item" disabled={!hasText} onClick={() => ask('summarize')}>
         <Icon name="type" size={15} /> Summarise
       </button>
-      <button className="tools-item" disabled={!hasText} onClick={() => ask(ASK_ABOUT.explain)}>
+      <button className="tools-item" disabled={!hasText} onClick={() => ask('explain')}>
         <Icon name="explain" size={15} /> Explain this card
       </button>
-      <button className="tools-item" disabled={!hasText} onClick={() => ask(ASK_ABOUT.quiz)}>
+      <button className="tools-item" disabled={!hasText} onClick={() => ask('quiz')}>
         <Icon name="bulb" size={15} /> Quiz me on this
       </button>
-      <button className="tools-item" disabled={!hasText} onClick={() => ask(ASK_ABOUT.funfact)}>
+      <button className="tools-item" disabled={!hasText} onClick={() => ask('funfact')}>
         <Icon name="sparkle" size={15} /> Fun fact
       </button>
       <span className="tools-rule" />
@@ -527,7 +532,7 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
 }
 
 /** The selected card's tools (DESIGN.md 71): one compact bar just above the
- *  card - colour, text size, AI, connect. Each button opens only what
+ *  card, centred - colour, text size, AI, connect. Each button opens only what
  *  belongs to it, above the bar, so the card stays in view. In xyflow's node
  *  toolbar, so it keeps one size at any zoom and shows only while this card
  *  alone is selected. */
@@ -562,7 +567,7 @@ function CardTools({ node, selected }: { node: MNode; selected?: boolean }) {
   })
   const btn = (m: Menu) => `tools-btn ${menu === m ? 'open' : ''}`
   return (
-    <NodeToolbar position={Position.Top} align="start" offset={16}
+    <NodeToolbar position={Position.Top} align="center" offset={30}
       className="card-tools-bar nodrag nopan">
       <div ref={bar} className="tools-bar" role="toolbar" aria-label="This card"
         style={{ ['--node-color' as string]: accentOf(node) }}
@@ -611,7 +616,6 @@ function CardTools({ node, selected }: { node: MNode; selected?: boolean }) {
         )}
         {menu === 'text' && (
           <div className="tools-menu list text">
-            <div className="tools-label">Size</div>
             <div className="tools-sizes">
               {NAMED_SIZES.map((x) => (
                 <button key={x.label} className={x === nearest ? 'on' : ''}

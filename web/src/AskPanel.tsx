@@ -105,6 +105,8 @@ function statusLine(t: Turn): string | null {
   if (step) return step
   if (t.status !== 'reading') return null
   if (t.looking) return 'Looking at your picture…'
+  // a card action says what it is doing, all the way to its first word (DESIGN.md 75)
+  if (t.doing) return t.doing
   // before the answer's context: the request being understood (DESIGN.md 66)
   if (t.used === undefined) return t.task ? 'Getting ready to write…' : 'Understanding your request…'
   const what = t.mode === 'search' ? `the ${t.used} best-matching cards`

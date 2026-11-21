@@ -87,6 +87,9 @@ class AskRequest(BaseModel):
     own: bool = False
     # pictures pasted into the chat box, as data: URLs (DESIGN.md 62)
     images: list[Annotated[str, Field(max_length=21_000_000)]] = Field(default_factory=list, max_length=4)
+    # a card action's task, known already (DESIGN.md 75): the request is not
+    # read first - "summarize", "explain", "quiz" or "funfact"
+    task: str = Field(default="", max_length=20)
 
 
 class DraftRequest(BaseModel):

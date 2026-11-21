@@ -524,7 +524,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             # asked while a picture is being described waits its turn (60)
             tools = own_tools(model, ctx.attached) if ctx.mode == "own" \
                 else board_tools(model, bid, ctx.attached)
-            yield from tasks_mod.run(model, ctx, body.question, history, tools)
+            yield from tasks_mod.run(model, ctx, body.question, history, tools, known=body.task)
             yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
 
         return stream_answer(model, understood, warning, request, after=lambda: indexer.want(bid), hold=True)
@@ -1200,6 +1200,11 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
 
         @app.get("/{full_path:path}")
         def spa(full_path: str):
+            # an address under /api/ that no route answers is a missing route -
+            # most often a server older than the page (DESIGN.md 75) - not a page
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(404, "Mindboard needs restarting - this page is newer than "
+                                         "the server it is talking to")
             candidate = WEB_DIR / full_path
             if full_path and candidate.is_file() and WEB_DIR in candidate.resolve().parents:
                 return FileResponse(candidate)
@@ -1212,6 +1217,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     else:
         @app.get("/{full_path:path}")
         def no_ui(full_path: str):
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(404, "no such route")
             return Response(
                 "<h1 style='font:600 16px system-ui;padding:2rem'>Mindboard backend is running, "
                 "but the interface was not built.<br><small style='font-weight:400'>Run "

@@ -140,3 +140,17 @@ def test_a_quiz_is_its_own_task_asked_one_question_at_a_time():
     assert plan["task"] == "quiz"
     note = tasks.task_note(plan, [])
     assert "only the NEXT question" in note and "never its answer" in note
+
+
+def test_a_card_actions_task_is_taken_as_it_is_without_reading_the_request():
+    # DESIGN.md 75: read first, a fun fact came back as "LIST" and the page
+    # said "Understanding your request" for a plain summary
+    model = Model({"task": "extract", "steps": []})
+    ctx = Context(["A" * 26], "CARDS")
+    evs = list(tasks.run(model, ctx, "One fun fact from the card \"Analogy\".", [], tools(), known="funfact"))
+    assert [e["event"] for e in evs] == ["task"] and evs[0]["task"] == "funfact"
+    assert model.prompts == []                       # the request was not read by the model
+    assert "Fun fact:" in ctx.task_note and "Never just restate" in ctx.task_note
+    # anything else is read as before
+    list(tasks.run(model, Context([], "CARDS"), "what is this?", [], tools(), known="extract"))
+    assert len(model.prompts) == 1

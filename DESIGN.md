@@ -3827,3 +3827,77 @@ or Linux, the winget install itself on a computer without Node.js, and an
 agent following AGENTS.md on a clean computer.
 
 291 tests.
+
+## 75. Card actions said plainly, a centred bar, and a missing route said (2026-11-21)
+
+What the owner saw using the card AI (§72) on a running Mindboard:
+
+- **"Understanding your request…" for Summarise, and "LIST" over a fun fact.**
+  A card action went through the request reader (§66) like any typed
+  question: a wait, and sometimes a wrong reading. A card action knows its
+  task, so it now says so - `AskRequest.task` (`summarize`, `explain`,
+  `quiz`, `funfact`, `tasks.KNOWN`) - and `tasks.run(..., known=)` takes it
+  as it is: no reader call, the task event at once, the answer shaped for it.
+  The page says what it is doing until the first word - "Summarising…",
+  "Explaining…", "Making your quiz…", "Finding a fun fact…" (`Turn.doing`) -
+  and labels the answer Summary, Explanation, Quiz or Fun fact.
+- **The request shown as if the person had typed it** - a paragraph of
+  instructions under the card's name. The chat now shows a short line ("Fun
+  fact: Analogy", "Summarise: 2 cards") and keeps the request for the model
+  (`Turn.prompt`, used in the conversation sent back too, so a quiz still
+  knows what it is playing). The requests are short now ("One fun fact from
+  the card \"Analogy\".") because the task's shape carries the rules.
+- **The fun fact read the card back** ("Analogy is a central ability of human
+  cognition..."). It has a shape of its own (`SHAPES["funfact"]`): the most
+  surprising detail the cards hold - a number, a contrast, an odd name, a
+  link - in one or two playful sentences beginning "Fun fact:", with an emoji,
+  never the opening line or definition restated; a short funny line with 🤷
+  when there is nothing to surprise.
+- **Find related cards: "Unexpected token '<', "<!doctype"..."** The owner's
+  Mindboard had been started before the route existed, and the interface's
+  catch-all answered the unknown `/api/...` address with the page itself, which
+  the page could not read as data. Addresses under `/api/` that no route
+  answers are now a 404 saying Mindboard needs restarting, and the page says
+  the same for any non-JSON answer, instead of a parser's words. A restart
+  is what fixes the owner's case.
+- **The bar sits centred above the card**, and every menu centred on the bar
+  (`translate`, so the pop animation does not undo it). **The size menu is
+  one tight row** - no "Size" heading, 151 × 37 px.
+
+Checked with the real model on the SWIFT Lab Visitors board: Summarise showed
+"Summarise: David Astill MBE FCILT" in the chat, "Starting the model…" then
+"Summarising…", and a Summary; Fun fact showed "Finding a fun fact…" and an
+answer labelled Fun fact beginning "Fun fact:" (2.3 s) - still plain, from a
+card that lists only roles and dates. Card, bar and size menu share one
+centre line at 80 % zoom.
+
+293 tests.
+
+## 76. Cards in soft glass (2026-11-21)
+
+The owner found the cards basic: a flat box with a 2 px colour bar across the
+top. Three directions were drawn - soft glass, a header strip naming the
+card's kind with its link count, and a very round card with a coloured tag -
+and soft glass chosen: it changes how a card looks without adding anything
+to read on every card, which matters on a board of hundreds.
+
+- **Rounder** (14 px) and **lit**: the surface brightens a little towards the
+  top (the theme's own card colour mixed with 6 % white, so a light theme's
+  white card stays white) with a faint light line along the top edge.
+- **The colour down the left edge** in place of the bar across the top: a
+  3 px edge inset from the corners, glowing softly when the card has a
+  colour of its own; a card without one shows its type's colour, quieter.
+  The bar, tinted and solid tones are unchanged.
+- **Lifted under the pointer and while dragged** in the theme's larger shadow
+  (it was a fixed black shadow, heavy on light themes); **selected** with the
+  accent border and a soft 3 px ring.
+- Text sits a little further from the edges (11-14 px; 16 px on the left,
+  past the colour edge), titles 13.5 px.
+- The card bar (§71) moved from 16 to 30 px above the card - the owner found
+  it too close.
+
+Checked in the browser at 103 % on a dark and a light theme: coloured cards
+showed the glowing edge, the selected one the ring; on the light theme the
+cards stayed white with a soft shadow.
+
+293 tests.
