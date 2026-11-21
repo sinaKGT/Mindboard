@@ -13,7 +13,8 @@ more takes nothing from the board (§86); work moved from v2 to dev;
 Summarise beside Add to board, scrolling while it writes, no hover text in
 the chat (§87); a board answer citing no card says so (§88); Explain more
 understands, plans and answers, in a file's conversation too, and page
-lists are links (§89); next: the rest of C.
+lists are links (§89); tables with formulas keep their columns (§90);
+next: the rest of C.
 
 ---
 

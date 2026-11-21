@@ -1365,6 +1365,10 @@ a.btn { text-decoration: none; }
 .turn .prose-table-wrap { overflow-x: auto; }
 .turn .prose-table { border-collapse: collapse; }
 .turn .prose-table th, .turn .prose-table td { padding: 3px 8px; border-bottom: 1px solid var(--mb-border, #8884); text-align: left; vertical-align: top; }
+/* whole words in a cell (DESIGN.md 90): the chat breaks anywhere, which cut
+   a narrow column's "Dimension" into "Dimens / ion"; a very long word may
+   still break, and a wide table scrolls */
+.turn .prose-table th, .turn .prose-table td { overflow-wrap: break-word; word-break: normal; min-width: 7ch; }
 
 /* ---------------------------------------------------- pictures in answers -- */
 /* The pictures an answer cites, under it (AnswerPictures, DESIGN.md 48). */

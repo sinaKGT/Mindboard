@@ -4566,3 +4566,27 @@ an Explain more answer is longer with the plan in most cases, which the
 owner may or may not want.
 
 361 tests.
+
+## 90. A table with formulas keeps its columns (2026-11-21)
+
+Asked for the differences between context engineering and prompt
+engineering, a file answer compared them in a table whose cells held
+formulas with a conditional bar - $P_\theta(Y | \text{prompt})$. The page
+split each row on every "|", so those rows fell apart into extra columns of
+raw LaTeX ("$\arg\max_{\text{prompt}} P_\theta(Y" in one cell, the rest in
+the next). And the chat breaks words anywhere, so a narrow first column read
+"Dimens / ion", "Definiti / on".
+
+- **Cells** (`Prose.splitCells`): formulas (the same pattern the page draws
+  maths with, §61), `code`, and "\|" are set aside before a row is split
+  on "|", then put back. Checked on the row from the owner's answer: three
+  cells, each formula whole; "$5 | $10" still splits in two, since a price
+  is not a formula; "a \| b" stays one cell and reads "a | b".
+- **Whole words in cells**: table cells in the chat wrap at spaces
+  (`overflow-wrap: break-word`, at least 7 characters wide); a word longer
+  than the column may still break, and a wide table scrolls, as before.
+
+Not done: a formula the model writes without dollar signs is not known to
+be one, so a bar in it still splits the row.
+
+361 tests.

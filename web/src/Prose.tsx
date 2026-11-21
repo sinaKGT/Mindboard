@@ -22,6 +22,18 @@ export type Block =
 
 const TABLE_ROW = /^\s*\|.*\|\s*$/
 
+/** A table row's cells. A "|" inside a formula ($P(Y | C)$), inside `code`,
+ *  or written "\|" is part of the cell, not a border: split on every "|",
+ *  a row of formulas fell apart into stray columns of raw LaTeX (DESIGN.md 90). */
+const KEEP_WHOLE = new RegExp(`${MATH_SOURCE}|` + '`[^`\\n]+`', 'g')
+export function splitCells(row: string): string[] {
+  const kept: string[] = []
+  const masked = row
+    .replace(KEEP_WHOLE, (m) => { kept.push(m); return `\u0000${kept.length - 1}\u0000` })
+    .replace(/\\\|/g, () => { kept.push('|'); return `\u0000${kept.length - 1}\u0000` })
+  return masked.split('|').map((c) => c.replace(/\u0000(\d+)\u0000/g, (_, n) => kept[Number(n)]).trim())
+}
+
 /** the answer as blocks */
 export function blocks(src: string, breaks = false): Block[] {
   const out: Block[] = []
@@ -59,7 +71,7 @@ export function blocks(src: string, breaks = false): Block[] {
       flush(); indents = []
       const rows: string[][] = []
       for (; i < lines.length && TABLE_ROW.test(lines[i]); i++) {
-        const cells = lines[i].trim().slice(1, -1).split('|').map((c) => c.trim())
+        const cells = splitCells(lines[i].trim().slice(1, -1))
         if (!cells.every((c) => /^:?-{2,}:?$/.test(c))) rows.push(cells)
       }
       i--
