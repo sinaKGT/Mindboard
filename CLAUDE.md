@@ -4,7 +4,7 @@ Mindboard is a local-first mind-map canvas with a chat over your own notes:
 boards of cards and links, answered by local models (llama.cpp: Qwen3.5 chat +
 vision, Qwen3 embedding and reranker). Nothing leaves the computer.
 
-- **Why things are the way they are:** `DESIGN.md`, numbered sections §1–§66.
+- **Why things are the way they are:** `DESIGN.md`, numbered sections §1–§79.
   Read the sections for the area you touch before changing it, and add a new
   section for every change of substance (see "Writing a DESIGN.md section").
 - **How it fits together, workflow by workflow:** `docs/architecture.md`
@@ -57,6 +57,32 @@ mindboard run            # port 7788 by default; `mindboard menu` for the menu
 
 Add Python dependencies to `pyproject.toml` (with a comment saying what for and
 the licence) — `install.sh` / `install.ps1` / `mindboard update` install from it.
+
+## The process for every change
+
+Every change goes through these steps, in this order. Say which step you are
+on; do not skip one because the change looks small.
+
+1. **Plan.** Understand what is asked; read the DESIGN.md sections for the
+   area and the code it touches. Say the plan in a few lines. Ask only when
+   something is genuinely unclear - not for what the code or a sensible
+   default can settle.
+2. **Design, if the change is something the owner sees.** Show a mock-up
+   first (two or three directions when the look is open), say which you
+   recommend, and wait for the owner's choice before building it. Skip this
+   for fixes and changes with no new look.
+3. **Implement.** Follow the rules of the house below; one change of
+   substance at a time.
+4. **Test.** Unit and route tests for what changed (`pytest`), the interface
+   type-checked and built, and the change checked in the browser
+   (`.claude/launch.json`; restart the server after Python changes). For
+   anything the model does, check it with the real model too. Then add the
+   DESIGN.md section, with what was measured and what is not done yet.
+5. **Update TODO.md.** Take out what is done, add what was found or left
+   over, and update its "Last updated" line.
+6. **Commit** on `v2`, as set out under Git below.
+7. **Push to GitHub:** `git push origin v2`. Merging into `main` (a pull
+   request, then merge) happens only when the owner asks for it.
 
 ## Rules of the house
 
@@ -143,4 +169,7 @@ marketing words. Code comments follow the same voice and cite `DESIGN.md NN`.
 - Commit messages: a short title line, a paragraph on what and why, and end
   with the attribution line the session gives (currently
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
-- Commit or push only when asked.
+- Commit and push `v2` at the end of every change (steps 6-7 of the process
+  above). Merge into `main` only when the owner asks.
+- The GitHub CLI is at `C:\Program Files\GitHub CLI\gh.exe` (it may not be on
+  the PATH of an older shell); pull requests go from `v2` into `main`.
