@@ -7,7 +7,8 @@ Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
 with a quiz as data, soft glass cards and Beautify (§75-79); all merged into
 main (PR #4); Explain more gives what it is asked for, with no "the cards
 do not cover it" line (§80-81); numbers in file answers - rows kept, a
-calculator and Double check (§82); next: the rest of C.
+calculator and Double check (§82); the card AI panel moves (§83); card
+titles in plain words (§84); next: the rest of C.
 
 ---
 

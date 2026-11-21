@@ -4220,3 +4220,92 @@ owner has seen go wrong. While the answer streams, a number the model
 labelled "(calculated)" may be its own sum; Double check is what catches it.
 
 346 tests.
+
+## 83. The card AI panel moves (2026-11-21)
+
+From the owner, with a screenshot of an Explanation panel over its card:
+"when we have this panel I want to be able to move that freely in canvas".
+The panel lived inside the selected card's toolbar, so it could not move, and
+it closed whenever the card was let go. Of three directions shown - floating
+over the board, placed on the board (zooming with it), floating with a line
+back to its card - the owner chose the first.
+
+- **A layer of its own.** Summarise, Explain, Fun fact and Quiz panels, for
+  one card or several, are now drawn in one layer over the page (`AiPanels`,
+  mounted by the canvas), not inside the toolbar, so what a panel holds - an
+  answer still streaming, a quiz half played - is kept when it leaves the
+  card. The card's menu leaves an empty mark in its bar (`PanelSlot`); while
+  the panel has not been moved, the layer places it against that mark every
+  frame - above the bar, or below when there is no room, as menus do - so it
+  follows the card as the board pans and zooms, and goes when the card is let
+  go or the menu closed, as before. The back arrow still returns to the menu.
+- **Dragged by its header** ("Drag to move"), it detaches: the card's menu
+  closes, the back arrow becomes a close button, and the panel stays where it
+  was put on the screen - at one size whatever the zoom - while other cards
+  are selected, the board is panned, or the chat is used. It closes with its
+  x, or Esc while it has focus. A press shorter than 4 pixels is a click, not
+  a drag. Several can be open; the one last touched is in front. Another
+  board closes them all.
+- **Kept whole in the window.** First tried, a panel let go near the bottom
+  edge grew off it as its answer arrived, taking Copy and Add to board out of
+  reach. Now a moved panel is held inside the window every frame - as it
+  grows, and as the window changes size - and a drag stops at the edges.
+- **Add to board** from a moved panel still makes a card linked to the first
+  card; if that card has been deleted meanwhile, the button is greyed out
+  ("Its card is no longer on the board") rather than doing nothing.
+- Beautify keeps its panel by the card: it changes that card, and is applied
+  or cancelled there.
+
+Checked in the app on the "Group test" board at 47% zoom: Explain opened by
+the card; dragged while its answer streamed, it kept streaming and moved;
+the card's menu closed; deselecting the card and panning the board left it
+in place and full size; let go past the bottom-right corner it stopped
+whole inside the window; Add to board made "Explanation: Chunking" (undone
+after); Esc closed it. Unmoved, the back arrow returned to the menu and
+deselecting the card closed the panel. With two cards selected, Summarise
+these opened by the selection bar, moved, and stayed after the selection
+was cleared. Interface type-checked and built; no server change.
+
+Not done: Esc closes a moved panel only while it has focus (click it first)
+- a board-wide Esc would also clear the selection; panels are not resizable;
+where a panel was put is not remembered after it closes.
+
+346 tests.
+
+## 84. Card titles in plain words (2026-11-21)
+
+In the owner's screenshot (§83) a card was titled "**Definition of Analogy:**",
+and every citation chip naming it showed the asterisks. The likely way in:
+Beautify (§78) writes a card's text with bold labels - "**Definition of
+Analogy:** The theory..." - and Break it into cards then made one card a
+line, its title from the model or, in the fallback, from the line's first six
+words; neither took markdown off a title.
+
+- **Titles the model writes are plain** (`ask.plain_title`): Break, Merge
+  and Add to board from the chat (`draft_card`, used by experts too) take off
+  a leading heading or list marker, bold, italics and code marks, and - only
+  when such marks came off - a trailing colon, which belonged to the label.
+  "Note: read later" keeps its colon; "5 * 3 = 15" is left alone. Fix the
+  writing keeps the person's own title as it is.
+- **Break's fallback reads a label.** A line that opens with a bold label
+  becomes a card titled by the label, with what follows as its text:
+  "**Base and target:** The two situations." gives "Base and target" and
+  "The two situations.".
+- **Titles already on a board are drawn plain** (`plainTitle` in text.ts,
+  the same rules): on the card, in the far-out view, in both kinds of
+  citation chip, in the related-cards list, and in the names an AI panel
+  gives a card it adds. Only the drawing changes: the title is kept, and
+  editing it shows it as written, so the asterisks can be deleted.
+
+Checked in the app: a card titled "**Definition of Analogy:**" showed
+"Definition of Analogy" on its face and in the two chips of its Explain
+panel. With the real model, Break on a card in Beautify's form gave
+"Definition of Analogy", "How Analogy Works", "Solar System Example" in three
+runs of three (9.1 s, then 1.5 s each); what the model wrote before
+cleaning is not shown by the route, so whether it wrote asterisks this time
+is not known - the unit tests hold the cleaning to the cases seen.
+
+Not done: titles typed with asterisks on purpose are drawn without them
+too; the search index and what the model reads keep the title as written.
+
+356 tests.

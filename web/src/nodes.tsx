@@ -1,5 +1,7 @@
 import { Handle, NodeResizer, NodeToolbar, Position, useStore as useFlow, type NodeProps } from '@xyflow/react'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { create } from 'zustand'
 
 import {
   columnSpots, connect, deleteNodes, linkifyNode, refreshLinkPreview, setStyle, spark, updateNode,
@@ -9,7 +11,7 @@ import { askable, revealCard, useAsk } from './askStore'
 import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
-import { continueList, URL_ONLY } from './text'
+import { continueList, plainTitle, URL_ONLY } from './text'
 import { Prose } from './Prose'
 import { withMath } from './Math'
 import { NODE_COLOURS } from './theme'
@@ -186,7 +188,7 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
   return (
     <div className="body" style={{ textAlign: node.style.align }}>
       <div className="title" style={{ fontSize: fs + 1 }}>
-        {node.title ? withMath(node.title) : <span className="placeholder">{placeholder}</span>}
+        {node.title ? withMath(plainTitle(node.title)) : <span className="placeholder">{placeholder}</span>}
       </div>
       {text_
         // markdown, as in the chat's answers (DESIGN.md 69): headings, bold,
@@ -259,7 +261,7 @@ const ACT: Record<Act, { label: string; doing: string; ask: (what: string, many:
  *  alone was read as whichever card a conversation was last about (DESIGN.md 72). */
 function nameCards(ids: string[]): { what: string; many: boolean; first: string } {
   const nodes = useStore.getState().nodes
-  const titles = ids.map((i) => (nodes[i]?.title || '').trim().slice(0, 80)).filter(Boolean)
+  const titles = ids.map((i) => plainTitle(nodes[i]?.title || '').slice(0, 80)).filter(Boolean)
   const many = ids.length > 1
   const what = many
     ? (titles.length ? `these cards: ${titles.map((t) => `"${t}"`).join(', ')}` : 'these cards')
@@ -272,12 +274,174 @@ const ANSWER_HEAD: Record<Exclude<Act, 'quiz'>, string> = {
 }
 const CITE_MARK = /\[\[[0-9A-Za-z]{26}\]\]/g
 
+/* ---------------------------------------------------- panels that move --
+ * DESIGN.md 83: a card action's panel - Summarise, Explain, Fun fact, Quiz -
+ * can be dragged by its header anywhere over the board. It lives in a layer
+ * of its own, so what it holds (an answer streaming in, a quiz half played)
+ * is kept when it leaves the card. Until it is moved it sits just above the
+ * card's bar, as before, and goes when the card is let go; once moved it
+ * floats where it was put, at one size whatever the zoom, stays open while
+ * other cards are used, and closes with its x or Esc. */
+
+interface FloatPanel {
+  key: number
+  ids: string[]
+  act: Act
+  /** where it floats, once moved; null while it sits by its card */
+  at: { x: number; y: number } | null
+  z: number
+  /** back to the AI menu (by the card only) */
+  back: () => void
+  /** moved away: the card's menu closes, the panel stays */
+  detach: () => void
+}
+
+let panelKeys = 0
+let panelZ = 0
+const usePanels = create<{
+  panels: FloatPanel[]
+  open: (p: Omit<FloatPanel, 'key' | 'at' | 'z'>) => number
+  place: (key: number, x: number, y: number) => void
+  front: (key: number) => void
+  close: (key: number) => void
+  /** its card's menu went: a panel still by its card goes with it */
+  unslot: (key: number) => void
+  clear: () => void
+}>((set, get) => ({
+  panels: [],
+  open: (p) => {
+    const key = ++panelKeys
+    set((st) => ({ panels: [...st.panels, { ...p, key, at: null, z: ++panelZ }] }))
+    return key
+  },
+  place: (key, x, y) => {
+    const was = get().panels.find((p) => p.key === key)
+    if (!was) return
+    set((st) => ({ panels: st.panels.map((p) => (p.key === key ? { ...p, at: { x, y } } : p)) }))
+    if (!was.at) was.detach()
+  },
+  front: (key) => set((st) => ({ panels: st.panels.map((p) => (p.key === key ? { ...p, z: ++panelZ } : p)) })),
+  close: (key) => set((st) => ({ panels: st.panels.filter((p) => p.key !== key) })),
+  unslot: (key) => set((st) => ({ panels: st.panels.filter((p) => p.key !== key || p.at) })),
+  clear: () => set({ panels: [] }),
+}))
+
+/** What the panel's head can do: be dragged, go back or close. */
+const FloatCtx = createContext<{ grab: (e: React.PointerEvent) => void; back: () => void;
+                                 close: () => void; moved: boolean } | null>(null)
+
+/** Where a panel sits while it is by its card: an empty mark in the card's
+ *  bar (or the selection's), which the layer places the panel against. */
+function PanelSlot({ k }: { k: number }) {
+  useEffect(() => () => usePanels.getState().unslot(k), [k])
+  return <span className="ai-slot" data-ai-slot={k} />
+}
+
+/** A panel's head: drag it to move the panel; back while it is by its card,
+ *  a close button once it floats. */
+function PanelHead({ title, children }: { title: string; children?: React.ReactNode }) {
+  const f = useContext(FloatCtx)
+  return (
+    <div className={`ai-panel-head ${f ? 'grab' : ''}`} onPointerDown={f?.grab}
+      title={f && !f.moved ? 'Drag to move' : undefined}>
+      {f && !f.moved && (
+        <button className="ai-back" onClick={f.back} aria-label="Back"><Icon name="undo" size={14} /></button>
+      )}
+      <b>{title}</b>
+      {children}
+      {f?.moved && (
+        <button className="ai-back ai-close" onClick={f.close} aria-label="Close" title="Close  (Esc)">
+          <Icon name="x" size={13} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
+function FloatFrame({ p }: { p: FloatPanel }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const { place, front, close } = usePanels.getState()
+  // placed every frame: by its card, against its slot, as the board pans and
+  // zooms; once moved, where it was put - kept whole in the window, as it
+  // grows with its answer and as the window changes size
+  const at = p.at
+  useLayoutEffect(() => {
+    let raf = 0
+    const tick = () => {
+      const el = ref.current
+      const anchor = at ? null : document.querySelector(`[data-ai-slot="${p.key}"]`)?.parentElement
+      if (el && at) {
+        const w = el.offsetWidth, h = el.offsetHeight
+        el.style.left = `${clamp(at.x, 8, Math.max(8, window.innerWidth - w - 8))}px`
+        el.style.top = `${clamp(at.y, 8, Math.max(8, window.innerHeight - h - 8))}px`
+        el.style.visibility = 'visible'
+      } else if (el && anchor) {
+        const a = anchor.getBoundingClientRect()
+        const w = el.offsetWidth, h = el.offsetHeight
+        let top = a.top - 6 - h
+        if (top < 8) top = a.bottom + 6                 // no room above: below, as menus do
+        el.style.left = `${clamp(a.left + a.width / 2 - w / 2, 8, window.innerWidth - w - 8)}px`
+        el.style.top = `${top}px`
+        el.style.visibility = 'visible'
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    tick()
+    return () => cancelAnimationFrame(raf)
+  }, [at, p.key])
+  const grab = (e: React.PointerEvent) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return
+    const el = ref.current
+    if (!el) return
+    e.preventDefault()
+    front(p.key)
+    const r = el.getBoundingClientRect()
+    const dx = e.clientX - r.left, dy = e.clientY - r.top
+    const sx = e.clientX, sy = e.clientY
+    let moving = !!p.at
+    const move = (ev: PointerEvent) => {
+      if (!moving && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return   // a click, not a drag
+      moving = true
+      // the whole panel stays in the window, wherever it is let go
+      place(p.key, clamp(ev.clientX - dx, 8, Math.max(8, window.innerWidth - r.width - 8)),
+            clamp(ev.clientY - dy, 8, Math.max(8, window.innerHeight - r.height - 8)))
+    }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  const shut = () => close(p.key)
+  const back = () => { close(p.key); p.back() }
+  return (
+    <div ref={ref} className={`tools-menu list ai ai-float ${at ? 'moved' : ''}`} tabIndex={-1}
+      style={{ zIndex: 60 + p.z, visibility: 'hidden' }}
+      onPointerDown={() => front(p.key)}
+      onKeyDown={(e) => { if (e.key === 'Escape' && at) { e.stopPropagation(); shut() } }}>
+      <FloatCtx.Provider value={{ grab, back, close: shut, moved: !!at }}>
+        <AiPanel ids={p.ids} act={p.act} />
+      </FloatCtx.Provider>
+    </div>
+  )
+}
+
+/** Every card action's panel, over the board (mounted once, by the canvas). */
+export function AiPanels() {
+  const panels = usePanels((s) => s.panels)
+  const boardId = useStore((s) => s.boardId)
+  useEffect(() => () => usePanels.getState().clear(), [boardId])   // another board: they go
+  if (!panels.length) return null
+  return createPortal(<>{panels.map((p) => <FloatFrame key={p.key} p={p} />)}</>, document.body)
+}
+
 /** A card action's answer, in a panel beside the card - not in the chat,
  *  which is for the person's own questions (DESIGN.md 77). Asked through the
  *  same route as the chat, with its task known (§75), and nothing kept in
  *  the conversation. "Add to board" makes it a card, linked to the first. */
-function AiAnswer({ ids, act, back }: { ids: string[]; act: Exclude<Act, 'quiz'>; back: () => void }) {
+function AiAnswer({ ids, act }: { ids: string[]; act: Exclude<Act, 'quiz'> }) {
   const boardId = useStore((s) => s.boardId)
+  const there = useStore((s) => !!s.nodes[ids[0]])
   const [text, setText] = useState('')
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
@@ -323,11 +487,7 @@ function AiAnswer({ ids, act, back }: { ids: string[]; act: Exclude<Act, 'quiz'>
   }
   return (
     <div className="ai-panel">
-      <div className="ai-panel-head">
-        <button className="ai-back" onClick={back} aria-label="Back"><Icon name="undo" size={14} /></button>
-        <b>{ANSWER_HEAD[act]}</b>
-        {!done && <span className="tools-spin" />}
-      </div>
+      <PanelHead title={ANSWER_HEAD[act]}>{!done && <span className="tools-spin" />}</PanelHead>
       <div className="ai-panel-body nowheel">
         {error ? <div className="tools-note">{error}</div>
           : shown ? <Prose text={shown} cite={cardRef} className="ai-prose" />
@@ -338,7 +498,8 @@ function AiAnswer({ ids, act, back }: { ids: string[]; act: Exclude<Act, 'quiz'>
           <button className="tools-plain" onClick={() => void navigator.clipboard?.writeText(shown.replace(CITE_MARK, ''))}>
             Copy
           </button>
-          <button className="tools-go" disabled={added} onClick={addCard}>
+          <button className="tools-go" disabled={added || !there} onClick={addCard}
+            title={there ? undefined : 'Its card is no longer on the board'}>
             {added ? 'Added' : 'Add to board'}
           </button>
         </div>
@@ -352,7 +513,7 @@ type QuizQ = { question: string; choices: string[]; answer: number; why: string 
 /** A quiz on these cards, played in the panel (DESIGN.md 77): each question
  *  comes as data - the question, its choices, which is right, and why - so the
  *  choices are buttons and the answer is marked here, at once. */
-function AiQuiz({ ids, back }: { ids: string[]; back: () => void }) {
+function AiQuiz({ ids }: { ids: string[] }) {
   const boardId = useStore((s) => s.boardId)
   const total = ids.length > 1 ? 4 : 3
   const [q, setQ] = useState<QuizQ | null>(null)
@@ -388,11 +549,9 @@ function AiQuiz({ ids, back }: { ids: string[]; back: () => void }) {
   const cheer = score === total ? 'Perfect! 🎉' : score >= total / 2 ? 'Nicely done! 👏' : 'Good try! 💪'
   return (
     <div className="ai-panel">
-      <div className="ai-panel-head">
-        <button className="ai-back" onClick={back} aria-label="Back"><Icon name="undo" size={14} /></button>
-        <b>Quiz</b>
+      <PanelHead title="Quiz">
         <span className="ai-quiz-count">{over ? `${score} of ${total}` : `Question ${n} of ${total} · ${score} right`}</span>
-      </div>
+      </PanelHead>
       <div className="ai-panel-body nowheel">
         {over ? (
           <div className="ai-quiz-end"><div className="ai-quiz-score">{score} / {total}</div>{cheer}</div>
@@ -478,14 +637,14 @@ function AiBeautify({ node, back }: { node: MNode; back: () => void }) {
 }
 
 /** Summarise, explain, fun fact or quiz on these cards - in the panel. */
-function AiPanel({ ids, act, back }: { ids: string[]; act: Act; back: () => void }) {
-  return act === 'quiz' ? <AiQuiz ids={ids} back={back} /> : <AiAnswer ids={ids} act={act} back={back} />
+function AiPanel({ ids, act }: { ids: string[]; act: Act }) {
+  return act === 'quiz' ? <AiQuiz ids={ids} /> : <AiAnswer ids={ids} act={act} />
 }
 
 type AiView =
   | { at: 'menu' }
   | { at: 'beautify' }
-  | { at: 'panel'; act: Act }
+  | { at: 'panel'; act: Act; key: number }
   | { at: 'breaking' }
   | { at: 'break'; cards: { title: string; text: string; keep: boolean }[] }
   | { at: 'finding' }
@@ -495,7 +654,7 @@ type AiView =
 
 type ManyView =
   | { at: 'menu' }
-  | { at: 'panel'; act: Act }
+  | { at: 'panel'; act: Act; key: number }
   | { at: 'merging' }
   | { at: 'merge'; title: string; text: string }
   | { at: 'said'; note: string }
@@ -512,7 +671,8 @@ export function SelectionAi({ ids }: { ids: string[] }) {
   const textual = picked.filter((n) => n.type !== 'meta')
   const canMerge = picked.length >= 2 && textual.length === picked.length && picked.length <= 8
   const shut = () => { setOpen(false); setView({ at: 'menu' }) }
-  const ask = (act: Act) => setView({ at: 'panel', act })
+  const ask = (act: Act) => setView({ at: 'panel', act, key: usePanels.getState().open({
+    ids, act, back: () => setView({ at: 'menu' }), detach: shut }) })
   const root = useRef<HTMLDivElement>(null)
   useFlip(root)
 
@@ -560,9 +720,9 @@ export function SelectionAi({ ids }: { ids: string[] }) {
         onClick={() => { setOpen((v) => !v); setView({ at: 'menu' }) }}>
         <Icon name="sparkle" size={14} /> AI
       </button>
-      {open && (
+      {open && view.at === 'panel' && <PanelSlot k={view.key} />}
+      {open && view.at !== 'panel' && (
         <div ref={root} className={`tools-menu list ai ${view.at === 'menu' ? '' : 'wide'} sel-ai-menu nowheel`}>
-          {view.at === 'panel' && <AiPanel ids={ids} act={view.act} back={() => setView({ at: 'menu' })} />}
           {view.at === 'menu' && (
             <>
               <button className="tools-item" onClick={() => ask('summarize')}>
@@ -621,7 +781,8 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
   const [view, setView] = useState<AiView>({ at: 'menu' })
   const boardId = useStore((s) => s.boardId)
   const hasText = !!(node.title.trim() || String(node.content.text ?? '').trim())
-  const ask = (act: Act) => setView({ at: 'panel', act })
+  const ask = (act: Act) => setView({ at: 'panel', act, key: usePanels.getState().open({
+    ids: [node.id], act, back: () => setView({ at: 'menu' }), detach: close }) })
   // above the bar unless the window's top would cut it off (as CardTools does)
   const root = useRef<HTMLDivElement>(null)
   useFlip(root)
@@ -674,11 +835,7 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
       <AiBeautify node={node} back={() => setView({ at: 'menu' })} />
     </div>
   )
-  if (view.at === 'panel') return (
-    <div ref={root} className="tools-menu list ai wide nowheel">
-      <AiPanel ids={[node.id]} act={view.act} back={() => setView({ at: 'menu' })} />
-    </div>
-  )
+  if (view.at === 'panel') return <PanelSlot k={view.key} />
   if (view.at === 'breaking' || view.at === 'finding') return (
     <div ref={root} className="tools-menu list ai wide nowheel">
       <div className="tools-wait"><span className="tools-spin" />
@@ -725,7 +882,7 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
           return (
             <div key={c.id} className="tools-found">
               <button className="tools-found-card" title="Go to this card" onClick={() => revealCard(c.id)}>
-                <b>{c.title}</b>{c.snippet ? <em>{c.snippet}</em> : null}
+                <b>{plainTitle(c.title)}</b>{c.snippet ? <em>{c.snippet}</em> : null}
               </button>
               <button className={`tools-link ${done ? 'done' : ''}`} disabled={done}
                 onClick={() => { connect(node.id, c.id); setView({ ...view, linked: [...view.linked, c.id] }) }}>
@@ -945,7 +1102,7 @@ function Shell({ node, selected, resizable, children }: {
   // its editor, list, picture or link preview (DESIGN.md 36). A boolean, so
   // the card renders again only when the line is crossed.
   const far = useFlow((s) => s.transform[2] < 0.35)
-  if (far && !selected) children = <div className="far-title">{node.title || 'Untitled'}</div>
+  if (far && !selected) children = <div className="far-title">{plainTitle(node.title) || 'Untitled'}</div>
   return (
     <>
       {resizable && (
@@ -1152,7 +1309,7 @@ function CardRef({ id }: { id: string }) {
   return (
     <button className="card-ref nodrag" title="Go to this card"
       onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => { e.stopPropagation(); revealCard(id) }}>{title || 'Untitled'}</button>
+      onClick={(e) => { e.stopPropagation(); revealCard(id) }}>{plainTitle(title) || 'Untitled'}</button>
   )
 }
 

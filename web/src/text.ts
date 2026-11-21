@@ -136,3 +136,25 @@ export function blocks(text: string): Block[] {
   }
   return out
 }
+
+/** A card's title drawn as words (DESIGN.md 84): no heading or list marker,
+ *  no bold, italics or code marks - and, when such marks came off, no
+ *  trailing colon, which belonged to a "**Label:**". Only how it is drawn:
+ *  the title itself is kept, and editing it shows it as written. Mirrors
+ *  ask.plain_title on the server. */
+const TITLE_LEAD = /^\s*(?:#{1,6}\s+|(?:[-*+•]|\d{1,3}[.)])\s+)/
+const TITLE_MARKS: [RegExp, string][] = [
+  [/\*\*(.+?)\*\*/g, '$1'], [/__(.+?)__/g, '$1'], [/`([^`]+)`/g, '$1'],
+  [/(^|[\s(])\*([^*\s](?:[^*]*[^*\s])?)\*(?=$|[\s).,:;!?])/g, '$1$2'],
+  [/(^|[\s(])_([^_\s](?:[^_]*[^_\s])?)_(?=$|[\s).,:;!?])/g, '$1$2'],
+]
+
+export function plainTitle(title: string): string {
+  const raw = title.replace(/\s+/g, ' ').trim()
+  if (!/[*_`#]|^\s*([-+•]|\d{1,3}[.)])\s/.test(raw)) return raw
+  let out = raw.replace(TITLE_LEAD, '')
+  for (const [re, keep] of TITLE_MARKS) out = out.replace(re, keep)
+  out = out.replace(/^[*_ ]+|[*_ ]+$/g, '').trim()
+  if (out !== raw) out = out.replace(/\s*:$/, '')
+  return out || raw
+}
