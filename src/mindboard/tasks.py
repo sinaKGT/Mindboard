@@ -362,3 +362,71 @@ def task_note(plan: dict, found: list[dict]) -> str:
     return ("\n\n(" + "\n\n".join(parts) + "\nIf you have nothing to add from your own knowledge, "
             "leave out the Beyond part entirely - never write it with \"None\". Answer every part "
             "of the request, and cite your sources as always. End with the three NEXT: lines.)")
+
+
+# ------------------------------------------------------------ explain more --
+#
+# DESIGN.md 89: Explain more answers from the conversation and the model's own
+# knowledge (86), and was not read first (80) - the general planner searched
+# the board and shaped "two examples" as a list to extract. The owner asked for
+# a chain of its own: understand what is wanted from the conversation, plan
+# the answer in a few points, then answer. One short call does the first two;
+# it has no tools, so it cannot search.
+
+EXPLAIN_PLAN = """You plan the answer to a person who asked to explain more. You see the
+conversation so far and their newest message. Reply with JSON only:
+{"need": "You want ...", "plan": ["...", "..."]}
+
+- need: one sentence saying what they want now, read in the light of the
+  conversation - say what "this", "it" or "that" refers to.
+- plan: 2 to 4 short points, in order, for what the answer will do to meet
+  that need: which example, analogy or detail to give, and how it ties to
+  what the conversation already said (name the parts it walks through).
+- Plan from the conversation and general knowledge only: there is nothing
+  to search and no source to cite."""
+
+EXPLAIN_PLAN_SECONDS = 30.0     # past this, the question is answered as it stands
+EXPLAIN_TURN_CHARS = 1500       # of each earlier turn the planner reads
+EXPLAIN_POINTS = 4
+
+
+def _cites_out(text: str) -> str:
+    """Card and page citations out: nothing in Explain more comes from a source."""
+    import re
+    text = re.sub(r"[ \t]*\[\[[0-9A-Za-z]{26}\]\]", "", text)
+    return re.sub(r"[ \t]*\((?:p|pp)\.\s?\d[\d\s,;.\-–p]*\)", "", text)
+
+
+def clean_explain_plan(got: dict) -> dict:
+    """The planner's JSON, checked: {"need", "plan"}, or {} when unusable."""
+    need = got.get("need") if isinstance(got, dict) else None
+    plan = got.get("plan") if isinstance(got, dict) else None
+    if not isinstance(need, str) or not need.strip():
+        return {}
+    points = [" ".join(p.split())[:200] for p in (plan if isinstance(plan, list) else [])
+              if isinstance(p, str) and p.strip()][:EXPLAIN_POINTS]
+    if not points:
+        return {}
+    return {"need": " ".join(need.split())[:200], "plan": points}
+
+
+def run_explain(model, ctx, question: str, history: list[dict]) -> Iterator[dict]:
+    """Explain more's chain (DESIGN.md 89): what is wanted and a short plan,
+    from the conversation; a "task" event shows the reading, and the plan is
+    left on `ctx.task_note` for the answer. Nothing usable: answered as it
+    stands, as before."""
+    convo = "\n\n".join(f"{t.get('role')}: {_cites_out(str(t.get('text', '')))[:EXPLAIN_TURN_CHARS]}"
+                        for t in (history or [])[-4:] if str(t.get("text", "")).strip())
+    got, trouble = json_reply(model, EXPLAIN_PLAN,
+                              (f"CONVERSATION SO FAR\n{convo}\n\n" if convo else "")
+                              + f"NEWEST MESSAGE\n{question.strip()}", 400, EXPLAIN_PLAN_SECONDS)
+    plan = clean_explain_plan(got)
+    if not plan:
+        if trouble and trouble != "stopped":
+            log.info("Explain more was not planned (%s); answered as it stands", trouble)
+        return
+    yield {"event": "task", "task": "explain", "about": "", "output": "", "reading": plan["need"],
+           "steps": [], "trouble": ""}
+    points = "\n".join(f"{i}. {p}" for i, p in enumerate(plan["plan"], 1))
+    ctx.task_note = (f"\n\n({plan['need']}\nPlan for the answer:\n{points}\n"
+                     "Follow this plan, building on the conversation. End with the three NEXT: lines.)")

@@ -372,7 +372,7 @@ function Answer({ turn, offer, question, index }: {
           {turn.mode === 'own'
             ? <div className="voice-head">Not from your board — the model's own knowledge</div>
             : turn.mode === 'explain'
-              ? <div className="voice-head">Explain more — the model's own knowledge, not your board</div> : null}
+              ? <div className="voice-head">Explain more — the model's own knowledge, not {branch ? 'this file' : 'your board'}</div> : null}
           <Rich text={board.trim()} page={fromFile ? pageLink(branch) : undefined} />
         </div>
       ) : null}

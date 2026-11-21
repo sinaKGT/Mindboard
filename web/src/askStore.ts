@@ -531,8 +531,9 @@ export const useAsk = create<Ask>()((set, get) => ({
     const keep = [...new Set((fresh ? [] : s.turns).flatMap((t) => (t.status === 'done' && t.cited) || []))]
       .filter((id) => nodes[id]).slice(-40)
     // Explain more holds in either view - the header icon in the small one,
-    // the chip in the full screen one
-    const explain = s.explain && !own && !branch
+    // the chip in the full screen one - and in a file's conversation too: it
+    // was dropped there while its chip still showed on (DESIGN.md 89)
+    const explain = s.explain && !own
     const controller = new AbortController()
     set({
       busy: true, controller, open: true,

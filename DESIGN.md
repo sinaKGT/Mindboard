@@ -4508,3 +4508,61 @@ its own real-model comparison. The warning also shows on an answer that
 rightly says the cards do not cover a question, since that cites nothing.
 
 358 tests.
+
+## 89. Explain more: understand, plan, answer - in a file's conversation too; page lists as links (2026-11-21)
+
+Two things the owner found in a conversation with *Context Engineering.pdf*.
+
+**Page lists were plain text.** An answer cited "(p. 13)" as a link but
+"(p. 4, p. 13)" as plain words, as if it cited nothing: the page pattern in
+`Prose.tsx` took one page or a range only. It now takes a list of up to
+twelve, "(p. 4, p. 13)", "(pp. 4, 12)" or "(p. 4; p. 12-13)", and draws each
+page as a link of its own inside the one pair of brackets.
+
+**Explain more was dropped in a file's conversation.** The page sent
+`explain` only for the board's conversation (`!branch`), while the chip
+still showed on; asked "tell me example for this workflow", the file was
+searched as usual (12 passages of 668), the answer said the document has no
+such example, and gave one under *Beyond this file*. The owner also asked
+for Explain more to be a chain of its own: read the conversation, plan how
+to meet what is wanted, then answer.
+
+- **In a file's conversation** Explain more now sends nothing from the file
+  (`POST /api/files/{fid}/ask` with `explain`): no passages, no pictures of
+  pages, no calculator, the file's tasks not run - the conversation and the
+  model's own knowledge, with `EXPLAIN_SYSTEM`, as on the board (§86). Page
+  citations are taken out of the conversation and the answer, as card
+  citations are. The answer's heading says "not this file".
+- **Understand and plan** (`tasks.run_explain`), for the board's
+  conversation and a file's: one JSON call (30 s, then hung up; no tools,
+  so it cannot search) reads the last four turns, up to 1,500 characters
+  each with citations out, and the newest message, and replies with what is
+  wanted ("You want ...") and 2 to 4 points for the answer. Both are checked
+  (`clean_explain_plan`); anything unusable answers as it stands, as before.
+  The reading goes to the page as a `task` event ("explain", no steps), so
+  the chip and "You want ..." line show as for other tasks; the plan is said
+  after the question, last, so the cached start of the prompt stays put.
+- **Answer** with `EXPLAIN_SYSTEM`, following the plan.
+
+With the real model, against copies of the PDF and the RAG board, each case
+twice without the plan and twice with it: in all 12 answers nothing from the
+file or board was sent. The readings were right each time - "You want a
+concrete example of the Context Engineering workflow to see how the three
+phases work in practice"; "You want a concrete example of how RAG-Fusion
+works in practice". For the file's workflow both gave a scenario through the
+three phases (a researcher's crop data without the plan; a support agent
+with a customer's ticket history, with it), in 11-13 s either way. For "give
+me an example of this" after RAG-Fusion, without the plan the example was a
+recipe search in 1,500-1,800 characters, 6-7 s, and described RRF as
+favouring documents near the top of *any* list; with it, a running-shoe
+query walked through each step with ranks in each list and RRF rewarding
+documents high in several, 2,700-2,900 characters, 12 s. "Explain it like
+I'm new to RAG" read the need right both times with the plan (1,700-3,200
+characters, 8-12 s). The plan costs one short call: 0 to 6 s more.
+
+Not done: the bracketed reference numbers a paper's text carries
+("[1147, 405, 340]") are copied into file answers as if they were sources;
+an Explain more answer is longer with the plan in most cases, which the
+owner may or may not want.
+
+361 tests.

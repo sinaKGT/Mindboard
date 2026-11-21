@@ -76,7 +76,7 @@ export function blocks(src: string, breaks = false): Block[] {
 }
 
 // maths first (DESIGN.md 61): a formula's _ and * are not italics
-const INLINE = new RegExp(`(${MATH_SOURCE}|` + String.raw`⟦[^⟦⟧\n]{1,400}⟧|\((?:p|pp)\.\s?\d{1,4}(?:\s?[-–]\s?\d{1,4})?\)|\[[^\]\n]{1,200}\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'"]|~~[^~\n]+~~|\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|` + '`[^`\\n]+`' + String.raw`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))`, 'g')
+const INLINE = new RegExp(`(${MATH_SOURCE}|` + String.raw`⟦[^⟦⟧\n]{1,400}⟧|\((?:p|pp)\.\s?\d{1,4}(?:\s?[-–]\s?\d{1,4})?(?:\s?[,;]\s?(?:(?:p|pp)\.\s?)?\d{1,4}(?:\s?[-–]\s?\d{1,4})?){0,11}\)|\[[^\]\n]{1,200}\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'"]|~~[^~\n]+~~|\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|` + '`[^`\\n]+`' + String.raw`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))`, 'g')
 
 /** one line's light formatting; citations through `cite` */
 type PageCite = (page: number, label: string) => ReactNode
@@ -101,8 +101,21 @@ function inline(text: string, cite: (id: string) => ReactNode, key = '', page?: 
       )
     }
     // a file's page, cited "(p. 12)" (DESIGN.md 64): a link to it, where there is one
+    // - and each page of a list, "(p. 4, p. 13)" or "(pp. 4, 12)", a link of
+    // its own: a list was plain text, as if it cited nothing (DESIGN.md 89)
     const pg = j % 2 ? piece.match(/^\((?:p|pp)\.\s?(\d{1,4})/) : null
-    if (pg) return <Fragment key={k}>{page ? page(Number(pg[1]), piece) : piece}</Fragment>
+    if (pg) {
+      if (!page) return <Fragment key={k}>{piece}</Fragment>
+      const parts = piece.slice(1, -1).split(/\s?[,;]\s?/)
+      if (parts.length === 1) return <Fragment key={k}>{page(Number(pg[1]), piece)}</Fragment>
+      return (
+        <Fragment key={k}>({parts.map((p, n) => {
+          const num = p.match(/\d{1,4}/)
+          const label = /^(?:p|pp)\./.test(p) ? p : `p. ${p}`
+          return <Fragment key={n}>{n ? ', ' : ''}{num ? page(Number(num[0]), label) : p}</Fragment>
+        })})</Fragment>
+      )
+    }
     if (piece.startsWith('[[')) {
       const id = piece.match(/^\[\[([0-9A-Za-z]{26})\]\]$/)
       return id ? <Fragment key={k}>{cite(id[1])}</Fragment> : null   // a citation the model got wrong: left out

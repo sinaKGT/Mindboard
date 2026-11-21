@@ -513,15 +513,19 @@ def test_an_explain_more_answer_cites_nothing():
     assert done["answer"] == "A twin mirrors a city." and done["dropped"] == [], "taken out, not counted as invented"
 
 
-def test_explain_more_is_not_read_first_nor_its_steps_run(client, board, cards, model):
-    """DESIGN.md 80, 86: the request is not planned - no task, no steps
-    searching a board Explain more means not to use."""
+def test_explain_more_is_planned_from_the_conversation_and_searches_nothing(client, board, cards, model):
+    """DESIGN.md 80, 86, 89: no steps searching a board Explain more means
+    not to use - its own chain reads what is wanted and plans the answer."""
     res = client.post(ask_url(board["id"]), headers={"X-Mindboard-Token": TOKEN},
                       json={"question": "give me two examples", "explain": True, "keep": [cards["mount"]]})
     assert res.status_code == 200, res.text
     got = events(res, tasks=True)
-    assert not [e for e, _ in got if e in TASK_EVENTS]
-    assert got[0][1]["mode"] == "explain" and got[0][1]["cards"] == [] and got[-1][0] == "done"
+    task = [d for e, d in got if e == "task"]
+    assert task == [{"task": "explain", "about": "", "output": "", "reading": "You want two examples of the corner mount.",
+                     "steps": [], "trouble": ""}]
+    assert not [e for e, _ in got if e in ("step", "task_step")]
+    ctx = [d for e, d in got if e == "context"][0]
+    assert ctx["mode"] == "explain" and ctx["cards"] == [] and got[-1][0] == "done"
 
 
 def test_cards_an_answer_drew_on_stay_in_the_conversation(dd, board, cards, monkeypatch):

@@ -11,8 +11,9 @@ calculator and Double check (§82); the card AI panel moves (§83); card
 titles in plain words (§84); Make a table under an answer (§85); Explain
 more takes nothing from the board (§86); work moved from v2 to dev;
 Summarise beside Add to board, scrolling while it writes, no hover text in
-the chat (§87); a board answer citing no card says so (§88); next: the
-rest of C.
+the chat (§87); a board answer citing no card says so (§88); Explain more
+understands, plans and answers, in a file's conversation too, and page
+lists are links (§89); next: the rest of C.
 
 ---
 
@@ -36,6 +37,10 @@ rest of C.
   answered as hybrid search), so any fix needs a with/without run on the
   real model first. Also watch whether the "no card is cited" warning shows
   on answers that rightly say the cards do not cover it.
+- **A paper's reference numbers in file answers** (from §89). Answers about
+  a paper copy its bracketed reference numbers ("[1147, 405, 340]") as if
+  they were sources. Decide whether to take them out of passages or answers
+  without touching real brackets (code, lists).
 - **Summarise: try it with the real model** (from §87). Done with the fake
   model only: see how often sentences are left out by the word check, and
   whether 400 characters is the right length to offer it from.

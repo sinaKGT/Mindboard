@@ -593,6 +593,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 if got.mode != "explain":
                     yield from tasks_mod.run(model, got, body.question, history,
                                              board_tools(model, bid, pics))
+                else:   # understood and planned from the conversation (DESIGN.md 89)
+                    yield from tasks_mod.run_explain(model, got, body.question, history)
                 yield from answer_events(model, got, question, history, body.think, hold=False)
 
             return stream_answer(model, with_pictures, warning, request,
@@ -609,6 +611,8 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 tools = own_tools(model, ctx.attached) if ctx.mode == "own" \
                     else board_tools(model, bid, ctx.attached)
                 yield from tasks_mod.run(model, ctx, body.question, history, tools, known=body.task)
+            else:       # its own chain: understand, plan, answer (DESIGN.md 89)
+                yield from tasks_mod.run_explain(model, ctx, body.question, history)
             yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
 
         return stream_answer(model, understood, warning, request, after=lambda: indexer.want(bid), hold=True)
@@ -811,7 +815,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         streamed like a board's answer. Reads only."""
         from starlette.concurrency import run_in_threadpool
 
-        from .ask import AskError, answer_events, take_pasted
+        from .ask import AskError, Context, answer_events, take_pasted
 
         s = file_or_404(fid)
         history = [t.model_dump() for t in body.history]
@@ -827,6 +831,12 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                 pasted = take_pasted(body.images)
             except AskError as exc:
                 raise HTTPException(400, str(exc))
+            if body.explain:
+                # Explain more (DESIGN.md 89): nothing from the file - the
+                # conversation about it and the model's own knowledge
+                ctx = Context([], "", mode="explain")
+                ctx.attached = pasted
+                return model, ctx, model.memory_note(), []
             picked, how = files.find(s, body.question, search_model("embed"), search_model("rerank"))
             ctx = files.context(s, picked, how)
             ctx.attached = pasted
@@ -835,6 +845,10 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         model, ctx, warning, picked = await run_in_threadpool(prepare)
 
         def run():
+            if ctx.mode == "explain":
+                yield from tasks_mod.run_explain(model, ctx, body.question, history)
+                yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
+                return
             worked = ""
             # a spreadsheet (DESIGN.md 65): the model first decides whether the
             # question needs calculating over whole sheets, and the tools run

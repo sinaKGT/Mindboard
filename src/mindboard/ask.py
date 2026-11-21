@@ -875,9 +875,11 @@ PASTED_ALONE = "PASTED with this question: the picture below. Answer about it."
 
 
 def _uncited(text: str) -> str:
-    """Text with its card citations taken out, with the space before each -
-    and nothing else touched: a nested list keeps its indentation."""
-    return re.sub(r"[ \t]*\[\[[0-9A-Za-z]{26}\]\]", "", text).strip()
+    """Text with its card citations taken out, and its page citations - an
+    Explain more in a file conversation (DESIGN.md 89) - with the space before
+    each, and nothing else touched: a nested list keeps its indentation."""
+    text = re.sub(r"[ \t]*\[\[[0-9A-Za-z]{26}\]\]", "", text)
+    return re.sub(r"[ \t]*\((?:p|pp)\.\s?\d[\d\s,;.\-–p]*\)", "", text).strip()
 
 
 def check_fits(ctx: Context, question: str, history: list[dict], think: bool) -> int:

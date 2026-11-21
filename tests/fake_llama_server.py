@@ -80,6 +80,11 @@ class Handler(BaseHTTPRequestHandler):
             # question, no steps - said at once, as JSON
             pieces, slow = [("content", '{"task": "answer", "about": "", "output": "", '
                                         '"reading": "You want an answer.", "steps": []}')], False
+        if isinstance(system, str) and system.startswith("You plan the answer to a person who asked to explain more"):
+            # Explain more's own chain (DESIGN.md 89): what is wanted, and a plan
+            pieces, slow = [("content", json.dumps({
+                "need": "You want two examples of the corner mount.",
+                "plan": ["Give a garden example.", "Give a rooftop example."]}))], False
         if isinstance(system, str) and system.startswith("You prepare the arithmetic"):
             # the calculator's choice (DESIGN.md 82): the first two numbers of
             # the first passage, added - and one more nobody wrote, to refuse

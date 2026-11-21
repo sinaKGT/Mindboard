@@ -165,3 +165,41 @@ def test_a_fun_fact_is_not_given_todays_date_to_compare_with():
     other = Context(["A" * 26], "[" + "A" * 26 + "] Visit\nLab visit on 29 Oct 2026")
     list(tasks.run(Model({}), other, "Summarise the card.", [], tools(), known="summarize"))
     assert not other.no_dates
+
+
+class Planner:
+    """Explain more's planner (DESIGN.md 89): one JSON reply, as a stream."""
+
+    def __init__(self, reply):
+        self.reply, self.asked = reply, []
+
+    def stream(self, msgs, **kw):
+        self.asked.append(msgs)
+        yield {"type": "text", "text": self.reply if isinstance(self.reply, str) else json.dumps(self.reply)}
+        yield {"type": "done", "stopped": False}
+
+
+def test_explain_more_reads_what_is_wanted_and_plans_the_answer():
+    """DESIGN.md 89: understand from the conversation, plan, then answer."""
+    from types import SimpleNamespace
+    model = Planner({"need": "You want an example of the three phases.",
+                     "plan": ["Take one coding question.", "Walk it through retrieval, processing and management.",
+                              "", 7, "a", "b", "c"]})
+    ctx = SimpleNamespace(task_note="")
+    history = [{"role": "user", "text": "a workflow for context engineering"},
+               {"role": "assistant", "text": "Three phases: retrieval (p. 4, p. 13), processing [[" + "A" * 26 + "]]."}]
+    got = list(tasks.run_explain(model, ctx, "tell me an example for this workflow", history))
+    assert got == [{"event": "task", "task": "explain", "about": "", "output": "",
+                    "reading": "You want an example of the three phases.", "steps": [], "trouble": ""}]
+    asked = model.asked[0][1]["content"]
+    assert "retrieval, processing." in asked, "the conversation goes in without card or page citations"
+    assert asked.endswith("NEWEST MESSAGE\ntell me an example for this workflow")
+    assert "1. Take one coding question.\n2. Walk it through" in ctx.task_note
+    assert "4. b" in ctx.task_note and "5." not in ctx.task_note, "at most four points, junk dropped"
+
+
+def test_an_unusable_explain_plan_answers_as_it_stands():
+    from types import SimpleNamespace
+    for reply in ("not json", {"need": "", "plan": ["x"]}, {"need": "You want x.", "plan": []}, {"need": 3}):
+        ctx = SimpleNamespace(task_note="")
+        assert list(tasks.run_explain(Planner(reply), ctx, "more", [])) == [] and ctx.task_note == ""

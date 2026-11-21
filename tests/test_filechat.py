@@ -338,3 +338,20 @@ def test_asking_a_spreadsheet_runs_the_tools_the_model_chose(tmp_path, model, mo
         assert evs[1][0] == "context" and evs[-1][0] == "done"
     if app.state.ask.get("model"):
         app.state.ask["model"].stop()
+
+
+def test_explain_more_in_a_file_conversation_reads_nothing_from_the_file(tmp_path, model):  # noqa: F811
+    """DESIGN.md 89: it was dropped there while its chip showed on."""
+    dd = DataDir(tmp_path / "data")
+    h = {"X-Mindboard-Token": TOKEN}
+    with TestClient(create_app(dd, TOKEN)) as client:
+        pdf = text_pdf(["Hydrogen buses start in Nottingham in 2027.", LONG, "Funding comes from Innovate UK."])
+        fid = client.post("/api/files", headers=h, files={"file": ("plan.pdf", pdf, "application/pdf")}).json()["id"]
+        wait_ready(client, fid, h)
+        res = client.post(f"/api/files/{fid}/ask", headers=h, json={
+            "question": "give me two examples", "explain": True, "cards": [],
+            "history": [{"role": "user", "text": "when?"}, {"role": "assistant", "text": "In 2027 (p. 1)."}]})
+        assert res.status_code == 200, res.text
+        evs = events(res)
+        ctx = [d for e, d in evs if e == "context"][0]
+        assert ctx["mode"] == "explain" and ctx["passages"] == [] and evs[-1][0] == "done"
