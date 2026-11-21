@@ -42,21 +42,57 @@ interface_stale() {
   [ ! -f "$INTERFACE" ] && return 0
   [ -n "$(find web/src web/index.html web/package.json -newer "$INTERFACE" -print -quit 2>/dev/null)" ]
 }
+# How to install Node.js here, or "" when there is no package manager to ask.
+node_command() {
+  if command -v brew >/dev/null 2>&1; then echo "brew install node"
+  elif command -v apt-get >/dev/null 2>&1; then echo "sudo apt-get install -y nodejs npm"
+  elif command -v dnf >/dev/null 2>&1; then echo "sudo dnf install -y nodejs npm"
+  elif command -v pacman >/dev/null 2>&1; then echo "sudo pacman -S --noconfirm nodejs npm"
+  elif command -v zypper >/dev/null 2>&1; then echo "sudo zypper install -y nodejs npm"
+  else echo ""; fi
+}
+
+# Offered, never done unasked (DESIGN.md 74). MINDBOARD_NODE=yes|no answers
+# for someone not at the terminal (an agent).
+install_node() {
+  local how answer
+  how="$(node_command)"
+  [ -n "$how" ] || return 1
+  answer="${MINDBOARD_NODE:-}"
+  if [ -z "$answer" ]; then
+    [ -t 0 ] || return 1
+    printf '  Building the interface needs Node.js. Install it now with "%s"? [Y/n] ' "$how"
+    read -r answer || return 1
+  fi
+  case "$answer" in [nN]*) return 1 ;; esac
+  say "node.js       installing ($how) ..."
+  $how >/dev/null || return 1
+  hash -r
+  command -v npm >/dev/null 2>&1
+}
+
 build_interface() {
   if ! interface_stale; then
     say "interface     up to date"
     return
   fi
-  if ! command -v npm >/dev/null 2>&1; then
+  if ! command -v npm >/dev/null 2>&1 && ! install_node; then
+    local how
+    how="$(node_command)"
+    how="${how:-from https://nodejs.org}"
     if [ -f "$INTERFACE" ]; then
-      say "interface     older than the code - install Node.js to rebuild it (brew install node)"
+      say "interface     older than the code - install Node.js to rebuild it ($how)"
       return
     fi
-    fail "The interface needs building, which needs Node.js. Install it (on a Mac: brew install node), then run this again."
+    fail "The interface needs building, which needs Node.js. Install it ($how), then run this again."
   fi
   say "interface     building (a minute the first time)"
-  ./build.sh >/dev/null 2>&1 || fail "The interface did not build. Run ./build.sh to see why."
-  [ -f "$INTERFACE" ] || fail "The interface did not build. Run ./build.sh to see why."
+  local ok=0
+  ./build.sh >/dev/null 2>&1 || ok=1
+  # the build empties the output folder, placeholder too; put it back, or git
+  # sees a changed file and `mindboard update` refuses to run
+  [ -f src/mindboard/web/.gitkeep ] || : > src/mindboard/web/.gitkeep
+  [ "$ok" = 0 ] && [ -f "$INTERFACE" ] || fail "The interface did not build. Run ./build.sh to see why."
   say "interface     built"
 }
 

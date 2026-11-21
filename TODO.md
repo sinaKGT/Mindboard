@@ -3,7 +3,8 @@
 Only what is left, in the order we plan to take it. Each item says what was
 asked, what was decided, and what done looks like.
 Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
-(§72), v2 merged into main (PR #2); next: C.
+(§72), v2 merged into main (PR #2), Node.js in the installers and
+AGENTS.md (§74); next: C.
 
 ---
 
@@ -57,11 +58,9 @@ Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
 
 ## G. Installing and releasing
 
-- **Node.js in the installation** (`install.sh`, `install.ps1`, `mindboard
-  update`), for building the interface.
-- **A guide for coding agents** (`AGENTS.md`): how an AI agent installs and
-  sets up Mindboard on a new computer by itself - steps, checks, what to ask
-  the person.
+- **Try AGENTS.md on a clean computer** with an agent (Windows and a Mac),
+  and fix what it trips on. The installers' Node.js offer has been run on
+  Windows only; the Mac/Linux one in Git Bash, not on a real Mac or Linux.
 
 ---
 

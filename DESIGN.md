@@ -3777,3 +3777,53 @@ showed the panel above the dock with Ctrl+0 as a key, the button kept no
 `title` and gained its `aria-label`; "Minimap" on the dark theme drew dark.
 
 291 tests.
+
+## 74. Node.js in the installers, and a guide for agents (2026-11-21)
+
+**Node.js.** The interface is built from `web/` into `src/mindboard/web/`,
+which git does not carry, so every install builds it - and building needs
+Node.js. What the installers did:
+
+- `install.sh` rebuilt a missing or out-of-date interface, and stopped with
+  "brew install node" when Node.js was missing.
+- `install.ps1` did not build at all; it left it to `mindboard install`, which
+  builds only a *missing* interface. A fresh Windows copy without Node.js got
+  no interface, and - found on the way - every update on Windows (which runs
+  `install.ps1` again) kept the old interface over the new code.
+- Building empties the output folder, including the tracked placeholder
+  `src/mindboard/web/.gitkeep`; git then sees a deleted file, and `mindboard
+  update` refuses to run over "changed" files. Nothing put it back.
+
+Now both installers rebuild when the interface is missing or older than any
+file in `web/src`, `web/index.html` or `web/package.json`, and put the
+placeholder back after building. When Node.js is missing they offer to install
+it - `winget install OpenJS.NodeJS.LTS` on Windows; Homebrew, apt, dnf, pacman
+or zypper elsewhere - asked, never done unasked; `MINDBOARD_NODE=yes|no`
+answers for someone not at the keyboard. Declined, with an older interface
+present, they carry on with it and say so; with none, they stop and name the
+command. Windows also looks for `npm` where winget puts Node.js, since a
+window opened before the install does not have it on its PATH. `mindboard
+install` names the command for the system it runs on. The README now says
+Node.js is needed on every system, with the commands.
+
+**AGENTS.md** - for an AI coding agent asked to install Mindboard: ground
+rules (ask before anything large or system-wide, never enter the person's
+password, never edit, commit or discard Mindboard's files, report what
+happened); a table of what to check (Python 3.10+, git, Node.js, uv, disk,
+graphics card) with the install command for each system; clone; install with
+the questions answered in advance; check with `version`, `doctor` and
+`where`; the AI as an optional, asked step (the three model sizes, `--yes`
+only after the person agreed to the size the installer states, `ai check`,
+the voice); starting and handing over; updating; and a troubleshooting table
+of the installers' own messages.
+
+Checked on Windows in a scratch environment and data folder: an out-of-date
+interface was rebuilt and `git status` stayed clean; a second run said "up to
+date"; with Node.js off the PATH, `npm` was found where winget installs it.
+The Mac/Linux build step was run in Git Bash: declined with no package
+manager it warned and carried on; with Node.js it built and put the
+placeholder back. Not yet tried: the Mac and Linux installers on a real Mac
+or Linux, the winget install itself on a computer without Node.js, and an
+agent following AGENTS.md on a clean computer.
+
+291 tests.
