@@ -12,9 +12,18 @@ import { type PastedPicture, PICTURE_ONLY, withSaid } from './Pasted'
 import { useStore } from './store'
 import { useUI } from './ui'
 
+/** A card's AI action, sent through the chat (DESIGN.md 75): its task, known
+ *  already; the short line the chat shows; what it says while it works. */
+export interface CardAction { task: 'summarize' | 'explain' | 'quiz' | 'funfact'; label: string; doing: string }
+
 export interface Turn {
   role: 'user' | 'assistant'
   text: string
+  /** a card action (DESIGN.md 75): what the model was asked, when the chat
+   *  shows a short line ("Fun fact: Analogy") in its place */
+  prompt?: string
+  /** what it is doing before its first word, in the action's words */
+  doing?: string
   /** an answer: what it cited, what was removed, its two voices */
   cited?: string[]
   dropped?: number
@@ -125,10 +134,10 @@ interface Ask {
   setExplain(on: boolean): void
   setOwn(on: boolean): void
   /** `fresh`: sent without the conversation before it (a card action, DESIGN.md 72) */
-  send(question: string, pictures?: PastedPicture[], fresh?: boolean): Promise<void>
+  send(question: string, pictures?: PastedPicture[], fresh?: boolean, action?: CardAction): Promise<void>
   /** ask about chosen cards (DESIGN.md 72): they alone in context, on the board's
    *  own conversation with the board on, and the question in plain words */
-  askAbout(ids: string[], question: string): void
+  askAbout(ids: string[], question: string, action?: CardAction): void
   stop(): void
   /** file conversations, and which is shown - null for the board's own */
   branches: FileBranch[]
@@ -274,16 +283,16 @@ export const useAsk = create<Ask>()((set, get) => ({
     controller.abort()
   },
 
-  askAbout(ids, question) {
+  askAbout(ids, question, action) {
     const s = get()
     if (s.busy) { useStore.getState().say('Still answering - try again when it is done', true); return }
     if (s.active) get().show(null)
     set({ context: ids, own: false, open: true })
     save(get())
-    void get().send(question, [], true)
+    void get().send(question, [], true, action)
   },
 
-  async send(question, pictures = [], fresh = false) {
+  async send(question, pictures = [], fresh = false, action) {
     const s = get()
     const boardId = s.boardId
     if (!question.trim() && pictures.length) question = PICTURE_ONLY
@@ -304,7 +313,7 @@ export const useAsk = create<Ask>()((set, get) => ({
       .filter((t, i) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done')
         && (!own || ownTurn(i)))
       .slice(-HISTORY_TURNS)
-      .map((t) => ({ role: t.role, text: t.role === 'user' ? withSaid(t.text, t.said) : t.text }))
+      .map((t) => ({ role: t.role, text: t.role === 'user' ? withSaid(t.prompt ?? t.text, t.said) : t.text }))
     // the cards earlier answers drew on stay in the conversation (DESIGN 34)
     const keep = [...new Set((fresh ? [] : s.turns).flatMap((t) => (t.status === 'done' && t.cited) || []))]
       .filter((id) => nodes[id]).slice(-40)
@@ -315,9 +324,10 @@ export const useAsk = create<Ask>()((set, get) => ({
     set({
       busy: true, controller, open: true,
       turns: [...s.turns,
-              { role: 'user', text: question.trim(),
+              { role: 'user', text: action ? action.label : question.trim(),
+                ...(action ? { prompt: question.trim() } : {}),
                 ...(pictures.length ? { images: pictures.map((p) => p.thumb) } : {}) },
-              { role: 'assistant', text: '', status: 'reading', ...(branch ? { mode: 'file' as const } : {}),
+              { role: 'assistant', text: '', status: 'reading', ...(action ? { doing: action.doing } : {}), ...(branch ? { mode: 'file' as const } : {}),
                 ...(pictures.length && !own && !branch ? { looking: true } : {}) }],
     })
     const patch = (p: Partial<Turn>) => set((st) => {
@@ -329,7 +339,7 @@ export const useAsk = create<Ask>()((set, get) => ({
 
     try {
       const body = { question: question.trim(), cards, history, think: s.think, keep, explain,
-                     images: pictures.map((p) => p.url), own }
+                     images: pictures.map((p) => p.url), own, ...(action ? { task: action.task } : {}) }
       await (branch ? api.askFile(branch.id, body, (n, d) => handle(n, d), controller.signal)
         : api.ask(boardId, body, (n, d) => handle(n, d), controller.signal))
       if (last().status !== 'done') patch({ status: 'stopped' })

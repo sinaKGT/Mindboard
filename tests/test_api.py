@@ -137,3 +137,10 @@ def test_a_new_board_starts_light(tmp_path):
     from mindboard.paths import DataDir
     b = create_board(DataDir(tmp_path), "Fresh")
     assert b["settings"]["theme"] == "daylight"
+
+
+def test_an_api_address_no_route_answers_is_not_the_page(dd):
+    # DESIGN.md 75: an older server answered a newer page's route with the
+    # interface's HTML, and the page said "Unexpected token '<'"
+    res = client(dd).get("/api/boards/x/cards/y/no-such-route", headers=auth())
+    assert res.status_code == 404 and "restarting" in res.json()["detail"]

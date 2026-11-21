@@ -785,6 +785,17 @@ function CanvasInner() {
           const pt = 'changedTouches' in event
             ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent)
           if (!start) return
+          // let go anywhere over another card - not only on one of its four
+          // ports - and the link is made to that card (DESIGN.md 77)
+          const over = (document.elementFromPoint(pt.clientX, pt.clientY) as HTMLElement | null)
+            ?.closest('.react-flow__node') as HTMLElement | null
+          const target = over?.dataset.id
+          if (target && target !== start.nodeId && !target.startsWith('ghost:')
+              && useStore.getState().nodes[target]) {
+            connect(start.nodeId, target)
+            stopLinking()
+            return
+          }
           const travelled = Math.hypot(pt.clientX - start.x, pt.clientY - start.y)
           if (travelled < CLICK_SLOP) {
             // a click on a port, not a drag - the port itself opened linking,
@@ -867,7 +878,7 @@ function CanvasInner() {
         )}
         {selectionBox && (
           <ViewportPortal>
-            <Unzoomed x={selectionBox.x} y={selectionBox.y} className="selection-bar nodrag nopan">
+            <Unzoomed x={selectionBox.x} y={selectionBox.y} className="selection-bar nodrag nopan nowheel">
               <span className="count">{selectedIds.length} selected</span>
               <span className="sep" />
               <button onClick={() => wrapSelection(selectedIds)}>
@@ -876,7 +887,7 @@ function CanvasInner() {
               <button onClick={() => void duplicateNodes(selectedIds)}>
                 <Icon name="copy" size={14} /> Duplicate
               </button>
-              <button title="Add these cards to the context and ask about them"
+              <button title="Ask about these"
                 onClick={() => useAsk.getState().add(selectedIds)}>
                 <Icon name="askAdd" size={14} /> Ask
               </button>
@@ -931,7 +942,7 @@ function CanvasInner() {
         <button className="icon-btn" title="Fit to view  (Ctrl+0)" onClick={() => fitView({ duration: 300 })}>
           <Icon name="fit" size={14} />
         </button>
-        <button className="icon-btn" title="Export this level as an image  (Ctrl+E)"
+        <button className="icon-btn" title="Export image  (Ctrl+E)"
           onClick={() => void runExport('png', 2)}>
           <Icon name="image" size={14} />
         </button>

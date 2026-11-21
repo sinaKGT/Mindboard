@@ -3827,3 +3827,193 @@ or Linux, the winget install itself on a computer without Node.js, and an
 agent following AGENTS.md on a clean computer.
 
 291 tests.
+
+## 75. Card actions said plainly, a centred bar, and a missing route said (2026-11-21)
+
+What the owner saw using the card AI (§72) on a running Mindboard:
+
+- **"Understanding your request…" for Summarise, and "LIST" over a fun fact.**
+  A card action went through the request reader (§66) like any typed
+  question: a wait, and sometimes a wrong reading. A card action knows its
+  task, so it now says so - `AskRequest.task` (`summarize`, `explain`,
+  `quiz`, `funfact`, `tasks.KNOWN`) - and `tasks.run(..., known=)` takes it
+  as it is: no reader call, the task event at once, the answer shaped for it.
+  The page says what it is doing until the first word - "Summarising…",
+  "Explaining…", "Making your quiz…", "Finding a fun fact…" (`Turn.doing`) -
+  and labels the answer Summary, Explanation, Quiz or Fun fact.
+- **The request shown as if the person had typed it** - a paragraph of
+  instructions under the card's name. The chat now shows a short line ("Fun
+  fact: Analogy", "Summarise: 2 cards") and keeps the request for the model
+  (`Turn.prompt`, used in the conversation sent back too, so a quiz still
+  knows what it is playing). The requests are short now ("One fun fact from
+  the card \"Analogy\".") because the task's shape carries the rules.
+- **The fun fact read the card back** ("Analogy is a central ability of human
+  cognition..."). It has a shape of its own (`SHAPES["funfact"]`): the most
+  surprising detail the cards hold - a number, a contrast, an odd name, a
+  link - in one or two playful sentences beginning "Fun fact:", with an emoji,
+  never the opening line or definition restated; a short funny line with 🤷
+  when there is nothing to surprise.
+- **Find related cards: "Unexpected token '<', "<!doctype"..."** The owner's
+  Mindboard had been started before the route existed, and the interface's
+  catch-all answered the unknown `/api/...` address with the page itself, which
+  the page could not read as data. Addresses under `/api/` that no route
+  answers are now a 404 saying Mindboard needs restarting, and the page says
+  the same for any non-JSON answer, instead of a parser's words. A restart
+  is what fixes the owner's case.
+- **The bar sits centred above the card**, and every menu centred on the bar
+  (`translate`, so the pop animation does not undo it). **The size menu is
+  one tight row** - no "Size" heading, 151 × 37 px.
+
+Checked with the real model on the SWIFT Lab Visitors board: Summarise showed
+"Summarise: David Astill MBE FCILT" in the chat, "Starting the model…" then
+"Summarising…", and a Summary; Fun fact showed "Finding a fun fact…" and an
+answer labelled Fun fact beginning "Fun fact:" (2.3 s) - still plain, from a
+card that lists only roles and dates. Card, bar and size menu share one
+centre line at 80 % zoom.
+
+293 tests.
+
+## 76. Cards in soft glass (2026-11-21)
+
+The owner found the cards basic: a flat box with a 2 px colour bar across the
+top. Three directions were drawn - soft glass, a header strip naming the
+card's kind with its link count, and a very round card with a coloured tag -
+and soft glass chosen: it changes how a card looks without adding anything
+to read on every card, which matters on a board of hundreds.
+
+- **Rounder** (14 px) and **lit**: the surface brightens a little towards the
+  top (the theme's own card colour mixed with 6 % white, so a light theme's
+  white card stays white) with a faint light line along the top edge.
+- **The colour down the left edge** in place of the bar across the top: a
+  3 px edge inset from the corners, glowing softly when the card has a
+  colour of its own; a card without one shows its type's colour, quieter.
+  The bar, tinted and solid tones are unchanged.
+- **Lifted under the pointer and while dragged** in the theme's larger shadow
+  (it was a fixed black shadow, heavy on light themes); **selected** with the
+  accent border and a soft 3 px ring.
+- Text sits a little further from the edges (11-14 px; 16 px on the left,
+  past the colour edge), titles 13.5 px.
+- The card bar (§71) moved from 16 to 30 px above the card - the owner found
+  it too close.
+
+Checked in the browser at 103 % on a dark and a light theme: coloured cards
+showed the glowing edge, the selected one the ring; on the light theme the
+cards stayed white with a soft shadow.
+
+293 tests.
+
+## 77. AI results beside the card, a quiz as data, and drop to connect (2026-11-21)
+
+From the owner, after using the card AI (§72, §75):
+
+- **"The chat box is only for asking questions."** Summarise, Explain, Fun
+  fact and the quiz now open in a panel beside the card (or the selection),
+  in place of its AI menu - never in the chat. Summarise, Explain and Fun
+  fact go through the same route as the chat with their task known (§75) and
+  no conversation; the answer streams into the panel ("Summarising…" first),
+  with Copy and Add to board (a card linked to the first one, its citations
+  taken out). Going back or closing hangs up, so the model stops.
+- **A quiz as structured data.** The model wrote its choices into the
+  question's sentence - "A) Animal instinct B) Human cognition C) ..." - and
+  a quiz played in prose had to be read back out of it. Now each question is
+  asked for on its own (`POST /cards/quiz`, `ask.quiz_question`) as JSON -
+  question, 3-4 choices, the right one's position, and why - checked (one
+  right, none repeated, the answer in range; tried twice), choices without
+  letters, and shuffled, since the model puts the right one first. The panel
+  shows them as buttons, marks the pick at once - right in green, wrong in red
+  with the right letter and the reason - keeps score, asks for the next
+  question with the earlier ones listed so none repeats, and ends with the
+  score and Play again.
+- **Merge** showed Python's list syntax - "['Analogy is ...', "It has
+  ..."]" - in the draft and then on the merged card: the model sent its text
+  as a list. A field sent as a list is now joined into lines (`ask._plain`),
+  in Break, Merge and the quiz alike. The draft's text box could not be
+  scrolled: the wheel zoomed the board. The bars and their menus are now
+  `nowheel`, so the wheel scrolls what it is over. Its button was grey: the
+  selection bar's button style reached every button inside it; it is now
+  limited to the bar's own buttons, and the main action button is solid
+  white on the accent.
+- **A menu that grows after it opens** - a quiz question arriving - ran off
+  the top of the window; the above-or-below check now runs again whenever it
+  changes size.
+- **The card bar has Delete** after Connect.
+- **Hover texts are short names**, not explanations: "Think deeper", "Explain
+  more", "Pin open", "Ask this file", "Back up all boards" - about forty were
+  shortened; a shortcut stays, set apart (§73).
+- **Connecting:** a link dragged from a card's port and let go anywhere over
+  another card - not only on one of its four ports - is made to that card.
+  Let go over empty board, it still makes a new connected card.
+
+Not done: "when I click on break it down it shows..." - the owner's sentence
+was cut off; the list-text fix above may be what it was.
+
+Checked with the real model on the SWIFT Lab Visitors board: the quiz gave
+four separate choices, a wrong pick showed "Not quite - it is B." with the
+card's words, and the chat gained nothing; Summarise streamed into the
+panel in 5.9 s with Copy and Add to board; the merge draft came back as
+lines, scrolled with the wheel, its button white on blue, and the merged
+card showed a list; a drag let go over the middle of another card made one
+link and no new card.
+
+296 tests.
+
+## 78. A plainer fun fact, and Beautify (2026-11-21)
+
+**The fun fact** opened with "Fun fact:" under a panel already headed Fun
+fact, or with "The most delightful detail is that ...", and once compared a
+card's date with today's and called a past visit "from the future". Its shape
+now says to state the fact itself, without a label or that opener, and to
+work nothing out - no sums of dates, no comparing with today; the panel
+strips such an opener if it comes anyway, and moves a full stop left alone
+after a citation back before it. A fun fact is no longer given today's date
+(`Context.no_dates`; the dates note is left out for it). Three runs after:
+no label, no opener; one still called a date "future" from the card's own
+words - the model's slip, said here.
+
+**Beautify** - asked for by the owner: the card's text laid out as Markdown,
+the same words (`POST /beautify`, `ask.beautify`). Separate items become a
+bullet list, ordered steps a numbered one, items sharing the same fields a
+small table, "Label: value" lines bold labels, a short heading only where
+the text has parts; no emoji, no title. The model's text is checked against
+the card's: at least 90 % of its distinct words still there and at most 15 %
+new, or the card is left as it was - layout only, never content. The AI menu
+shows it drawn as the card would draw it, with Apply and Cancel; Apply is one
+op, so Ctrl+Z puts the old text back.
+
+Checked with the real model: David Astill's four "Label: value" lines came
+back as four bold labels and the two report files as a list, every word kept,
+in 7.2 s; applied and undone.
+
+299 tests.
+
+## 79. Beautify only organises (2026-11-21)
+
+"It just needs to organise the text, not change anything." Beautify (§78) had
+the model rewrite the card as Markdown and then checked the words after the
+fact - 90 % kept, 15 % new allowed - which still let rewording through.
+
+Now the model writes no text at all. The card is cut into its own pieces
+(`ask.beautify_pieces`): its lines, without any list marks or heading marks
+they had; a line of items joined by semicolons - outside brackets - its
+items, a "Label:" in front kept as a piece of its own; a paragraph over 220
+characters, its sentences. The model is given the pieces numbered and replies
+only with how to group them - `{"blocks": [{"kind": "heading" | "bullets" |
+"numbered" | "text", "pieces": [...]}]}` - and the server builds the Markdown
+from the card's own words. The plan must use every piece exactly once and in
+order, with known kinds, or the card is left as it was. Pieces kept together
+in a paragraph are joined as they were in the card ("; " stays "; ", a new
+line a line break), so nothing runs into anything else; a "Label: value"
+piece at the start of a line gets a bold label; a "heading" that is really a
+long or "Label: value" line stays a line. Tables, which would mean moving
+words, are no longer made.
+
+Checked with the real model on four texts - David Astill's and Nigel's cards,
+a five-sentence paragraph on analogy, and one sentence of steps joined by
+semicolons: every one kept the same words in the same order; the cards came
+back with bold labels and their semicolons; the paragraph was parted in two;
+the steps became a list under "To set up the lab visit:" (0.9-6.8 s). Found
+on the way and fixed: a first try ran a label's items into each other
+("Nottingham City Transport Chair of ALBUM") and cut a bracket at its
+semicolon; and the model once made Nigel's whole "Role: ..." line a heading.
+
+299 tests.

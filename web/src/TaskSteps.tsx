@@ -11,7 +11,7 @@ import type { TaskPlan, TaskStep, Turn } from './askStore'
 
 const TASK_WORDS: Record<string, string> = {
   answer: 'Answer', summarize: 'Summary', explain: 'Explanation', compare: 'Comparison',
-  extract: 'List', analyze: 'Analysis', rewrite: 'Rewrite', translate: 'Translation', plan: 'Plan', quiz: 'Quiz',
+  extract: 'List', analyze: 'Analysis', rewrite: 'Rewrite', translate: 'Translation', plan: 'Plan', quiz: 'Quiz', funfact: 'Fun fact',
 }
 const DO_WORDS: Record<string, string> = { read: 'Read', search: 'Search', work_out: 'Work out' }
 const MARK: Record<TaskStep['status'], string> = { waiting: '○', running: '◌', done: '✓', failed: '!', stopped: '■' }

@@ -132,6 +132,15 @@ class Handler(BaseHTTPRequestHandler):
             # breaking a card into smaller ones (DESIGN.md 72): two, as JSON
             text = ('{"cards": [{"title": "First point", "text": "The first part."}, '
                     '{"title": "Second point", "text": "The second part."}]}')
+        if isinstance(system, str) and system.startswith("You organise the text"):
+            # beautifying a card (DESIGN.md 79): all its numbered pieces, as one list
+            asked = str(body["messages"][-1]["content"])
+            n = sum(1 for ln in asked.splitlines() if ln.split(". ", 1)[0].isdigit())
+            text = json.dumps({"blocks": [{"kind": "bullets", "pieces": list(range(1, n + 1))}]})
+        if isinstance(system, str) and system.startswith("You write ONE quiz question"):
+            # a quiz question as data (DESIGN.md 77)
+            text = ('{"question": "What is the best angle at?", "choices": ["4 m", "9 m", "1 m"], '
+                    '"answer": 0, "why": "The card says best angle at 4 m."}')
         if isinstance(system, str) and system.startswith("You merge several cards"):
             # merging cards into one (DESIGN.md 72), as JSON
             text = '{"title": "Merged", "text": "Best angle at 4 m, and the range is 100 m."}'

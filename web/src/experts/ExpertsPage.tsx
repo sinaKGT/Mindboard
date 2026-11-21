@@ -97,7 +97,7 @@ function Said({ turn, onCard }: { turn: Turn; onCard: (board: string, card: stri
   const parts = at >= 0 ? [text.slice(0, at), text.slice(at + BEYOND.length)] : [text]
   const cite = (id: string) => {
     const w = turn.where?.[id]
-    return w ? <button className="xp-cite" title="Open this card on its board"
+    return w ? <button className="xp-cite" title="Open card"
       onClick={() => onCard(w.board, id)}>{w.title}</button> : null
   }
   return (
@@ -158,7 +158,7 @@ function Editor({ expert, shapes, onDone }: {
             return (
               <button key={s} className={`${d.shape === s ? 'on' : ''} ${open ? '' : 'locked'}`}
                 disabled={!open} onClick={() => setD({ ...d, shape: s })}
-                title={open ? SHAPE_WORDS[s] : `Locked - needs ${st!.need} (you have ${st!.have} of ${st!.of})`}>
+                title={open ? SHAPE_WORDS[s] : `Locked - ${st!.have} of ${st!.of}`}>
                 {open ? '' : '🔒 '}{SHAPE_WORDS[s]}
                 {!open ? <span className="xp-progress">{st!.have}/{st!.of}</span> : null}
               </button>
@@ -487,7 +487,7 @@ export function ExpertsPage() {
               : (
                 <div key={i} className="xp-a">
                   {t.reading?.weigh?.length || t.plan?.length ? (
-                    <div className="xp-reading" title="How the expert read your question, and its plan, before answering">
+                    <div className="xp-reading" title="The expert's plan">
                       {t.reading?.reading ? <><span className="xp-reading-head">Read as</span> {t.reading.reading}</> : null}
                       {t.reading?.weigh?.length ? (
                         <div className="xp-weigh">{t.reading.weigh.map((w, j) => <span key={j}>{w}</span>)}</div>
@@ -561,7 +561,7 @@ export function ExpertsPage() {
           {inside ? <PickPicture add={pasted.add} className="xp-pick" size={15} /> : null}
           {canListen ? (
             <button className={`xp-mic ${talkState !== 'off' ? 'on' : ''}`}
-              title={talkState !== 'off' ? 'Listening - press to stop' : 'Talk - just speak, hands-free'}
+              title={talkState !== 'off' ? 'Stop listening' : 'Talk'}
               aria-label={talkState !== 'off' ? 'Stop listening' : 'Talk'}
               onClick={() => void toggleTalk()}><MicIcon /></button>
           ) : null}

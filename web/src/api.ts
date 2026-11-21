@@ -45,7 +45,14 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     try { detail = (await res.json()).detail ?? detail } catch { /* non-json */ }
     throw new Error(detail)
   }
-  return res.status === 204 ? (undefined as T) : res.json()
+  if (res.status === 204) return undefined as T
+  // a page where data was expected: a server older than this page, which
+  // does not have the route yet (DESIGN.md 75) - say so, not "Unexpected token"
+  if (!(res.headers.get('content-type') || '').includes('json')) {
+    throw new Error('Mindboard needs restarting - this page is newer than the server. '
+      + 'Close Mindboard and start it again.')
+  }
+  return res.json()
 }
 
 const apiCore = {
@@ -119,7 +126,7 @@ const apiCore = {
    *  the question cannot be asked at all. */
   ask: (boardId: string, body: {
     question: string; cards: string[]; history: { role: string; text: string }[]; think: boolean
-    keep: string[]; explain: boolean; images?: string[]; own?: boolean
+    keep: string[]; explain: boolean; images?: string[]; own?: boolean; task?: string
   }, onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> =>
     streamEvents(`/boards/${boardId}/ask`, body, onEvent, signal),
   /** Ask one expert: its boards searched together, answered in its voice. */
@@ -235,6 +242,14 @@ const apiMore = {
   breakCard: (boardId: string, id: string) =>
     req<{ cards: { title: string; text: string }[]; note: string }>(
       `/boards/${boardId}/cards/${id}/break`, { method: 'POST' }),
+  /** A card's text laid out as Markdown, the same words (DESIGN.md 78). */
+  beautify: (boardId: string, body: { title: string; text: string }) =>
+    req<{ text: string; changed: boolean }>(`/boards/${boardId}/beautify`,
+      { method: 'POST', body: JSON.stringify(body) }),
+  /** One quiz question about these cards, as data (DESIGN.md 77). */
+  quizCard: (boardId: string, ids: string[], asked: string[]) =>
+    req<{ question: string; choices: string[]; answer: number; why: string } | { note: string }>(
+      `/boards/${boardId}/cards/quiz`, { method: 'POST', body: JSON.stringify({ ids, asked }) }),
   /** One card drafted from several cards' own words (DESIGN.md 72). */
   mergeCards: (boardId: string, ids: string[]) =>
     req<{ title: string; text: string }>(`/boards/${boardId}/cards/merge`,

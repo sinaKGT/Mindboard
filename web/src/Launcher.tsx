@@ -342,27 +342,27 @@ export function Launcher({ onImport }: { onImport: () => void }) {
             <Icon name="plus" size={14} /> New board
           </button>
           <button className="btn" onClick={() => { setTitle(''); setModal({ mode: 'new-group' }) }}
-            title="A group gathers boards - AI work, teaching, a project">
+            title="New group">
             <Icon name="folder" size={14} /> New group
           </button>
           {!!boards?.length && (
             <button className="btn experts-btn" onClick={() => { location.hash = '#/experts' }}
-              title="Talk to experts made of your boards">
+              title="Experts">
               <Icon name="ask" size={14} /> Experts
             </button>
           )}
           <button className="btn" onClick={onImport}
-            title="Open a .mindboard bundle, or a backup zip to restore every board">
+            title="Import or restore">
             <Icon name="upload" size={14} /> Import
           </button>
           {!!boards?.length && (
             <button className="btn ghost" onClick={() => void backUp()}
-              title="Download every board, media included, as one zip">
+              title="Back up all boards">
               <Icon name="download" size={14} /> Back up all
             </button>
           )}
           <span className="look-wrap">
-            <button className="btn ghost look-btn" title="This page's theme and background"
+            <button className="btn ghost look-btn" title="Theme"
               onClick={() => setPanel(panel === 'look' ? null : 'look')}>
               <Icon name="palette" size={14} /> Look
             </button>

@@ -137,7 +137,7 @@ export function PickPicture({ add, className = '', size = 13 }: {
   add: (files: File[]) => void; className?: string; size?: number
 }) {
   return (
-    <label className={`pick-picture ${className}`} title="Add a picture to the question (or paste one)"
+    <label className={`pick-picture ${className}`} title="Add a picture"
       onClick={(e) => e.stopPropagation()}>
       <input type="file" accept="image/*" multiple hidden
         onChange={(e) => { add(picturesIn(e.target.files)); e.target.value = '' }} />

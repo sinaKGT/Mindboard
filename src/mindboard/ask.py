@@ -378,6 +378,9 @@ class Context:
     # what the task's steps found and the shape the task asks for (tasks.py,
     # DESIGN.md 66) - said with the question, so the cached start stays put
     task_note: str = ""
+    # leave out today's date (DESIGN.md 78): a fun fact compared the cards'
+    # dates with it and called a past visit "from the future"
+    no_dates: bool = False
 
     @property
     def tokens(self) -> int:
@@ -749,6 +752,9 @@ def dates_note(ctx: "Context", question: str, today=None) -> str:
     newest first, each with the card it is on."""
     import datetime as dt
 
+    if getattr(ctx, "no_dates", False):
+        return ""
+
     today = today or dt.date.today()
     note = f"\n\n(Today is {dt.date.strftime(today, '%A')} {say_date(today)}.)"
     if not TIME_WORDS.search(question) or ctx.mode in ("own", "file"):
@@ -1085,6 +1091,165 @@ def proofread(model, title: str, text: str) -> dict:
             "changed": fixed_title != title or fixed_text != text}
 
 
+# ------------------------------------------------------------- beautify --
+# DESIGN.md 78: a card's text laid out as Markdown - the same words, a better shape
+
+BEAUTIFY_SYSTEM = """You organise the text of one card of a person's mind map.
+
+The card's text is given as numbered PIECES, in order. You do not write any
+text - you only say how to group the pieces, so not one word changes.
+
+Reply with JSON only, no other text:
+{"blocks": [{"kind": "...", "pieces": [1, 2]}]}
+
+- kind: "heading" (one short piece that names the part after it), "bullets"
+  (separate items, as a list), "numbered" (steps or ranks, in order) or
+  "text" (sentences that belong together, as a paragraph).
+- Use every piece exactly once, in the order given (1, 2, 3 ...).
+- Lists for items, a paragraph for flowing sentences; a heading only when
+  the text has clear parts. If it is fine as it is, one "text" block."""
+
+BEAUTIFY_CHARS = 6000
+BEAUTIFY_PIECES = 80
+LABEL = re.compile(r"^([A-Za-z][\w /&()'-]{0,40}?):\s+(\S.*)$")
+LIST_MARK = re.compile(r"^\s*(?:[-*+•]|\d+[.)]|\[[ xX]\])\s+")
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[0-9A-Za-zÀ-￿]+", text.lower())
+
+
+def _semicolon_parts(body: str) -> list[str]:
+    """`body` split at its semicolons - not those inside brackets."""
+    parts, depth, cur = [], 0, []
+    for ch in body:
+        depth += (ch in "([{") - (ch in ")]}")
+        if ch == ";" and depth <= 0:
+            parts.append("".join(cur)); cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return [x.strip() for x in parts if x.strip()]
+
+
+def _cut(text: str) -> tuple[list[str], list[str]]:
+    """The card's pieces (`beautify_pieces`), and what joined each one to the
+    next in the card - "; ", " ", or a new line - so pieces a plan keeps
+    together are joined as they were, not run into each other."""
+    pieces: list[str] = []
+    joins: list[str] = []
+    for line in text.splitlines():
+        line = LIST_MARK.sub("", line.strip()).strip()
+        line = re.sub(r"^#{1,6}\s+", "", line).strip()
+        if not line:
+            continue
+        label = LABEL.match(line)
+        body = label.group(2) if label else line
+        parts = _semicolon_parts(body)
+        if len(parts) >= 2 and all(len(x) < 160 for x in parts):
+            # "Role: A; B; C" - the label stays a piece of its own, a heading or a lead
+            if label:
+                pieces.append(label.group(1) + ":"); joins.append(" ")
+            for x in parts:
+                pieces.append(x); joins.append("; ")
+        elif len(line) > 220:
+            for x in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])", line):
+                if x.strip():
+                    pieces.append(x.strip()); joins.append(" ")
+        else:
+            pieces.append(line); joins.append(" ")
+        if joins:
+            joins[-1] = "\n"                    # the end of a line of the card
+    return pieces, joins
+
+
+def beautify_pieces(text: str) -> list[str]:
+    """The card's text cut into the pieces Beautify may arrange (DESIGN.md 79):
+    its lines, without any list marks they had; a line of items joined by
+    semicolons (outside brackets), its items; a long paragraph, its sentences.
+    Every word stays, in order - only the joins between pieces go."""
+    return _cut(text)[0]
+
+
+def _piece_md(piece: str) -> str:
+    """A "Label: value" piece with its label in bold; anything else as it is."""
+    m = LABEL.match(piece)
+    if m and len(m.group(1).split()) <= 4:
+        return f"**{m.group(1)}:** {m.group(2)}"
+    if piece.endswith(":") and len(piece.split()) <= 4:      # a label alone, leading a list
+        return f"**{piece}**"
+    return piece
+
+
+def beautify(model, title: str, text: str) -> dict:
+    """The card's text organised - lists, numbered steps, short headings,
+    bold labels - from its own pieces, so no word is changed, added or
+    lost: the model only groups them (DESIGN.md 79). {"text", "changed"};
+    as it was when the plan cannot be used. Writes nothing."""
+    text = text or ""
+    if not text.strip():
+        return {"text": text, "changed": False}
+    head, rest = text[:BEAUTIFY_CHARS], text[BEAUTIFY_CHARS:]
+    pieces, joins = _cut(head)
+    # the pieces hold exactly the card's words, in order - else leave it be
+    if not pieces or len(pieces) > BEAUTIFY_PIECES or _words(" ".join(pieces)) != _words(head):
+        return {"text": text, "changed": False}
+    listing = "\n".join(f"{i}. {x}" for i, x in enumerate(pieces, 1))
+    try:
+        reply = model.chat([{"role": "system", "content": BEAUTIFY_SYSTEM},
+                            {"role": "user", "content": f"TITLE\n{(title or '').strip()}\n\nPIECES\n{listing}"}],
+                           max_tokens=600, think=False, temperature=0.1, timeout=BREAK_SECONDS)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        return {"text": text, "changed": False}
+    blocks = got.get("blocks") if isinstance(got, dict) else None
+    if not isinstance(blocks, list):
+        return {"text": text, "changed": False}
+    used: list[int] = []
+    out: list[str] = []
+    for blk in blocks:
+        if not isinstance(blk, dict):
+            return {"text": text, "changed": False}
+        kind = str(blk.get("kind") or "text").strip().lower()
+        try:
+            idx = [int(i) for i in (blk.get("pieces") or [])]
+        except (TypeError, ValueError):
+            return {"text": text, "changed": False}
+        if not idx or kind not in ("heading", "bullets", "numbered", "text"):
+            return {"text": text, "changed": False}
+        used += idx
+        parts = [pieces[i - 1] for i in idx if 1 <= i <= len(pieces)]
+        if len(parts) != len(idx):
+            return {"text": text, "changed": False}
+        if kind == "heading":
+            joined = " ".join(parts)
+            # a heading names a part: short, and not a "Label: value" line - a
+            # whole "Role: Control room, ..." line came back as a heading
+            if joined.endswith(":") or LABEL.match(joined) or len(joined.split()) > 8:
+                out.append(_piece_md(joined))
+            else:
+                out.append("### " + joined)
+        elif kind == "bullets":
+            out.append("\n".join(f"- {_piece_md(x)}" for x in parts))
+        elif kind == "numbered":
+            out.append("\n".join(f"{n}. {_piece_md(x)}" for n, x in enumerate(parts, 1)))
+        else:
+            # kept together: joined as they were in the card - "; " stays "; "
+            said = ""
+            for k, i in enumerate(idx):
+                starts = k == 0 or joins[idx[k - 1] - 1] == "\n"   # at the start of a line
+                said += _piece_md(pieces[i - 1]) if starts else pieces[i - 1]
+                if k < len(idx) - 1:
+                    said += joins[i - 1].replace("\n", " ") if joins[i - 1] != "\n" else "  \n"
+            out.append(said)
+    # every piece exactly once, in order - or nothing is changed
+    if used != list(range(1, len(pieces) + 1)):
+        log.info("a beautify plan skipped, repeated or moved pieces; left as it was")
+        return {"text": text, "changed": False}
+    laid = "\n\n".join(out) + rest
+    return {"text": laid, "changed": laid.strip() != text.strip()}
+
+
 # ------------------------------------------------------------ to a card --
 
 DRAFT_KINDS = ("relates", "supports", "example-of", "part-of", "causes", "contradicts")
@@ -1220,8 +1385,8 @@ def break_card(model, title: str, text: str) -> dict:
     for c in (got.get("cards") if isinstance(got, dict) else None) or []:
         if not isinstance(c, dict):
             continue
-        t = " ".join(str(c.get("title") or "").split()[:10]).strip()[:80]
-        x = CITE.sub("", str(c.get("text") or "")).strip()[:600]
+        t = " ".join(_plain(c.get("title")).split()[:10]).strip()[:80]
+        x = CITE.sub("", _plain(c.get("text"))).strip()[:600]
         if t or x:
             out.append({"title": t or x[:60], "text": x})
     out = out[:BREAK_MAX]
@@ -1270,12 +1435,79 @@ def merge_cards(model, cards: list[dict]) -> dict:
         return fallback
     if not isinstance(got, dict):
         return fallback
-    title = " ".join(str(got.get("title") or "").split()[:10]).strip()[:80]
-    text = CITE.sub("", str(got.get("text") or "")).strip()[:4000]
+    title = " ".join(_plain(got.get("title")).split()[:10]).strip()[:80]
+    text = CITE.sub("", _plain(got.get("text"))).strip()[:4000]
     # a merge that lost most of the words is not a merge
     if not text or len(text) < min(len(joined), 400) * 0.3:
         return fallback
     return {"title": title or fallback["title"], "text": text}
+
+
+QUIZ_SYSTEM = """You write ONE quiz question about a person's cards, as structured data.
+
+Reply with JSON only, no other text:
+{"question": "...", "choices": ["...", "...", "...", "..."], "answer": 0, "why": "..."}
+
+- question: one short question whose answer is written in the cards. Never what
+  a title stands for or anything the cards do not say.
+- choices: 3 or 4 short options, without letters. Exactly one is right by the
+  cards; the others are plainly wrong by the cards - never another true fact
+  from them.
+- answer: the position of the right choice, counting from 0.
+- why: one short sentence, from the cards, saying why it is right.
+- Never repeat a question already asked (listed below, if any)."""
+
+QUIZ_CHOICES = (3, 4)
+QUIZ_TRIES = 2
+
+
+def _plain(value) -> str:
+    """A field the model may send as a list of lines: joined, not shown as
+    Python's list - "['first.', 'second.']" reached a card (DESIGN.md 77)."""
+    if isinstance(value, (list, tuple)):
+        return "\n".join(f"- {_plain(v)}" if len(value) > 1 else _plain(v) for v in value if _plain(v))
+    return str(value or "").strip()
+
+
+def quiz_question(model, cards: list[dict], asked: Optional[list[str]] = None, rng=None) -> dict:
+    """One quiz question about these cards, as data - {question, choices,
+    answer, why} - so the page shows the choices as buttons and marks the
+    answer itself (DESIGN.md 77); or {note} when none could be made. The
+    choices are shuffled: the model puts the right one first."""
+    import random
+    rng = rng or random.Random()
+    listing = "\n\n".join(f"CARD {i}\nTITLE: {(c.get('title') or '').strip()}\nTEXT: {(c.get('text') or '').strip()[:MERGE_CHARS]}"
+                          for i, c in enumerate(cards[:MERGE_MAX], 1))
+    if not any((c.get("text") or c.get("title") or "").strip() for c in cards):
+        return {"note": "These cards hold nothing to ask about yet."}
+    before = "\n".join(f"- {q}" for q in (asked or [])[-10:])
+    for _ in range(QUIZ_TRIES):
+        try:
+            reply = model.chat([{"role": "system", "content": QUIZ_SYSTEM},
+                                {"role": "user", "content": listing
+                                 + (f"\n\nALREADY ASKED\n{before}" if before else "")}],
+                               max_tokens=400, think=False, temperature=0.5, timeout=BREAK_SECONDS)["text"]
+            got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+        except Exception:
+            continue
+        if not isinstance(got, dict):
+            continue
+        question = CITE.sub("", _plain(got.get("question")))[:300].strip()
+        raw = got.get("choices") if isinstance(got.get("choices"), list) else []
+        choices = [re.sub(r"^\(?[A-Da-d][).:]\s+", "", CITE.sub("", _plain(c))).strip()[:160] for c in raw]
+        try:
+            answer = int(got.get("answer"))
+        except (TypeError, ValueError):
+            continue
+        if (not question or not QUIZ_CHOICES[0] <= len(choices) <= QUIZ_CHOICES[1]
+                or not all(choices) or len(set(c.lower() for c in choices)) != len(choices)
+                or not 0 <= answer < len(choices)):
+            continue
+        right = choices[answer]
+        rng.shuffle(choices)
+        return {"question": question, "choices": choices, "answer": choices.index(right),
+                "why": CITE.sub("", _plain(got.get("why")))[:300].strip()}
+    return {"note": "Could not make a question from these cards - try again."}
 
 
 RELATED_LIMIT = 6

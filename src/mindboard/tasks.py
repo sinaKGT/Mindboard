@@ -33,7 +33,9 @@ from typing import Callable, Iterator, Optional
 log = logging.getLogger(__name__)
 
 TASKS = ("answer", "summarize", "explain", "compare", "extract", "analyze", "rewrite",
-         "translate", "plan", "quiz")
+         "translate", "plan", "quiz", "funfact")
+# a card's AI menu says what it wants (DESIGN.md 75): no need to read it first
+KNOWN = ("summarize", "explain", "quiz", "funfact")
 STEPS_MAX = 4
 UNDERSTAND_SECONDS = 60.0      # past this, the question is answered as it stands
 STEP_SECONDS = 150.0           # one step; past this it is skipped
@@ -59,6 +61,17 @@ SHAPES = {
     "plan": ("Lay out a plan: numbered steps in order, each one line with what to do and why; "
              "then the main risk or open point."),
     # DESIGN.md 72: a quiz is a game played over several turns, not a plan for one
+    # DESIGN.md 75: a fact that surprises, not the card's first line read back
+    "funfact": ("Give ONE fun fact from the cards: the most surprising, delightful or unexpected "
+                "detail they hold - a striking number, a contrast, an odd name, a link between two "
+                "things - told straight away in one or two playful sentences, with one fitting "
+                "emoji, and the card cited. Do not open with \"Fun fact\" or any label - the page "
+                "already heads it so (DESIGN.md 78) - nor with \"The most surprising detail is\": "
+                "say the fact itself. Work nothing out - no sums of dates or ages, no comparing "
+                "with today - only what the cards state. Never just restate a card's opening line or its "
+                "definition. Only what the cards say: if they hold nothing that could surprise or "
+                "delight, say so instead in one short, funny line ending with an emoji (like 🤷 or "
+                "🙈). Nothing else - no lists, no headings."),
     "quiz": ("Play the quiz, in a playful, encouraging voice. If the person has just answered a "
              "question from earlier in this conversation, first say whether they got it right, "
              "explain in one or two sentences from the cards (cited), and give the score so far. "
@@ -236,11 +249,24 @@ def _work_out(model, question: str, plan: dict, found: list[dict], step: dict) -
     return "".join(out).strip()
 
 
-def run(model, ctx, question: str, history: list[dict], tools: Tools) -> Iterator[dict]:
+def run(model, ctx, question: str, history: list[dict], tools: Tools,
+        known: str = "") -> Iterator[dict]:
     """Understand the request and do its steps, as events: "task" with the
     plan, then "step" for each as it runs and ends. What the steps found and
     the shape the task asks for are left on `ctx.task_note`, for the answer;
-    cards a board search found join `ctx.cards`, so they can be cited."""
+    cards a board search found join `ctx.cards`, so they can be cited.
+
+    `known`: a card action's task (DESIGN.md 75) - taken as it is, without the
+    model reading the request first: no wait, no misreading ("LIST" for a fun
+    fact), and the answer shaped for it at once."""
+    if known in KNOWN:
+        plan = {"task": known, "about": "", "output": "", "reading": "", "steps": []}
+        yield {"event": "task", **{k: plan[k] for k in ("task", "about", "output", "reading")},
+               "steps": [], "trouble": ""}
+        ctx.task_note = task_note(plan, [])
+        if known == "funfact":
+            ctx.no_dates = True
+        return
     plan, trouble = understand(model, question, history, tools)
     if model.cancelled():
         return
