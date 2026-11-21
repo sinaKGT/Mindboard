@@ -25,6 +25,30 @@ function download(dataUrl: string, filename: string) {
   a.remove()
 }
 
+const isGhost = (id: string) => id.startsWith('ghost:')
+
+/** Wait until every card of the level is on the page and measured.
+ *
+ *  The canvas puts only the cards in view on the page (onlyRenderVisibleElements),
+ *  and the picture is a copy of the page: zoomed in, it was sized for the whole
+ *  level but held only the few cards on screen (DESIGN.md 92). The caller turns
+ *  that off first; this waits for xyflow to draw and measure the rest. */
+export async function waitForAllCards(getNodes: () => Node[], timeoutMs = 8000): Promise<void> {
+  const until = performance.now() + timeoutMs
+  for (;;) {
+    await new Promise((r) => requestAnimationFrame(r))
+    const real = getNodes().filter((n) => !isGhost(n.id))
+    const drawn = new Set(
+      Array.from(document.querySelectorAll<HTMLElement>('.react-flow__node'))
+        .map((el) => el.dataset.id ?? ''))
+    const ready = real.every((n) => drawn.has(n.id) && n.measured?.width && n.measured?.height)
+    if (ready) break
+    if (performance.now() > until) throw new Error('the cards took too long to draw')
+  }
+  // one more frame so the links follow the measured cards
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+}
+
 function cssVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
   return v || fallback
@@ -41,7 +65,7 @@ export async function exportBoardImage(opts: {
   const stage = document.querySelector('.stage') as HTMLElement | null
   if (!viewport || !stage) throw new Error('the canvas is not open')
 
-  const real = opts.nodes.filter((n) => !n.id.startsWith('ghost:'))
+  const real = opts.nodes.filter((n) => !isGhost(n.id))
   if (!real.length) throw new Error('there is nothing on this level to export')
 
   const bounds = getNodesBounds(real)
@@ -70,7 +94,7 @@ export async function exportBoardImage(opts: {
     },
     filter: (node: HTMLElement) => {
       const id = node?.dataset?.id
-      return !(typeof id === 'string' && id.startsWith('ghost:'))
+      return !(typeof id === 'string' && isGhost(id))
     },
   }
 

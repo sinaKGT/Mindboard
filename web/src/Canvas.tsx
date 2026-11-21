@@ -14,7 +14,7 @@ import {
 import { AskPanel } from './AskPanel'
 import { revealCard, useAsk } from './askStore'
 import { edgeTypes } from './edges'
-import { exportBoardImage, type ImageKind } from './exportImage'
+import { exportBoardImage, waitForAllCards, type ImageKind } from './exportImage'
 import { Icon } from './icons'
 import { AiPanels, CLICK_SLOP, nodeTypes, SelectionAi } from './nodes'
 import { ancestorAtLevel, currentParent, useStore } from './store'
@@ -211,9 +211,14 @@ function CanvasInner() {
   }, [focusId, getInternalNode, setCenter, setUI])
 
   // ------------------------------------------------------ image export --
+  // every card on the page while a picture is made, not just those in view
+  // (DESIGN.md 92)
+  const [drawAll, setDrawAll] = useState(false)
   const runExport = useCallback(async (kind: ImageKind, scale: number) => {
     try {
       say('rendering...')
+      setDrawAll(true)
+      await waitForAllCards(getNodes)
       const levelName = parent ? (useStore.getState().nodes[parent]?.title ?? '') : ''
       const out = await exportBoardImage({
         nodes: getNodes(), title: board?.title ?? 'board', kind, scale, levelName,
@@ -222,6 +227,8 @@ function CanvasInner() {
         + `${Math.round(out.height * out.scale)}px`)
     } catch (err: any) {
       say(err.message || 'could not export that', true)
+    } finally {
+      setDrawAll(false)
     }
   }, [board?.title, getNodes, parent, say])
 
@@ -847,7 +854,7 @@ function CanvasInner() {
         zoomOnDoubleClick={false}
         minZoom={0.08}
         maxZoom={2.5}
-        onlyRenderVisibleElements
+        onlyRenderVisibleElements={!drawAll}
         proOptions={{ hideAttribution: true }}
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}>

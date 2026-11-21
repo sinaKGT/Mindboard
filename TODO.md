@@ -15,7 +15,8 @@ the chat (§87); a board answer citing no card says so (§88); Explain more
 understands, plans and answers, in a file's conversation too, and page
 lists are links (§89); tables with formulas keep their columns (§90);
 Add to board keeps a table the answer wrote (§91); C (answers) closed by
-the owner; next: D.
+the owner; a picture of the board holds every card when zoomed (§92);
+next: @ links in cards, then the rest of D.
 
 ---
 
@@ -25,9 +26,6 @@ the owner; next: D.
   opens a picker of cards; choosing one puts a link in the text (opens that
   card when clicked) and adds a link between the two cards - as ops.
   To decide: whether the board link is always added or only offered.
-- **Export picture wrong when the board is zoomed** (`exportImage.ts`).
-  To confirm when we start: what exactly goes wrong (cut off, blurred,
-  shifted) and whether this is the export or something else.
 - **Lists in the card editor.** Bullet and numbered lists left the card bar's
   Aa menu (DESIGN.md §71) to go into the editor; the editor does not have them
   yet. Done looks like: a list button (or `- ` / `1. ` typed at a line start)

@@ -4617,3 +4617,33 @@ the cards it drafts for answers without a table; nothing checks a drafted
 card against the answer.
 
 361 tests.
+
+## 92. A picture of the board holds every card, however it is zoomed (2026-11-21)
+
+Exporting a picture (§7c) while zoomed in gave an image sized for the whole
+level that held only the cards on screen: a wide empty field, a few cards at
+one side, and links running off to nothing. The canvas puts only the cards in
+view on the page (`onlyRenderVisibleElements`, kept for speed on big levels),
+and the picture is a copy of the page, so cards out of view were never in it.
+At the zoom a board opens at, every card is in view, which is why it looked
+right most of the time.
+
+The export now turns that setting off for its own length: `runExport` in
+`Canvas.tsx` sets `drawAll`, `waitForAllCards` (`exportImage.ts`) waits,
+frame by frame, until every card of the level is on the page and measured by
+xyflow (eight seconds at most, then it says so), gives the links one more
+frame, and only then reads the level's bounds and renders. The setting comes
+back on afterwards, whether the export worked or not. Measuring after the
+cards are drawn also fixes the bounds: a card never drawn had no measured
+size.
+
+Checked in the browser on "SWIFT Lab Visitors" (41 cards): zoomed in with 5
+cards on the page, the picture before the change held those 5 and their
+links; after it, all 41, the same as an export at the opening zoom. Panned to
+an empty corner with no card on the page, the picture still held all 41, and
+the canvas went back to drawing only what is in view.
+
+Not done: on a level with thousands of flat cards (no groups), drawing them
+all for the export may take seconds; not measured.
+
+361 tests.
