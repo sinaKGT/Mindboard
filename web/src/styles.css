@@ -2020,3 +2020,14 @@ button.file-tab { padding: 5px 10px; gap: 5px; }
   box-shadow: inset 0 -2px 0 var(--mb-warn, #c98a12); }
 .num-mark.fixed s { color: var(--mb-text-faint); margin-right: 3px; }
 .num-mark.unchecked { box-shadow: inset 0 -2px 0 var(--mb-text-faint); border-bottom: 0; }
+
+/* The card AI panel, movable (DESIGN.md 83): in a layer over the page, by its
+   card until dragged by its header, then floating where it was put. */
+.tools-menu.ai-float { position: fixed; bottom: auto; translate: none; width: 380px; padding: 0; animation: none; }
+.tools-menu.ai-float.moved { box-shadow: var(--mb-shadow-lg), 0 0 0 1px var(--mb-border-strong); }
+.tools-menu.ai-float:focus { outline: none; }
+.ai-panel-head.grab { cursor: grab; user-select: none; touch-action: none; }
+.ai-panel-head.grab:active { cursor: grabbing; }
+.ai-panel-head .ai-close { margin-left: auto; }
+.ai-quiz-count + .ai-close { margin-left: 6px; }
+.ai-slot { position: absolute; width: 0; height: 0; }

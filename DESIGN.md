@@ -4220,3 +4220,54 @@ owner has seen go wrong. While the answer streams, a number the model
 labelled "(calculated)" may be its own sum; Double check is what catches it.
 
 346 tests.
+
+## 83. The card AI panel moves (2026-11-21)
+
+From the owner, with a screenshot of an Explanation panel over its card:
+"when we have this panel I want to be able to move that freely in canvas".
+The panel lived inside the selected card's toolbar, so it could not move, and
+it closed whenever the card was let go. Of three directions shown - floating
+over the board, placed on the board (zooming with it), floating with a line
+back to its card - the owner chose the first.
+
+- **A layer of its own.** Summarise, Explain, Fun fact and Quiz panels, for
+  one card or several, are now drawn in one layer over the page (`AiPanels`,
+  mounted by the canvas), not inside the toolbar, so what a panel holds - an
+  answer still streaming, a quiz half played - is kept when it leaves the
+  card. The card's menu leaves an empty mark in its bar (`PanelSlot`); while
+  the panel has not been moved, the layer places it against that mark every
+  frame - above the bar, or below when there is no room, as menus do - so it
+  follows the card as the board pans and zooms, and goes when the card is let
+  go or the menu closed, as before. The back arrow still returns to the menu.
+- **Dragged by its header** ("Drag to move"), it detaches: the card's menu
+  closes, the back arrow becomes a close button, and the panel stays where it
+  was put on the screen - at one size whatever the zoom - while other cards
+  are selected, the board is panned, or the chat is used. It closes with its
+  x, or Esc while it has focus. A press shorter than 4 pixels is a click, not
+  a drag. Several can be open; the one last touched is in front. Another
+  board closes them all.
+- **Kept whole in the window.** First tried, a panel let go near the bottom
+  edge grew off it as its answer arrived, taking Copy and Add to board out of
+  reach. Now a moved panel is held inside the window every frame - as it
+  grows, and as the window changes size - and a drag stops at the edges.
+- **Add to board** from a moved panel still makes a card linked to the first
+  card; if that card has been deleted meanwhile, the button is greyed out
+  ("Its card is no longer on the board") rather than doing nothing.
+- Beautify keeps its panel by the card: it changes that card, and is applied
+  or cancelled there.
+
+Checked in the app on the "Group test" board at 47% zoom: Explain opened by
+the card; dragged while its answer streamed, it kept streaming and moved;
+the card's menu closed; deselecting the card and panning the board left it
+in place and full size; let go past the bottom-right corner it stopped
+whole inside the window; Add to board made "Explanation: Chunking" (undone
+after); Esc closed it. Unmoved, the back arrow returned to the menu and
+deselecting the card closed the panel. With two cards selected, Summarise
+these opened by the selection bar, moved, and stayed after the selection
+was cleared. Interface type-checked and built; no server change.
+
+Not done: Esc closes a moved panel only while it has focus (click it first)
+- a board-wide Esc would also clear the selection; panels are not resizable;
+where a panel was put is not remembered after it closes.
+
+346 tests.

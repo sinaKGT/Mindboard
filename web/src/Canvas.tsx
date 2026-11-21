@@ -16,7 +16,7 @@ import { revealCard, useAsk } from './askStore'
 import { edgeTypes } from './edges'
 import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
-import { CLICK_SLOP, nodeTypes, SelectionAi } from './nodes'
+import { AiPanels, CLICK_SLOP, nodeTypes, SelectionAi } from './nodes'
 import { ancestorAtLevel, currentParent, useStore } from './store'
 import { PlacedCheck } from './PlacedCheck'
 import { Shortcuts } from './Shortcuts'
@@ -955,6 +955,7 @@ function CanvasInner() {
       </div>
 
       <AskPanel />
+      <AiPanels />
 
       {themeOpen && <ThemeSheet />}
       {dragOver && <div className="drop-veil">drop to add</div>}
