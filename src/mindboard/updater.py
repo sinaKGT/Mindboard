@@ -30,7 +30,7 @@ def pull(root: Optional[Path]) -> dict:
     if root is None or not (root / ".git").exists():
         return {"ok": False, "new": 0, "titles": [],
                 "said": "this copy was not downloaded with git, so it cannot update itself - "
-                        "download it again with: git clone -b v2 https://github.com/sinaKGT/Mindboard.git"}
+                        "download it again with: git clone https://github.com/sinaKGT/Mindboard.git"}
     if shutil.which("git") is None:
         return {"ok": False, "new": 0, "titles": [],
                 "said": "git is not installed - on a Mac: brew install git; on Windows: winget install Git.Git"}
@@ -48,7 +48,7 @@ def pull(root: Optional[Path]) -> dict:
         behind = _git(root, "rev-list", "--count", "HEAD..@{u}")
         if behind.returncode != 0:
             return {"ok": False, "new": 0, "titles": [],
-                    "said": "this copy does not follow a branch on GitHub - run: git branch -u origin/v2"}
+                    "said": "this copy does not follow a branch on GitHub - run: git branch -u origin/main"}
         new = int(behind.stdout.strip() or 0)
         if new == 0:
             return {"ok": True, "new": 0, "titles": [], "said": "already up to date"}

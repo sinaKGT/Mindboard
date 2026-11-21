@@ -80,8 +80,8 @@ on; do not skip one because the change looks small.
    DESIGN.md section, with what was measured and what is not done yet.
 5. **Update TODO.md.** Take out what is done, add what was found or left
    over, and update its "Last updated" line.
-6. **Commit** on `v2`, as set out under Git below.
-7. **Push to GitHub:** `git push origin v2`. Merging into `main` (a pull
+6. **Commit** on `dev`, as set out under Git below.
+7. **Push to GitHub:** `git push origin dev`. Merging into `main` (a pull
    request, then merge) happens only when the owner asks for it.
 
 ## Rules of the house
@@ -164,12 +164,12 @@ marketing words. Code comments follow the same voice and cite `DESIGN.md NN`.
 
 ## Git
 
-- Work on branch `v2`; `main` is the release branch.
+- Work on branch `dev`; `main` is the release branch. Only these two exist.
 - Never commit `docs/`, `.claude/`, `web/package-lock.json`, `.llm/`.
 - Commit messages: a short title line, a paragraph on what and why, and end
   with the attribution line the session gives (currently
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
-- Commit and push `v2` at the end of every change (steps 6-7 of the process
+- Commit and push `dev` at the end of every change (steps 6-7 of the process
   above). Merge into `main` only when the owner asks.
 - The GitHub CLI is at `C:\Program Files\GitHub CLI\gh.exe` (it may not be on
-  the PATH of an older shell); pull requests go from `v2` into `main`.
+  the PATH of an older shell); pull requests go from `dev` into `main`.
