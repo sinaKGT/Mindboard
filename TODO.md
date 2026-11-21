@@ -14,48 +14,10 @@ Summarise beside Add to board, scrolling while it writes, no hover text in
 the chat (§87); a board answer citing no card says so (§88); Explain more
 understands, plans and answers, in a file's conversation too, and page
 lists are links (§89); tables with formulas keep their columns (§90);
-Add to board keeps a table the answer wrote (§91); next: the rest of C.
+Add to board keeps a table the answer wrote (§91); C (answers) closed by
+the owner; next: D.
 
 ---
-
-## C. Answers
-
-- **Answers that say a little more than the card** (seen in §81). An
-  answer dressed a card up ("allows users to analyse real-time data", cited,
-  where the card only names the domains). Explain more no longer uses cards
-  (§86); worth a look across ordinary answers before deciding whether it
-  needs anything.
-- **Tables: what Make a table leaves** (from §85). The button under an
-  answer is done, in place, with every cell checked against the answer.
-  Left: whether the board's answers may use a table on their own when asked
-  to compare (the system prompt still says "no tables"); try the button on
-  answers in a file conversation with the real model; a cell is checked word
-  by word, not as a fact, so words from two sentences can still be paired.
-- **Made-up examples cited as the board's** (from §88). In explanations the
-  model gives an example of its own ("tax rules for remote workers") and
-  cites a card after it, as if the card gave it - five of six answers on the
-  RAG board. Telling it to cite each card made answers worse (RAG Fusion
-  answered as hybrid search), so any fix needs a with/without run on the
-  real model first. Also watch whether the "no card is cited" warning shows
-  on answers that rightly say the cards do not cover it.
-- **A paper's reference numbers in file answers** (from §89). Answers about
-  a paper copy its bracketed reference numbers ("[1147, 405, 340]") as if
-  they were sources. Decide whether to take them out of passages or answers
-  without touching real brackets (code, lists).
-- **Add to board: check a drafted card against the answer** (from §91). The
-  drafter wrote "ensuring performance remains stable even as data scales",
-  which the answer did not say. A word check like the summary's (§87) could
-  drop such a clause; try it with the real model first.
-- **Summarise: try it with the real model** (from §87). Done with the fake
-  model only: see how often sentences are left out by the word check, and
-  whether 400 characters is the right length to offer it from.
-- **Numbers in file answers: what Double check leaves** (from §82). Rows
-  kept, a calculator and a Double check button are done; on the test set
-  every wrong number was corrected. Left: run it on a real PDF the owner
-  has seen go wrong; check a scanned page's numbers against its figure
-  description; tables whose header cells are several words ("Nitrogen
-  (mg/kg)") fall back to a weaker row check; redo a sum when a number it
-  used was corrected; a calculator for the board's answers too.
 
 ## D. The board
 
