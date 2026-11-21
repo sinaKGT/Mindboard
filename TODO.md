@@ -8,7 +8,8 @@ with a quiz as data, soft glass cards and Beautify (§75-79); all merged into
 main (PR #4); Explain more gives what it is asked for, with no "the cards
 do not cover it" line (§80-81); numbers in file answers - rows kept, a
 calculator and Double check (§82); the card AI panel moves (§83); card
-titles in plain words (§84); next: the rest of C.
+titles in plain words (§84); Make a table under an answer (§85); next: the
+rest of C.
 
 ---
 
@@ -19,11 +20,12 @@ titles in plain words (§84); next: the rest of C.
   ("allows users to analyse real-time data", cited, where the card only
   names the domains). Worth a look across ordinary answers too, before
   deciding whether it needs anything.
-- **Tables in answers when they help**, and a **"Make a table" action under
-  an answer** that rewrites it as a table (and could add it to the board as
-  a card - cards already draw markdown tables, §69). Cards have Beautify now
-  (§78-79), which lays a card out as lists and bold labels but makes no
-  tables, since it never moves words; the chat's answers have nothing yet.
+- **Tables: what Make a table leaves** (from §85). The button under an
+  answer is done, in place, with every cell checked against the answer.
+  Left: whether the board's answers may use a table on their own when asked
+  to compare (the system prompt still says "no tables"); try the button on
+  answers in a file conversation with the real model; a cell is checked word
+  by word, not as a fact, so words from two sentences can still be paired.
 - **Numbers in file answers: what Double check leaves** (from §82). Rows
   kept, a calculator and a Double check button are done; on the test set
   every wrong number was corrected. Left: run it on a real PDF the owner

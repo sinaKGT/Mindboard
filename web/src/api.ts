@@ -238,6 +238,10 @@ const apiMore = {
                                       candidates?: string[]; history?: { role: string; text: string }[] }) =>
     req<{ title: string; text: string; link_to: string; kind: string; label: string; why: string }>(
       `/boards/${boardId}/ask/draft`, { method: 'POST', body: JSON.stringify(body) }),
+  /** an answer's own words laid out as a table (DESIGN.md 85); writes nothing */
+  answerTable: (boardId: string, answer: string, signal?: AbortSignal) =>
+    req<{ table: string; rows: number; blanked: number; note: string }>(`/boards/${boardId}/table`,
+      { method: 'POST', body: JSON.stringify({ answer }), signal }),
   /** a card's words with spelling and grammar fixed (DESIGN.md 56) */
   proofread: (boardId: string, body: { title: string; text: string }) =>
     req<{ title: string; text: string; changed: boolean }>(`/boards/${boardId}/proofread`,

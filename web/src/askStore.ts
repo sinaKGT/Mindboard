@@ -67,7 +67,34 @@ export interface Turn {
   task?: TaskPlan
   /** Double check (DESIGN.md 82): its numbers looked up again, its sums redone */
   check?: DoubleCheck
+  /** Make a table (DESIGN.md 85): the answer's own words as rows and columns */
+  table?: AnswerTable
 }
+
+export interface AnswerTable {
+  status: 'making' | 'done' | 'none' | 'failed' | 'stopped'
+  /** the markdown table, built by the server from the checked cells */
+  table?: string
+  /** which part of the answer it lays out: what the board says, else what is beyond it */
+  part?: 'board' | 'beyond'
+  /** cells left empty because the answer does not say them */
+  blanked?: number
+  note?: string
+  /** shown in place of the answer, or the answer as written */
+  shown?: boolean
+}
+
+/** the part of an answer a table would lay out: what the board says, or -
+ *  when there is nothing before the line - what is beyond it */
+export function tablePart(text: string): { part: 'board' | 'beyond'; text: string } {
+  const at = text.indexOf('Beyond your board:')
+  const board = (at >= 0 ? text.slice(0, at) : text).trim()
+  return board ? { part: 'board', text: board } : { part: 'beyond', text: text.slice(at + 18).trim() }
+}
+
+/** worth offering a table: some length, and not one already */
+export const tableable = (text: string) =>
+  text.length >= 60 && !/^\s*\|.*\|\s*$/m.test(text)
 
 export interface CheckMark { text: string; status: 'ok' | 'fixed' | 'unchecked'; note: string; was?: string }
 export interface DoubleCheck {
@@ -161,6 +188,10 @@ interface Ask {
   stop(): void
   /** Double check the answer at this place in the shown file conversation (DESIGN.md 82) */
   doubleCheck(index: number): Promise<void>
+  /** the answer at this place laid out as a table, shown in its place (DESIGN.md 85) */
+  makeTable(index: number): Promise<void>
+  /** between the table and the answer as written */
+  showTable(index: number, shown: boolean): void
   /** file conversations, and which is shown - null for the board's own */
   branches: FileBranch[]
   active: string | null
@@ -352,7 +383,8 @@ export const useAsk = create<Ask>()((set, get) => ({
               const t = turns[index]
               if (t) turns[index] = { ...t, text,
                 board: at >= 0 ? text.slice(0, at).trim() : text, beyond: at >= 0 ? text.slice(at + 18).trim() : '',
-                check: { status: 'done', summary: data.summary, marks: data.marks, marked: data.marked, original } }
+                check: { status: 'done', summary: data.summary, marks: data.marks, marked: data.marked, original },
+                table: undefined }   // a table of the old numbers is out of date
               return { turns }
             })
           } else if (name === 'error') {
@@ -367,6 +399,44 @@ export const useAsk = create<Ask>()((set, get) => ({
       set({ busy: false, controller: null })
       save(get())
     }
+  },
+
+  async makeTable(index) {
+    const s = get()
+    const turn = s.turns[index]
+    if (!s.boardId || s.busy || !turn || turn.role !== 'assistant' || turn.status !== 'done' || turn.error) return
+    const { part, text } = tablePart(turn.text)
+    if (!tableable(text)) return
+    const controller = new AbortController()
+    const patch = (p: AnswerTable) => set((st) => {
+      const turns = st.turns.slice()
+      if (turns[index]) turns[index] = { ...turns[index], table: p }
+      return { turns }
+    })
+    set({ busy: true, controller })
+    patch({ status: 'making', part })
+    try {
+      const got = await api.answerTable(s.boardId, text, controller.signal)
+      patch(got.table
+        ? { status: 'done', part, table: got.table, blanked: got.blanked, shown: true }
+        : { status: got.note.startsWith("Couldn't") ? 'failed' : 'none', part, note: got.note })
+    } catch (err: any) {
+      patch(controller.signal.aborted ? { status: 'stopped', part }
+        : { status: 'failed', part, note: err.message || 'could not make a table' })
+    } finally {
+      set({ busy: false, controller: null })
+      save(get())
+    }
+  },
+
+  showTable(index, shown) {
+    set((st) => {
+      const turns = st.turns.slice()
+      const t = turns[index]
+      if (t?.table?.status === 'done') turns[index] = { ...t, table: { ...t.table, shown } }
+      return { turns }
+    })
+    save(get())
   },
 
   async send(question, pictures = [], fresh = false, action) {

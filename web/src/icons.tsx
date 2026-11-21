@@ -26,6 +26,8 @@ const PATHS: Record<string, ReturnType<typeof P>[]> = {
   palette: [P('M8 13.5a5.5 5.5 0 1 1 5.5-5.5c0 1.4-1.2 2-2.2 2H10a1.2 1.2 0 0 0-.9 2c.3.4.2 1.5-1.1 1.5Z'), P('M5.6 6.4h.01M8 5h.01M10.4 6.6h.01')],
   grid: [P('M2.5 2.5h4.2v4.2H2.5zM9.3 2.5h4.2v4.2H9.3zM2.5 9.3h4.2v4.2H2.5zM9.3 9.3h4.2v4.2H9.3z')],
   fit: [P('M3 6V3.5h2.5M13 6V3.5h-2.5M3 10v2.5h2.5M13 10v2.5h-2.5')],
+  // a table: Make a table under an answer (DESIGN.md 85)
+  table: [P('M2.5 3.5h11v9h-11zM2.5 6.5h11M2.5 9.5h11M6.5 3.5v9')],
   // a speech bubble: Ask your board
   ask: [P('M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5A1.5 1.5 0 0 1 11.5 11H7l-3 2.5V11h0A1 1 0 0 1 3 10z')],
   // a bubble with a plus: add this card to what the model reads
