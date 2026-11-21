@@ -158,3 +158,68 @@ export function plainTitle(title: string): string {
   if (out !== raw) out = out.replace(/\s*:$/, '')
   return out || raw
 }
+
+// --------------------------------------------------- cards named with @ --
+// A card names another as [[id]] (DESIGN.md 93): the same mark an answer cites
+// with, so the card shows it as a chip with the other card's title, a click
+// away. While the card is written the mark reads @[Title]; the labels map
+// each @[...] back to its card when the card is saved.
+
+const CARD_MARK = /\[\[([0-9A-Za-z]{26})\]\]/g
+
+/** The card's text as it is written: [[id]] as @[Title], and what each label
+ *  stands for. Two cards of one title get "Title (2)" and so on. */
+export function toWriting(text: string, titleOf: (id: string) => string | undefined):
+  { text: string; labels: Map<string, string> } {
+  const labels = new Map<string, string>()          // label -> id
+  const byId = new Map<string, string>()
+  const out = text.replace(CARD_MARK, (whole, id: string) => {
+    const known = byId.get(id)
+    if (known) return `@[${known}]`
+    const title = titleOf(id)
+    if (title === undefined) return whole          // not on this board: left as it is
+    const label = freeLabel(title, labels)
+    labels.set(label, id)
+    byId.set(id, label)
+    return `@[${label}]`
+  })
+  return { text: out, labels }
+}
+
+/** A label no other card in this text uses: brackets are taken out, so the
+ *  label always ends where its mark does. */
+export function freeLabel(title: string, labels: Map<string, string>, id?: string): string {
+  const base = (plainTitle(title) || 'Untitled').replace(/[[\]]/g, '').trim() || 'Untitled'
+  for (let n = 1; ; n++) {
+    const label = n === 1 ? base : `${base} (${n})`
+    const holder = labels.get(label)
+    if (holder === undefined || holder === id) return label
+  }
+}
+
+/** The card's text as it is kept: every @[label] the labels know becomes
+ *  [[id]]; one typed by hand, or edited, stays as written. */
+export function fromWriting(text: string, labels: Map<string, string>): string {
+  return text.replace(/@\[([^\]\n]+)\]/g, (whole, label: string) => {
+    const id = labels.get(label)
+    return id ? `[[${id}]]` : whole
+  })
+}
+
+/** The cards a kept text names. */
+export function namedCards(text: string): string[] {
+  return [...new Set(Array.from(text.matchAll(CARD_MARK), (m) => m[1]))]
+}
+
+/** The words typed after an @ up to the caret, while a card is being named:
+ *  the @ starts the text or follows a space or bracket, the words stay on one
+ *  line and short. null when the caret is not in such words. */
+export function atQuery(value: string, caret: number): { start: number; query: string } | null {
+  const before = value.slice(0, caret)
+  const at = before.lastIndexOf('@')
+  if (at < 0) return null
+  if (at > 0 && !/[\s([{"'“]/.test(before[at - 1])) return null   // an address: me@example.org
+  const query = before.slice(at + 1)
+  if (query.length > 40 || /[\n[\]]/.test(query) || /^\s/.test(query)) return null
+  return { start: at, query }
+}

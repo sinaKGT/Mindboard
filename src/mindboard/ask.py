@@ -19,7 +19,7 @@ from typing import Any, Iterator, Optional
 
 from . import retrieve
 from .assets import resolve
-from .search_index import BoardIndex, FileNotes, PictureNotes, card_notes, file_of
+from .search_index import BoardIndex, FileNotes, PictureNotes, card_notes, file_of, named_cards
 from .ops import read_graph
 from .paths import DataDir
 
@@ -461,7 +461,7 @@ def card_text(node: dict, nodes: dict[str, dict]) -> str:
     place = _where(node, nodes)
     head = f"[{node['id']}] ({kind}{f', in {place}' if place else ''}) {node.get('title') or 'Untitled'}"
     lines = []
-    note = str(c.get("text") or c.get("summary") or "").strip()
+    note = named_cards(str(c.get("text") or c.get("summary") or ""), nodes).strip()
     if node["type"] == "link":
         lines += [f"address: {c['url']}"] if c.get("url") else []
         lines += [f"page says: {c['excerpt']}"] if c.get("excerpt") else []

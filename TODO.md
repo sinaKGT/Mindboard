@@ -16,16 +16,18 @@ understands, plans and answers, in a file's conversation too, and page
 lists are links (§89); tables with formulas keep their columns (§90);
 Add to board keeps a table the answer wrote (§91); C (answers) closed by
 the owner; a picture of the board holds every card when zoomed (§92);
-next: @ links in cards, then the rest of D.
+@ in a card's text names another card and links the two (§93);
+next: the rest of D.
 
 ---
 
 ## D. The board
 
-- **@ in card text to link another card.** Typing @ while writing a card
-  opens a picker of cards; choosing one puts a link in the text (opens that
-  card when clicked) and adds a link between the two cards - as ops.
-  To decide: whether the board link is always added or only offered.
+- **@ links: what is left** (from §93). Breaking a card into cards drops
+  its @ references (the break-down takes card marks out); a Find over the
+  board (ops.py's text index) still holds the raw id, not the other card's
+  title; not tried with the real model - check that answers about a card
+  with a reference cite that card, not the one it names.
 - **Lists in the card editor.** Bullet and numbered lists left the card bar's
   Aa menu (DESIGN.md §71) to go into the editor; the editor does not have them
   yet. Done looks like: a list button (or `- ` / `1. ` typed at a line start)

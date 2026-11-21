@@ -11,7 +11,9 @@ import { askable, revealCard, useAsk } from './askStore'
 import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
-import { continueList, plainTitle, URL_ONLY } from './text'
+import {
+  atQuery, continueList, freeLabel, fromWriting, namedCards, plainTitle, toWriting, URL_ONLY,
+} from './text'
 import { Prose } from './Prose'
 import { withMath } from './Math'
 import { NODE_COLOURS } from './theme'
@@ -85,6 +87,39 @@ function useAutoHeight(value: string, enabled: boolean) {
   return ref
 }
 
+/** The cards an @ offers (DESIGN.md 93): titles holding the words typed,
+ *  those starting with them first, then this level's before the rest. */
+function cardChoices(self: MNode, query: string): MNode[] {
+  const q = query.trim().toLowerCase()
+  const level = self.parent ?? null
+  return Object.values(useStore.getState().nodes)
+    .filter((n) => n.id !== self.id)
+    .map((n) => ({ n, label: choiceLabel(n).toLowerCase() }))
+    .filter(({ label }) => !q || label.includes(q))
+    .sort((a, b) =>
+      Number(!a.label.startsWith(q)) - Number(!b.label.startsWith(q))
+      || Number((a.n.parent ?? null) !== level) - Number((b.n.parent ?? null) !== level)
+      || a.label.length - b.label.length
+      || a.label.localeCompare(b.label))
+    .slice(0, 8)
+    .map(({ n }) => n)
+}
+
+/** a card in the @ list: its title, or its first words when it has none */
+function choiceLabel(n: MNode): string {
+  const t = plainTitle(n.title)
+  if (t) return t
+  const first = bodyText(n).split('\n').find((l) => l.trim())?.trim() ?? ''
+  return first ? (first.length > 40 ? `${first.slice(0, 39)}…` : first) : 'Untitled'
+}
+
+/** where a card in the @ list sits, when it is not on this level */
+function placeOf(n: MNode, self: MNode): string {
+  if ((n.parent ?? null) === (self.parent ?? null)) return ''
+  if (!n.parent) return 'Top level'
+  return plainTitle(useStore.getState().nodes[n.parent]?.title ?? '') || 'Group'
+}
+
 /** The editable title + body every node type shares, so an image or a video
  *  carries a thought the same way a text node does. */
 function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a note...' }: {
@@ -93,7 +128,17 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
   const editing = useUI((s) => s.editingId === node.id)
   const setUI = useUI((s) => s.set)
   const [title, setTitle] = useState(node.title)
-  const [text, setText] = useState<string>(bodyText(node))
+  /** what each @[label] in the text stands for (DESIGN.md 93) */
+  const labels = useRef(new Map<string, string>())
+  const writing = () => {
+    const w = toWriting(bodyText(node), (id) => useStore.getState().nodes[id]?.title)
+    labels.current = w.labels
+    return w.text
+  }
+  // the body as it is written: a card it names reads @[Title], not [[id]]
+  const [text, setText] = useState<string>(writing)
+  /** the @ being typed, and which card in the list is lit */
+  const [pick, setPick] = useState<{ start: number; query: string; at: number } | null>(null)
   const area = useAutoHeight(text, editing)
   const titleRef = useRef<HTMLInputElement>(null)
   const idle = useRef<ReturnType<typeof setTimeout>>()
@@ -103,28 +148,65 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
   const converting = useRef(false)
 
   useEffect(() => {
-    if (!editing) { setTitle(node.title); setText(bodyText(node)) }
+    if (!editing) { setTitle(node.title); setText(writing()); setPick(null) }
   }, [node.title, node.content.text, node.content.summary, editing])
 
   useEffect(() => {
-    if (editing) { converting.current = false; titleRef.current?.focus() }
+    // the other cards' titles as they are now
+    if (editing) { converting.current = false; setText(writing()); titleRef.current?.focus() }
   }, [editing])
 
   const commit = () => {
     clearTimeout(idle.current)
     if (converting.current) return
+    const kept = fromWriting(text, labels.current)
     // A text node whose whole body is a link is a link - fetch it rather than
     // leaving the address sitting there as prose.
-    if (node.type === 'text' && URL_ONLY.test(text.trim())) {
+    if (node.type === 'text' && URL_ONLY.test(kept.trim())) {
       converting.current = true
-      void linkifyNode(node.id, text.trim())
+      void linkifyNode(node.id, kept.trim())
       return
     }
-    if (title !== node.title || text !== bodyText(node)) {
+    if (title !== node.title || kept !== bodyText(node)) {
       // meta-nodes used to store this under `summary`; migrate on first edit
       const { summary: _dropped, ...rest } = node.content as Record<string, unknown>
-      updateNode(node.id, { title, content: { ...rest, text } })
+      const ops: Op[] = [{ kind: 'node.update', id: node.id, patch: { title, content: { ...rest, text: kept } } }]
+      // a card newly named with @ is linked on the board too, in the same
+      // change, unless the two are linked already (DESIGN.md 93)
+      const s = useStore.getState()
+      const before = new Set(namedCards(bodyText(node)))
+      for (const other of namedCards(kept)) {
+        if (before.has(other) || other === node.id || !s.nodes[other]) continue
+        const linked = Object.values(s.edges).some((e) =>
+          (e.source === node.id && e.target === other) || (e.source === other && e.target === node.id))
+        if (!linked) ops.push({ kind: 'edge.create', edge: newEdge(node.id, other) })
+      }
+      s.run(ops)
     }
+  }
+
+  // ------------------------------------------- naming a card with @ --
+  const choices = pick ? cardChoices(node, pick.query) : []
+  const showPick = !!pick && (choices.length > 0 || !/\s/.test(pick.query))
+  const looking = (el: HTMLTextAreaElement) => {
+    const q = atQuery(el.value, el.selectionStart ?? el.value.length)
+    setPick((was) => q ? { ...q, at: was && was.start === q.start && was.query === q.query ? was.at : 0 } : null)
+  }
+  const choose = (other: MNode) => {
+    const el = area.current
+    if (!el || !pick) return
+    const label = freeLabel(other.title, labels.current, other.id)
+    labels.current.set(label, other.id)
+    const caret = el.selectionStart ?? el.value.length
+    const after = el.value.slice(caret)
+    const mark = `@[${label}]` + (/^\s/.test(after) ? '' : ' ')
+    const value = el.value.slice(0, pick.start) + mark + after
+    // text and caret in place at once, as for lists below
+    el.value = value
+    el.setSelectionRange(pick.start + mark.length, pick.start + mark.length)
+    setText(value)
+    setPick(null)
+    touch()
   }
 
   /** Pasting a bare link into an empty node makes the link, not its address. */
@@ -155,8 +237,21 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
         <textarea ref={area} className="nodrag" value={text} rows={1} placeholder={bodyPlaceholder}
           style={{ fontSize: fs }}
           onPaste={onPasteUrl}
-          onChange={(e) => { setText(e.target.value); touch() }}
+          onChange={(e) => { setText(e.target.value); looking(e.target); touch() }}
+          onSelect={(e) => { if (pick) looking(e.currentTarget) }}
           onKeyDown={(e) => {
+            if (showPick && pick) {
+              const n = choices.length
+              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPick(null); return }
+              if (n && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                e.preventDefault()
+                setPick({ ...pick, at: (pick.at + (e.key === 'ArrowDown' ? 1 : n - 1)) % n })
+                return
+              }
+              if (n && (e.key === 'Enter' || e.key === 'Tab') && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault(); choose(choices[Math.min(pick.at, n - 1)]); return
+              }
+            }
             if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
               e.preventDefault(); commit(); setUI('editingId', null)
               return
@@ -178,6 +273,28 @@ function NodeText({ node, placeholder = 'Untitled', bodyPlaceholder = 'Add a not
             }
           }}
           onBlur={() => { commit(); setUI('editingId', null) }} />
+        {showPick && pick && (
+          <NodeToolbar isVisible position={Position.Bottom} align="start" offset={8}
+            className="card-pick nodrag nopan nowheel">
+            {/* pressing here keeps the caret in the card */}
+            <div className="pick-list" role="listbox" aria-label="Name a card"
+              onMouseDown={(e) => e.preventDefault()}>
+              {choices.length ? choices.map((other, i) => {
+                const where = placeOf(other, node)
+                return (
+                  <div key={other.id} role="option" aria-selected={i === pick.at}
+                    className={`pick-it${i === pick.at ? ' on' : ''}`}
+                    onMouseEnter={() => setPick({ ...pick, at: i })}
+                    onClick={() => choose(other)}>
+                    <span className="pick-bar" style={{ background: accentOf(other) }} />
+                    <span className="pick-title">{choiceLabel(other)}</span>
+                    {where && <span className="pick-where">{where}</span>}
+                  </div>
+                )
+              }) : <div className="pick-none">No card called "{pick.query}"</div>}
+            </div>
+          </NodeToolbar>
+        )}
       </div>
     )
   }

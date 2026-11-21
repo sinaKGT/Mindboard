@@ -166,9 +166,28 @@ def card_notes(dd: DataDir) -> dict[str, str]:
     return {**PictureNotes.get(dd).notes, **FileNotes.get(dd).notes}
 
 
+CARD_REF = re.compile(r"\[\[([0-9A-Za-z]{26})\]\]")
+
+
+def named_cards(text: str, nodes: dict[str, dict]) -> str:
+    """A card's text with each card it names - [[id]], put there with @
+    (DESIGN.md 93) - read as that card's title in quotes. Search finds the
+    words, and the model does not take another card's id inside this card's
+    text for a citation of this card. A card no longer on the board leaves
+    nothing behind."""
+    def title(m: re.Match) -> str:
+        other = nodes.get(m.group(1))
+        if other is None:
+            return ""
+        return f"\"{(other.get('title') or 'Untitled').strip()}\""
+    return CARD_REF.sub(title, text)
+
+
 def card_fields(node: dict, nodes: dict[str, dict],
                 notes: Optional[dict[str, str]] = None) -> dict[str, str]:
-    c = node.get("content") or {}
+    c = dict(node.get("content") or {})
+    if c.get("text"):
+        c["text"] = named_cards(str(c["text"]), nodes)
     trail, cur = [], nodes.get(node.get("parent") or "")
     while cur:
         trail.insert(0, cur.get("title") or "")

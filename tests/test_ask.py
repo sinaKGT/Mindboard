@@ -102,6 +102,25 @@ def test_every_kind_of_card_says_what_it_holds(dd, board, cards):
     assert "(text, in Sensors / Power) Solar" in text, "a card says which groups it sits in"
 
 
+def test_a_card_named_in_a_card_reads_as_its_title():
+    """@ puts [[id]] in a card's text (DESIGN.md 93): the model reads the other
+    card's title there, not an id it could take for a citation of this card,
+    and search finds the words; a card no longer here leaves nothing."""
+    from mindboard.search_index import card_fields
+    a, b, gone = ulid(), ulid(), ulid()
+    nodes = {
+        a: {"id": a, "type": "text", "title": "Analogy", "parent": None,
+            "content": {"text": f"Mapping relations, see [[{b}]] and [[{gone}]]."}},
+        b: {"id": b, "type": "text", "title": "Base and target", "parent": None,
+            "content": {"text": "Two situations."}},
+    }
+    text = ask.card_text(nodes[a], nodes)
+    assert 'see "Base and target" and .' in text
+    assert b not in text and gone not in text
+    assert '"Base and target"' in card_fields(nodes[a], nodes)["body"]
+    assert nodes[a]["content"]["text"].count("[[") == 2, "the card itself is left as it is"
+
+
 def test_pictures_go_in_as_pictures_shrunk_and_labelled(dd, board, cards):
     ctx = ask.build(dd, conn_for(dd, board["id"]), board["id"], [cards["plan"], cards["video"]])
     assert [p.card for p in ctx.pictures] == [cards["plan"], cards["video"]], "a video by its cover"

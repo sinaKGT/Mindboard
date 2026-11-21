@@ -4647,3 +4647,57 @@ Not done: on a level with thousands of flat cards (no groups), drawing them
 all for the export may take seconds; not measured.
 
 361 tests.
+
+## 93. @ in a card's text names another card and links the two (2026-11-21)
+
+Wanted: while writing a card, a way to point at another card from the text,
+the way a note-taking app does, with the board showing the same thing as a
+link. Three directions were drawn (`docs/mockups/card-links.html`): the link
+always added, offered after each choice, or a remembered switch in the list.
+The owner chose **always added**.
+
+What was done:
+
+- **The mark is the one answers already cite with**, `[[card-id]]`. Card text
+  already showed it as a chip with the other card's title that goes to the
+  card when clicked (`CardRef`), so nothing new was needed to show it, and
+  renaming the other card renames the chip.
+- **Writing.** Typing `@` - at the start of the text or after a space or
+  bracket, so `me@example.org` does not open it - opens a list of up to eight
+  cards under the card (a `NodeToolbar`, so the card's `overflow: hidden`
+  does not cut it off). Titles holding the words typed; those starting with
+  them first, then this level's cards before the rest; a card in another
+  level shows its group's name. ↑ ↓ and Enter or Tab choose, a click
+  chooses (pressing the list keeps the caret in the card), Esc closes the
+  list without leaving the card, and a space with nothing matching closes
+  it. While the card is written a reference reads `@[Title]` (`toWriting`,
+  `text.ts`); on saving, each `@[label]` the editor gave out becomes
+  `[[id]]` again (`fromWriting`). One typed or changed by hand stays as
+  written. Two cards of one title get `Title (2)`.
+- **The link.** On saving, each card the text names that it did not name
+  before, and that is not already linked to this card either way, gets a
+  link from this card - in the same `store.run` as the text, so one Ctrl+Z
+  takes back both. Deleting a reference later leaves the link; links are
+  removed on the board, as before. A card in another level is linked as any
+  link across levels is, drawn to its group.
+- **What the model and search read.** `named_cards` (`search_index.py`)
+  turns each `[[id]]` in a card's text into the other card's title in
+  quotes, in the context (`ask.card_text`) and in the search index
+  (`card_fields`). Left as an id, the model could take card B's id inside
+  card A's text for a citation of A's words; as a title, search also finds
+  the words. A card no longer on the board leaves nothing.
+
+Checked in the browser on a five-card board: `@ba` listed Basics, Base and
+target, and Baseline results (with "Experiments" beside it); choosing Base
+and target put `@[Base and target]` in the text, stored
+`[[01M800QR...]]`, showed the chip and drew the link; a second reference to
+the same card added no second link; a card inside Experiments was linked;
+choosing with a click kept the card in editing. Ctrl+Z took the reference
+and the link back together.
+
+Not done: breaking a card into cards takes card marks out, so its
+references are dropped; the board's Find index (`ops.py`) still holds the
+raw id; not tried with the real model - the prompt did not change, only what
+a card's text says.
+
+362 tests.
