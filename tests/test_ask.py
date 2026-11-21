@@ -651,18 +651,46 @@ def test_a_field_sent_as_a_list_is_joined_not_shown_as_a_list():
     assert got["text"] == "- First.\n- Second." and "[" not in got["text"]
 
 
-def test_beautify_lays_text_out_and_never_loses_or_adds_words():
+def test_beautify_only_organises_the_cards_own_words():
+    # DESIGN.md 79: the model groups the card's pieces; it never writes text
     import json as js
-    plain = "Role: director\nVisit: 22 Sep"
-    got = ask.beautify(DraftModel(js.dumps({"text": "- **Role:** director\n- **Visit:** 22 Sep"})), "T", plain)
-    assert got == {"text": "- **Role:** director\n- **Visit:** 22 Sep", "changed": True}
-    assert "change the layout only" in ask.BEAUTIFY_SYSTEM.lower()
-    # words lost, words added, or no JSON: left exactly as it was
-    for bad in ['{"text": "- **Role:** director"}',
-                '{"text": "- Role: director, a brilliant leader\\n- Visit: 22 Sep, a sunny autumn day"}',
-                "not json"]:
-        assert ask.beautify(DraftModel(bad), "T", plain) == {"text": plain, "changed": False}
+    text = ("Role: Managing Director; Chair of ALBUM; Vice-Chair of the Commission\n"
+            "Visit: 22 Sep 2026\nReport: one.docx; two.docx")
+    pieces = ask.beautify_pieces(text)
+    assert pieces == ["Role:", "Managing Director", "Chair of ALBUM", "Vice-Chair of the Commission",
+                      "Visit: 22 Sep 2026", "Report:", "one.docx", "two.docx"]
+    plan = {"blocks": [{"kind": "heading", "pieces": [1]}, {"kind": "bullets", "pieces": [2, 3, 4]},
+                       {"kind": "text", "pieces": [5]}, {"kind": "heading", "pieces": [6]},
+                       {"kind": "bullets", "pieces": [7, 8]}]}
+    got = ask.beautify(DraftModel(js.dumps(plan)), "David", text)
+    assert got["changed"] and got["text"] == (
+        "**Role:**\n\n- Managing Director\n- Chair of ALBUM\n- Vice-Chair of the Commission\n\n"
+        "**Visit:** 22 Sep 2026\n\n**Report:**\n\n- one.docx\n- two.docx")
+    # not one word changed, added, lost or moved
+    assert ask._words(got["text"]) == ask._words(text)
+    assert "do not write any" in ask.BEAUTIFY_SYSTEM
+    # a plan that skips, repeats or reorders a piece, or no JSON: left as it was
+    for bad in [{"blocks": [{"kind": "bullets", "pieces": [1, 2, 3]}]},
+                {"blocks": [{"kind": "bullets", "pieces": list(range(1, 9)) + [8]}]},
+                {"blocks": [{"kind": "bullets", "pieces": [2, 1, 3, 4, 5, 6, 7, 8]}]},
+                {"blocks": [{"kind": "poem", "pieces": list(range(1, 9))}]}]:
+        assert ask.beautify(DraftModel(js.dumps(bad)), "T", text) == {"text": text, "changed": False}
+    assert ask.beautify(DraftModel("not json"), "T", text)["changed"] is False
     assert ask.beautify(DraftModel("{}"), "T", "  ")["changed"] is False
+    # pieces kept together are joined as they were: the semicolons stay, and a
+    # semicolon inside brackets never cut the text in the first place
+    card = "Role: Director; Chair of ALBUM\nEmail: to add (not published; ask them)"
+    one = {"blocks": [{"kind": "text", "pieces": list(range(1, len(ask.beautify_pieces(card)) + 1))}]}
+    kept = ask.beautify(DraftModel(js.dumps(one)), "T", card)["text"]
+    assert kept == "**Role:** Director; Chair of ALBUM  \n**Email:** to add (not published; ask them)"
+    # a "heading" that is really a "Label: value" line stays a line, its label bold
+    line = "Role: Control room, works on diversions"
+    as_head = ask.beautify(DraftModel(js.dumps({"blocks": [{"kind": "heading", "pieces": [1]},
+                                                           {"kind": "text", "pieces": [2]}]})), "T", line + "\nMore.")
+    assert as_head["text"] == "**Role:** Control room, works on diversions\n\nMore."
+    # a long paragraph is cut at its sentences, every word kept
+    long = "First point here. " * 8 + "Second, longer point that goes on. " * 4
+    assert ask._words(" ".join(ask.beautify_pieces(long))) == ask._words(long)
 
 
 def test_beautify_route_writes_nothing(client, board, cards):
@@ -671,7 +699,7 @@ def test_beautify_route_writes_nothing(client, board, cards):
     res = client.post(f"/api/boards/{board['id']}/beautify", headers=h,
                       json={"title": "T", "text": "Role: director\nVisit: 22 Sep"})
     assert res.status_code == 200, res.text
-    assert res.json()["changed"] is True and res.json()["text"].startswith("- **Role:**")
+    assert res.json() == {"text": "- **Role:** director\n- **Visit:** 22 Sep", "changed": True}
     assert client.get(f"/api/boards/{board['id']}/graph", headers=h).json()["revision"] == before["revision"]
 
 

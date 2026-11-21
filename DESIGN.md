@@ -3985,3 +3985,35 @@ back as four bold labels and the two report files as a list, every word kept,
 in 7.2 s; applied and undone.
 
 299 tests.
+
+## 79. Beautify only organises (2026-11-21)
+
+"It just needs to organise the text, not change anything." Beautify (§78) had
+the model rewrite the card as Markdown and then checked the words after the
+fact - 90 % kept, 15 % new allowed - which still let rewording through.
+
+Now the model writes no text at all. The card is cut into its own pieces
+(`ask.beautify_pieces`): its lines, without any list marks or heading marks
+they had; a line of items joined by semicolons - outside brackets - its
+items, a "Label:" in front kept as a piece of its own; a paragraph over 220
+characters, its sentences. The model is given the pieces numbered and replies
+only with how to group them - `{"blocks": [{"kind": "heading" | "bullets" |
+"numbered" | "text", "pieces": [...]}]}` - and the server builds the Markdown
+from the card's own words. The plan must use every piece exactly once and in
+order, with known kinds, or the card is left as it was. Pieces kept together
+in a paragraph are joined as they were in the card ("; " stays "; ", a new
+line a line break), so nothing runs into anything else; a "Label: value"
+piece at the start of a line gets a bold label; a "heading" that is really a
+long or "Label: value" line stays a line. Tables, which would mean moving
+words, are no longer made.
+
+Checked with the real model on four texts - David Astill's and Nigel's cards,
+a five-sentence paragraph on analogy, and one sentence of steps joined by
+semicolons: every one kept the same words in the same order; the cards came
+back with bold labels and their semicolons; the paragraph was parted in two;
+the steps became a list under "To set up the lab visit:" (0.9-6.8 s). Found
+on the way and fixed: a first try ran a label's items into each other
+("Nottingham City Transport Chair of ALBUM") and cut a bracket at its
+semicolon; and the model once made Nigel's whole "Role: ..." line a heading.
+
+299 tests.

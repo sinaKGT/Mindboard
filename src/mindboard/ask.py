@@ -1094,53 +1094,159 @@ def proofread(model, title: str, text: str) -> dict:
 # ------------------------------------------------------------- beautify --
 # DESIGN.md 78: a card's text laid out as Markdown - the same words, a better shape
 
-BEAUTIFY_SYSTEM = """You lay out the text of one card of a person's mind map as clean Markdown.
+BEAUTIFY_SYSTEM = """You organise the text of one card of a person's mind map.
 
-Reply with JSON only, no other text: {"text": "..."}
+The card's text is given as numbered PIECES, in order. You do not write any
+text - you only say how to group the pieces, so not one word changes.
 
-Change the layout only - never the content:
-- Keep every fact, name, number and date, in the person's own words. Add
-  nothing, remove nothing, do not summarise or explain.
-- Separate items become a "- " bullet list; steps in order become a numbered list.
-- Several items that share the same fields (name, role, date...) become a
-  small Markdown table.
-- "Label: value" lines become "**Label:** value".
-- A short "### " heading only when the text has clear parts.
-- Bold a key term sparingly. No emoji, no title (the card has one already).
-- If the text is already well laid out, return it as it is."""
+Reply with JSON only, no other text:
+{"blocks": [{"kind": "...", "pieces": [1, 2]}]}
+
+- kind: "heading" (one short piece that names the part after it), "bullets"
+  (separate items, as a list), "numbered" (steps or ranks, in order) or
+  "text" (sentences that belong together, as a paragraph).
+- Use every piece exactly once, in the order given (1, 2, 3 ...).
+- Lists for items, a paragraph for flowing sentences; a heading only when
+  the text has clear parts. If it is fine as it is, one "text" block."""
 
 BEAUTIFY_CHARS = 6000
+BEAUTIFY_PIECES = 80
+LABEL = re.compile(r"^([A-Za-z][\w /&()'-]{0,40}?):\s+(\S.*)$")
+LIST_MARK = re.compile(r"^\s*(?:[-*+•]|\d+[.)]|\[[ xX]\])\s+")
 
 
 def _words(text: str) -> list[str]:
     return re.findall(r"[0-9A-Za-zÀ-￿]+", text.lower())
 
 
+def _semicolon_parts(body: str) -> list[str]:
+    """`body` split at its semicolons - not those inside brackets."""
+    parts, depth, cur = [], 0, []
+    for ch in body:
+        depth += (ch in "([{") - (ch in ")]}")
+        if ch == ";" and depth <= 0:
+            parts.append("".join(cur)); cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return [x.strip() for x in parts if x.strip()]
+
+
+def _cut(text: str) -> tuple[list[str], list[str]]:
+    """The card's pieces (`beautify_pieces`), and what joined each one to the
+    next in the card - "; ", " ", or a new line - so pieces a plan keeps
+    together are joined as they were, not run into each other."""
+    pieces: list[str] = []
+    joins: list[str] = []
+    for line in text.splitlines():
+        line = LIST_MARK.sub("", line.strip()).strip()
+        line = re.sub(r"^#{1,6}\s+", "", line).strip()
+        if not line:
+            continue
+        label = LABEL.match(line)
+        body = label.group(2) if label else line
+        parts = _semicolon_parts(body)
+        if len(parts) >= 2 and all(len(x) < 160 for x in parts):
+            # "Role: A; B; C" - the label stays a piece of its own, a heading or a lead
+            if label:
+                pieces.append(label.group(1) + ":"); joins.append(" ")
+            for x in parts:
+                pieces.append(x); joins.append("; ")
+        elif len(line) > 220:
+            for x in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])", line):
+                if x.strip():
+                    pieces.append(x.strip()); joins.append(" ")
+        else:
+            pieces.append(line); joins.append(" ")
+        if joins:
+            joins[-1] = "\n"                    # the end of a line of the card
+    return pieces, joins
+
+
+def beautify_pieces(text: str) -> list[str]:
+    """The card's text cut into the pieces Beautify may arrange (DESIGN.md 79):
+    its lines, without any list marks they had; a line of items joined by
+    semicolons (outside brackets), its items; a long paragraph, its sentences.
+    Every word stays, in order - only the joins between pieces go."""
+    return _cut(text)[0]
+
+
+def _piece_md(piece: str) -> str:
+    """A "Label: value" piece with its label in bold; anything else as it is."""
+    m = LABEL.match(piece)
+    if m and len(m.group(1).split()) <= 4:
+        return f"**{m.group(1)}:** {m.group(2)}"
+    if piece.endswith(":") and len(piece.split()) <= 4:      # a label alone, leading a list
+        return f"**{piece}**"
+    return piece
+
+
 def beautify(model, title: str, text: str) -> dict:
-    """The card's text laid out as Markdown, with nothing added or lost - or as
-    it was when the reply cannot be used: {"text", "changed"}. Writes nothing."""
+    """The card's text organised - lists, numbered steps, short headings,
+    bold labels - from its own pieces, so no word is changed, added or
+    lost: the model only groups them (DESIGN.md 79). {"text", "changed"};
+    as it was when the plan cannot be used. Writes nothing."""
     text = text or ""
     if not text.strip():
         return {"text": text, "changed": False}
+    head, rest = text[:BEAUTIFY_CHARS], text[BEAUTIFY_CHARS:]
+    pieces, joins = _cut(head)
+    # the pieces hold exactly the card's words, in order - else leave it be
+    if not pieces or len(pieces) > BEAUTIFY_PIECES or _words(" ".join(pieces)) != _words(head):
+        return {"text": text, "changed": False}
+    listing = "\n".join(f"{i}. {x}" for i, x in enumerate(pieces, 1))
     try:
         reply = model.chat([{"role": "system", "content": BEAUTIFY_SYSTEM},
-                            {"role": "user", "content": f"TITLE\n{(title or '').strip()}\n\nTEXT\n{text[:BEAUTIFY_CHARS]}"}],
-                           max_tokens=min(4000, 300 + len(text) // 2), think=False, temperature=0.1,
-                           timeout=BREAK_SECONDS)["text"]
+                            {"role": "user", "content": f"TITLE\n{(title or '').strip()}\n\nPIECES\n{listing}"}],
+                           max_tokens=600, think=False, temperature=0.1, timeout=BREAK_SECONDS)["text"]
         got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
-        laid = CITE.sub("", _plain(got.get("text") if isinstance(got, dict) else "")).strip()
     except Exception:
         return {"text": text, "changed": False}
-    laid += text[BEAUTIFY_CHARS:]
-    # the same words: nearly all of the old ones still there, few new ones
-    old, new = _words(text), _words(laid)
-    if not laid or not old:
+    blocks = got.get("blocks") if isinstance(got, dict) else None
+    if not isinstance(blocks, list):
         return {"text": text, "changed": False}
-    kept = sum(1 for w in set(old) if w in set(new)) / len(set(old))
-    added = sum(1 for w in set(new) if w not in set(old)) / max(len(set(new)), 1)
-    if kept < 0.9 or added > 0.15:
-        log.info("a beautified card lost or added words (kept %.2f, added %.2f); left as it was", kept, added)
+    used: list[int] = []
+    out: list[str] = []
+    for blk in blocks:
+        if not isinstance(blk, dict):
+            return {"text": text, "changed": False}
+        kind = str(blk.get("kind") or "text").strip().lower()
+        try:
+            idx = [int(i) for i in (blk.get("pieces") or [])]
+        except (TypeError, ValueError):
+            return {"text": text, "changed": False}
+        if not idx or kind not in ("heading", "bullets", "numbered", "text"):
+            return {"text": text, "changed": False}
+        used += idx
+        parts = [pieces[i - 1] for i in idx if 1 <= i <= len(pieces)]
+        if len(parts) != len(idx):
+            return {"text": text, "changed": False}
+        if kind == "heading":
+            joined = " ".join(parts)
+            # a heading names a part: short, and not a "Label: value" line - a
+            # whole "Role: Control room, ..." line came back as a heading
+            if joined.endswith(":") or LABEL.match(joined) or len(joined.split()) > 8:
+                out.append(_piece_md(joined))
+            else:
+                out.append("### " + joined)
+        elif kind == "bullets":
+            out.append("\n".join(f"- {_piece_md(x)}" for x in parts))
+        elif kind == "numbered":
+            out.append("\n".join(f"{n}. {_piece_md(x)}" for n, x in enumerate(parts, 1)))
+        else:
+            # kept together: joined as they were in the card - "; " stays "; "
+            said = ""
+            for k, i in enumerate(idx):
+                starts = k == 0 or joins[idx[k - 1] - 1] == "\n"   # at the start of a line
+                said += _piece_md(pieces[i - 1]) if starts else pieces[i - 1]
+                if k < len(idx) - 1:
+                    said += joins[i - 1].replace("\n", " ") if joins[i - 1] != "\n" else "  \n"
+            out.append(said)
+    # every piece exactly once, in order - or nothing is changed
+    if used != list(range(1, len(pieces) + 1)):
+        log.info("a beautify plan skipped, repeated or moved pieces; left as it was")
         return {"text": text, "changed": False}
+    laid = "\n\n".join(out) + rest
     return {"text": laid, "changed": laid.strip() != text.strip()}
 
 
