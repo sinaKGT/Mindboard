@@ -367,6 +367,68 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         finally:
             model._asking.release()
 
+    @app.post("/api/boards/{bid}/cards/{nid}/break")
+    def api_break_card(bid: str, nid: str):
+        """Smaller cards drafted from one card's own words (DESIGN.md 72).
+        Writes nothing: the interface adds the ones the person keeps."""
+        from .ask import break_card
+
+        board_or_404(bid)
+        node = {n["id"]: n for n in read_graph(conn_for(dd, bid), bid)["nodes"]}.get(nid)
+        if node is None:
+            raise HTTPException(404, "that card is not on this board any more")
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Set up the AI first - choose 6 in the Mindboard menu")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
+        try:
+            c = node.get("content") or {}
+            return break_card(model, node.get("title") or "", str(c.get("text") or c.get("summary") or ""))
+        finally:
+            model._asking.release()
+
+    @app.post("/api/boards/{bid}/cards/merge")
+    def api_merge_cards(bid: str, body: dict):
+        """One card drafted from several cards' own words (DESIGN.md 72).
+        Writes nothing: the interface replaces the cards only if the person
+        accepts, in one undoable step."""
+        from .ask import MERGE_MAX, merge_cards
+
+        board_or_404(bid)
+        ids = [str(i) for i in (body.get("ids") or [])][:MERGE_MAX]
+        nodes = {n["id"]: n for n in read_graph(conn_for(dd, bid), bid)["nodes"]}
+        picked = [nodes[i] for i in ids if i in nodes]
+        if len(picked) < 2:
+            raise HTTPException(400, "choose two or more cards to merge")
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Set up the AI first - choose 6 in the Mindboard menu")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
+        try:
+            return merge_cards(model, [{"title": n.get("title") or "",
+                                        "text": str((n.get("content") or {}).get("text") or "")} for n in picked])
+        finally:
+            model._asking.release()
+
+    @app.get("/api/boards/{bid}/cards/{nid}/related")
+    def api_related_cards(bid: str, nid: str):
+        """Cards that belong with this one, by the board's search on its words
+        (DESIGN.md 72). Uses the search models only - not the question slot."""
+        from .ask import AskError, related_cards
+
+        board_or_404(bid)
+        emb = search_model("embed")
+        try:
+            got = related_cards(dd, conn_for(dd, bid), bid, nid, emb,
+                                emb.inst.embedder.name if emb else "", search_model("rerank"))
+        except AskError as exc:
+            raise HTTPException(404, str(exc))
+        finally:
+            indexer.want(bid)
+        return {"results": got}
+
     @app.post("/api/boards/{bid}/ask/draft")
     def api_ask_draft(bid: str, body: DraftRequest):
         """A card drafted from an answer, for the person to check. Writes

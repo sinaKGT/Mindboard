@@ -48,6 +48,11 @@ const PATHS: Record<string, ReturnType<typeof P>[]> = {
   copy: [P('M6 6h7.5v7.5H6z'), P('M10.5 6V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1H6')],
   keys: [P('M2 4.5h12v7H2z'), P('M4.6 7h.01M7.3 7h.01M10 7h.01M12.7 7h.01M5.4 9.4h5.2',
     {strokeWidth: 1.6})],
+  // three dots: more of what can be done to a card
+  more: [P('M3.5 8h.01M8 8h.01M12.5 8h.01', {strokeWidth: 2.4})],
+  // sparkles: the AI's actions on a card
+  sparkle: [P('M7 2.5c.4 2.4 1.6 3.6 4 4-2.4.4-3.6 1.6-4 4-.4-2.4-1.6-3.6-4-4 2.4-.4 3.6-1.6 4-4Z'),
+            P('M12 10v3M10.5 11.5h3')],
   external: [P('M9 3.5h3.5V7'), P('M12.5 3.5 7.5 8.5'), P('M11 9.5v2.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2.5')],
 }
 

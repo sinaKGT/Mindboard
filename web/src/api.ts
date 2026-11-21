@@ -231,6 +231,18 @@ const apiMore = {
   proofread: (boardId: string, body: { title: string; text: string }) =>
     req<{ title: string; text: string; changed: boolean }>(`/boards/${boardId}/proofread`,
       { method: 'POST', body: JSON.stringify(body) }),
+  /** Smaller cards drafted from one card's own words (DESIGN.md 72). */
+  breakCard: (boardId: string, id: string) =>
+    req<{ cards: { title: string; text: string }[]; note: string }>(
+      `/boards/${boardId}/cards/${id}/break`, { method: 'POST' }),
+  /** One card drafted from several cards' own words (DESIGN.md 72). */
+  mergeCards: (boardId: string, ids: string[]) =>
+    req<{ title: string; text: string }>(`/boards/${boardId}/cards/merge`,
+      { method: 'POST', body: JSON.stringify({ ids }) }),
+  /** Cards that belong with this one, by the board's own search (DESIGN.md 72). */
+  relatedCards: (boardId: string, id: string) =>
+    req<{ results: { id: string; type: string; title: string; snippet: string }[] }>(
+      `/boards/${boardId}/cards/${id}/related`),
   askStop: (boardId: string) =>
     req<{ stopped: boolean }>(`/boards/${boardId}/ask/stop`, { method: 'POST' }),
   /** Accepts a single .mindboard bundle or a whole backup zip. */

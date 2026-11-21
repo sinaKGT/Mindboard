@@ -525,6 +525,105 @@ def test_drafting_writes_nothing_to_the_board(client, board, cards, model):
     assert after["revision"] == before["revision"]
 
 
+# ------------------------------------------- one card: break it, relate it --
+
+def test_a_card_is_broken_into_smaller_cards_from_its_own_words():
+    import json as js
+    model = DraftModel(js.dumps({"cards": [{"title": "Plan", "text": "Plan the route [[" + "A" * 26 + "]]."},
+                                           {"title": "Mount", "text": "Mount at 4 m."}, "junk", {}]}))
+    got = ask.break_card(model, "Site visit", "Plan the route. Mount at 4 m.")
+    assert got == {"cards": [{"title": "Plan", "text": "Plan the route ."},
+                             {"title": "Mount", "text": "Mount at 4 m."}], "note": ""}
+    assert "Use only what the card says" in model.asked[0][0]["content"]
+
+
+def test_breaking_falls_back_to_the_cards_own_list_and_says_when_there_is_nothing():
+    listed = "Things:\n- check the wind\n- order two poles\n- ask the council"
+    got = ask.break_card(DraftModel("not json"), "To do", listed)
+    assert [c["text"] for c in got["cards"]] == ["check the wind", "order two poles", "ask the council"]
+    lines = ask.break_card(DraftModel('{"cards": []}'), "Visitor", "Role: director\nVisit: 22 Sep")
+    assert [c["text"] for c in lines["cards"]] == ["Role: director", "Visit: 22 Sep"]
+    one = ask.break_card(DraftModel('{"cards": []}'), "Idea", "A single thought.")
+    assert one["cards"] == [] and "one idea" in one["note"]
+    assert "no text" in ask.break_card(DraftModel("{}"), "Empty", "")["note"]
+    many = ask.break_card(DraftModel(js_cards(9)), "Many", "x")
+    assert len(many["cards"]) == ask.BREAK_MAX
+
+
+def js_cards(n):
+    import json as js
+    return js.dumps({"cards": [{"title": f"T{i}", "text": f"t{i}"} for i in range(n)]})
+
+
+def test_breaking_a_card_writes_nothing_to_the_board(client, board, cards, model):
+    h = {"X-Mindboard-Token": TOKEN}
+    before = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    res = client.post(f"/api/boards/{board['id']}/cards/{cards['mount']}/break", headers=h)
+    assert res.status_code == 200, res.text
+    assert [c["title"] for c in res.json()["cards"]] == ["First point", "Second point"]
+    after = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    assert after["revision"] == before["revision"]
+    assert client.post(f"/api/boards/{board['id']}/cards/{'Z' * 26}/break", headers=h).status_code == 404
+
+
+def test_related_cards_leave_out_the_card_its_links_and_its_groups(dd, board, cards):
+    c = conn_for(dd, board["id"])
+    extra = node(title="Pole height", content={"text": "the mount angle at 4 m on the corner"})
+    assert not apply_envelopes(c, board["id"], [{"opId": ulid(), "op": {"kind": "node.create", "node": extra}}])["rejected"]
+    got = ask.related_cards(dd, c, board["id"], cards["mount"])
+    ids = [g["id"] for g in got]
+    assert extra["id"] in ids
+    # itself, and the plan and wind cards it already links to, never come back
+    assert not {cards["mount"], cards["plan"], cards["link"]} & set(ids)
+    inside = ask.related_cards(dd, c, board["id"], cards["lidar"])
+    assert cards["sensors"] not in [g["id"] for g in inside]
+    # groups never, and a card others are part of is a container, not a neighbour
+    hub = node(title="Pole hub", content={"text": "mount angle corner pole 4 m"})
+    spokes = [node(title=f"Spoke {i}") for i in range(ask.HOLDS)]
+    env = [{"opId": ulid(), "op": {"kind": "node.create", "node": v}} for v in [hub, *spokes]]
+    env += [{"opId": ulid(), "op": {"kind": "edge.create", "edge": {
+        "id": ulid(), "source": s["id"], "target": hub["id"], "kind": "part-of"}}} for s in spokes]
+    assert not apply_envelopes(c, board["id"], env)["rejected"]
+    again = [g["id"] for g in ask.related_cards(dd, c, board["id"], cards["mount"], limit=40)]
+    assert hub["id"] not in again and extra["id"] in again
+    assert not {cards["sensors"], cards["power"]} & set(again)
+    assert set(got[0]) == {"id", "type", "title", "snippet"}
+    with pytest.raises(ask.AskError):
+        ask.related_cards(dd, c, board["id"], "Z" * 26)
+
+
+def test_cards_are_merged_from_their_own_words_or_set_side_by_side():
+    import json as js
+    two = [{"title": "Mount", "text": "best angle at 4 m"}, {"title": "Lidar", "text": "range 100 m"}]
+    model = DraftModel(js.dumps({"title": "Pole", "text": "Best angle at 4 m; range 100 m [[" + "A" * 26 + "]]."}))
+    assert ask.merge_cards(model, two) == {"title": "Pole", "text": "Best angle at 4 m; range 100 m ."}
+    assert "Use only what the cards say" in model.asked[0][0]["content"]
+    side = ask.merge_cards(DraftModel("no json"), two)
+    assert side == {"title": "Mount / Lidar", "text": "best angle at 4 m\n\nrange 100 m"}
+    # a merge that drops most of the words falls back too
+    long = [{"title": "A", "text": "word " * 200}, {"title": "B", "text": "other " * 200}]
+    assert ask.merge_cards(DraftModel('{"title": "T", "text": "short"}'), long)["title"] == "A / B"
+
+
+def test_merging_writes_nothing_and_needs_two_cards(client, board, cards):
+    h = {"X-Mindboard-Token": TOKEN}
+    url = f"/api/boards/{board['id']}/cards/merge"
+    before = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    res = client.post(url, headers=h, json={"ids": [cards["mount"], cards["lidar"]]})
+    assert res.status_code == 200, res.text
+    assert res.json() == {"title": "Merged", "text": "Best angle at 4 m, and the range is 100 m."}
+    assert client.get(f"/api/boards/{board['id']}/graph", headers=h).json()["revision"] == before["revision"]
+    assert client.post(url, headers=h, json={"ids": [cards["mount"]]}).status_code == 400
+
+
+def test_related_cards_route(client, board, cards):
+    h = {"X-Mindboard-Token": TOKEN}
+    res = client.get(f"/api/boards/{board['id']}/cards/{cards['mount']}/related", headers=h)
+    assert res.status_code == 200, res.text
+    assert cards["mount"] not in [g["id"] for g in res.json()["results"]]
+    assert client.get(f"/api/boards/{board['id']}/cards/{'Z' * 26}/related", headers=h).status_code == 404
+
+
 # --------------------------------------------------------------- pictures --
 
 class Seeing:

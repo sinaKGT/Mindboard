@@ -1141,6 +1141,175 @@ def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
             "why": str(got.get("why") or "").strip()[:200] if link else ""}
 
 
+# ------------------------------------------- one card: break it, relate it --
+# DESIGN.md 72: the card's AI menu. Breaking a card drafts smaller cards from
+# its own words, for the person to accept; finding related cards searches the
+# board with the card's words. Neither writes anything.
+
+BREAK_SYSTEM = """You split one card of a person's mind map into smaller cards, one idea each.
+
+Reply with JSON only, no other text:
+{"cards": [{"title": "...", "text": "..."}]}
+
+- Use only what the card says. Add no facts, examples or opinions of your own.
+- 2 to 6 cards, in the card's own order; each a separate point it makes.
+- title: a short name for the point, at most 8 words.
+- text: the point in 1-3 plain sentences, in the card's own words where possible.
+- If the card holds only one idea, reply {"cards": []}."""
+
+BREAK_MIN, BREAK_MAX = 2, 6
+BREAK_CHARS = 6000          # of a card's words the model reads
+BREAK_SECONDS = 90.0        # one reply; past this it is hung up (CLAUDE.md rule 5)
+
+
+def _points(text: str) -> list[str]:
+    """A card's own points without the model: its list items, else its
+    paragraphs, else its lines - the fallback when the model's reply cannot be
+    used, or says one idea of a card that plainly holds several lines."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    items = [re.sub(r"^([-*+]|\d+[.)]|\[[ xX]\])\s+", "", ln) for ln in lines
+             if re.match(r"^([-*+]|\d+[.)])\s+", ln)]
+    if len(items) >= BREAK_MIN:
+        return items
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if len(paras) >= BREAK_MIN:
+        return paras
+    return lines if len(lines) >= BREAK_MIN else []
+
+
+def break_card(model, title: str, text: str) -> dict:
+    """Smaller cards drafted from one card's own words, and what went wrong if
+    none could be: {"cards": [{"title", "text"}], "note": ""}."""
+    title, text = (title or "").strip(), (text or "").strip()
+    if not text:
+        return {"cards": [], "note": "This card has no text to break up."}
+    got: dict = {}
+    try:
+        reply = model.chat([{"role": "system", "content": BREAK_SYSTEM},
+                            {"role": "user", "content": f"TITLE\n{title}\n\nTEXT\n{text[:BREAK_CHARS]}"}],
+                           max_tokens=900, think=False, temperature=0.2, timeout=BREAK_SECONDS)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        got = {}
+    out = []
+    for c in (got.get("cards") if isinstance(got, dict) else None) or []:
+        if not isinstance(c, dict):
+            continue
+        t = " ".join(str(c.get("title") or "").split()[:10]).strip()[:80]
+        x = CITE.sub("", str(c.get("text") or "")).strip()[:600]
+        if t or x:
+            out.append({"title": t or x[:60], "text": x})
+    out = out[:BREAK_MAX]
+    if len(out) >= BREAK_MIN:
+        return {"cards": out, "note": ""}
+    # the model said one idea, strayed or failed: the card's own list or paragraphs
+    points = _points(text)[:BREAK_MAX]
+    if points:
+        return {"cards": [{"title": " ".join(p.split()[:6])[:60], "text": p[:600]} for p in points],
+                "note": ""}
+    return {"cards": [], "note": "This card holds one idea - nothing to break up."}
+
+
+MERGE_SYSTEM = """You merge several cards of a person's mind map into one card.
+
+Reply with JSON only, no other text:
+{"title": "...", "text": "..."}
+
+- Use only what the cards say. Add no facts, examples or opinions of your own.
+- Keep every distinct point the cards make; say a point they share once.
+- title: a short name for the merged card, at most 8 words.
+- text: the merged points in plain sentences, or a short "- " list when the
+  cards list separate things. In the cards' own words where possible."""
+
+MERGE_MAX = 8               # cards merged at once
+MERGE_CHARS = 2500          # of each card's words the model reads
+
+
+def merge_cards(model, cards: list[dict]) -> dict:
+    """One card drafted from several cards' own words: {"title", "text"}.
+    Writes nothing. A reply that cannot be used gives the cards side by side."""
+    cards = [c for c in cards if (c.get("title") or "").strip() or (c.get("text") or "").strip()][:MERGE_MAX]
+    joined = "\n\n".join(t for t in ((c.get("text") or "").strip() for c in cards) if t)
+    fallback = {"title": " / ".join((c.get("title") or "").strip() for c in cards if (c.get("title") or "").strip())[:80]
+                or "Merged card",
+                "text": joined[:4000]}
+    if len(cards) < 2:
+        return fallback
+    listing = "\n\n".join(f"CARD {i}\nTITLE: {(c.get('title') or '').strip()}\nTEXT: {(c.get('text') or '').strip()[:MERGE_CHARS]}"
+                          for i, c in enumerate(cards, 1))
+    try:
+        reply = model.chat([{"role": "system", "content": MERGE_SYSTEM}, {"role": "user", "content": listing}],
+                           max_tokens=900, think=False, temperature=0.2, timeout=BREAK_SECONDS)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        return fallback
+    if not isinstance(got, dict):
+        return fallback
+    title = " ".join(str(got.get("title") or "").split()[:10]).strip()[:80]
+    text = CITE.sub("", str(got.get("text") or "")).strip()[:4000]
+    # a merge that lost most of the words is not a merge
+    if not text or len(text) < min(len(joined), 400) * 0.3:
+        return fallback
+    return {"title": title or fallback["title"], "text": text}
+
+
+RELATED_LIMIT = 6
+RELATED_QUERY = 1500        # characters of the card's words searched with
+HOLDS = 2                   # a card this many others are part of is a container, not a neighbour
+
+
+def related_cards(dd: DataDir, conn: sqlite3.Connection, bid: str, nid: str,
+                  embedder: Optional[retrieve.Embedder] = None, embed_model: str = "",
+                  reranker: Optional[retrieve.Reranker] = None,
+                  limit: int = RELATED_LIMIT) -> list[dict]:
+    """Cards on the board that belong with this one, by the board's own search
+    run on the card's words - leaving out the card, the cards it is already
+    linked to, and the groups it sits in or holds."""
+    graph = read_graph(conn, bid)
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    me = nodes.get(nid)
+    if me is None:
+        raise AskError("that card is not on this board any more")
+    c = me.get("content") or {}
+    query = " ".join([me.get("title") or "", str(c.get("text") or c.get("summary") or "")]).strip()
+    if not query:
+        return []
+    skip = {nid}
+    for e in graph["edges"]:
+        if e["source"] == nid:
+            skip.add(e["target"])
+        elif e["target"] == nid:
+            skip.add(e["source"])
+    up = me.get("parent")
+    while up:                                  # the groups it sits in
+        skip.add(up)
+        up = (nodes.get(up) or {}).get("parent")
+    skip.update(expand(nodes, [nid]))          # what it holds, if it is a group
+    # groups, and cards that hold others - the board's root, "External
+    # visitors", an organisation its people are part of - match every card's
+    # words and are structure, not what "related" means. Counting links did
+    # not find them: the root had 2, a meeting card with content 7 (DESIGN.md 72)
+    held: dict[str, int] = {}
+    for e in graph["edges"]:
+        if e.get("kind") == "part-of":
+            held[e["target"]] = held.get(e["target"], 0) + 1
+    skip.update(i for i, n in nodes.items() if n.get("type") == "meta" or held.get(i, 0) >= HOLDS)
+    index = board_index(dd, conn, bid, nodes, embedder, embed_model, background=True)
+    scored, _ = retrieve.score(index, query[:RELATED_QUERY], nodes, graph["edges"], embedder, reranker)
+    out = []
+    for i in retrieve.ranked(scored):
+        if i in skip or i not in nodes or scored[i] <= 0:
+            continue
+        n = nodes[i]
+        words = " ".join(str((n.get("content") or {}).get(k) or "")
+                         for k in ("text", "summary", "excerpt", "alt")).split()
+        out.append({"id": i, "type": n.get("type"), "title": n.get("title") or "Untitled",
+                    "snippet": " ".join(words)[:140]})
+        if len(out) >= limit:
+            break
+    return out
+
+
 # ------------------------------------------------------------ pictures --
 
 # DESIGN.md 51: the description now writes out the picture's text, so a word

@@ -3586,42 +3586,149 @@ scroll bar, the tools beneath; clearing the box returns the bar to its pill.
 
 282 tests.
 
-## 71. The card's tools: a pill at the top, a colour dot on the card (2026-11-21)
+## 71. The card's tools: one compact bar above the card (2026-11-21)
 
 A selected card opened a panel above it, three rows tall: colours and fill,
 text size and lists, then fix the writing, context, connect, add connected,
 move out, duplicate, delete. It covered the cards above the selected one and
-grew with every new action. Layout "B" from the mock-up, built:
+grew with every new action.
 
-- **Actions in a pill at the top of the canvas**, centred, rounded ends,
-  shown while one card is selected (`CardBar` in `nodes.tsx`, drawn by
-  `Canvas.tsx` outside the board's transform, so it keeps its size and place
-  at any zoom). Groups add Open and Ungroup at the front; a card inside a
-  group adds Move out. New card actions join this bar. Hidden while a link
-  is being drawn and in exported pictures.
-- **The look stays with the card**: a small dot just off its top right
-  corner, in the card's colour, opens a narrow strip under it - six colours,
-  any colour, default colour; fill (bar, tinted, solid); text size; bullet and
-  numbered lists. Both sit in xyflow's `NodeToolbar`, which keeps them one
-  size at any zoom and shows them only while that card alone is selected.
-- **Any colour**: a rainbow bead opens the system colour picker; the choice is
-  kept in `style.color` like the others, and is applied once, when the picker
-  closes, not as an op for every step of a drag across it. A custom colour
-  shows in that bead.
-- **Depth, asked for after the first build looked flat**: the pill and the
-  strip are raised glass - a lit top edge, a darker lower one, a soft shadow
-  with a faint glow of the board's accent; buttons rise under the pointer and
-  press in when clicked; the dot and the swatches are glossy beads. Built from
-  the theme's own colours, so every theme, light or dark, keeps it.
+Now one compact bar sits just above the selected card (`CardTools` in
+`nodes.tsx`), four buttons, each opening only what belongs to it:
+
+- **Colour** (a dot in the card's colour): six swatches, any colour, default
+  colour, and the three fills (bar, tinted, solid).
+- **Aa**: text size by name - S, M, L, XL (11, 13, 16, 20 px), the nearest
+  marked, so a card with another size keeps it.
+- **AI** (sparkles): the card's AI actions - fix the writing, ask about it,
+  and since §72 summarise, explain, quiz, fun fact, break up, find related.
+- **Connect** (a link): one click, as before; `c` still works.
+
+Taken off the bar at the owner's word, to keep it to four: the "more" menu
+(add connected card, duplicate, delete, open, ungroup, move out) and the two
+lists. They remain where they already were - the ports add a connected
+card, Ctrl+D duplicates, Del deletes, a double-click opens a group, Ctrl+G /
+Ctrl+Shift+G group and ungroup -
+and lists are to go into the card's editor. Not done yet: the lists in the
+editor, and Move out has no button now.
+
+Menus open above the bar, so the card stays in view while it changes. The bar
+is in xyflow's `NodeToolbar`: one size at any zoom, shown only while that card
+alone is selected, hidden in exported pictures. Its surface is the app's
+floating panel (the selection bar's border and shadow, a faint lit top edge),
+in every theme's own colours.
+
+- **Any colour**: the rainbow swatch opens the system colour picker; the
+  choice is kept in `style.color` and applied once, when the picker closes,
+  not as an op for every step of a drag across it.
 - **A fix found on the way**: any change to the board rebuilt the canvas's
   list of cards without their selection, so picking a colour deselected the
   card and put its tools away. The cards in hand are now kept selected when
   the level is rebuilt.
 
+Tried and dropped, on the owner's look at each, the same day: a pill at the
+top of the canvas for the actions with the look beside the card - first a
+colour dot opening a strip down the card's right side (glossy "3D" beads,
+then flat; it sat on the resize corner, covered the right port, and was
+awkward), then a format row above the card. Two menus for one card were
+confusing. One wide bar with everything, everything in the top pill, and
+formatting behind an "Aa" button were drawn and not chosen. Text size as
+smaller / number / larger, and then as a numbered list, was confusing; named
+sizes replace both.
+
 Keyboard and undo are as before; every change is still an op. Checked in the
-browser on a dark and a light theme: the pill centred at the top; the strip
-at one size at 12 % and 29 % zoom; a colour, a custom colour (one op) and
-Ctrl+Z each changed the card while it stayed selected. The old panel and its
-styles are gone.
+browser on a dark and a light theme at 87 % zoom: each menu opened alone and
+above the bar; a swatch, L then XL, and the fills changed the card while it
+stayed selected; the AI menu listed its two items. The old panel, the top
+pill and their styles are gone.
 
 282 tests.
+
+## 72. AI on a card, and on several (2026-11-21)
+
+The card bar's sparkle button (§71) held two things: fix the writing, and put
+the card in the chat's context. The owner asked for more that a learner does
+with one card, and for some of it on several cards at once.
+
+**One card** - the sparkle menu, in three groups:
+
+- **Summarise, Explain this card, Quiz me on this, Fun fact** go through the
+  chat: the card alone is put in context and the request is sent in words the
+  person sees in the conversation, so the answer cites the card like any
+  other. Each is sent *fresh* - without the conversation before it - and names
+  the card by its title: sent with the history, "this card" was read as the
+  card the conversation had last been about (a fun fact for the University of
+  Derby card came back about David Astill).
+  - Fun fact: only from what the card says; if it holds too little, one short
+    funny line ending with an emoji instead.
+  - Quiz: one question at a time, a cheer and a short explanation after each
+    answer, the score, three questions (four for several cards). Asked as
+    steps, the request reader (§66) took it as a plan and wrote a plan for a
+    quiz, twice, however it was worded; so `quiz` is now a task of its own
+    with its own answer shape (`tasks.SHAPES["quiz"]`): judge the last answer
+    if there was one, then ask only the next question, never its answer, and
+    make the three NEXT lines answers to pick from. The page names it Quiz.
+- **Break it into cards** (`POST /cards/{id}/break`, `ask.break_card`): 2 to 6
+  cards drafted from the card's own words, nothing added. They are listed in
+  the menu with a tick each; "Add N cards" places the ticked ones beside the
+  card, each linked to it as *part of*, in one undoable step. When the model
+  says one idea or its reply cannot be used, the card's own list items, else
+  its paragraphs, are offered; failing those, it says there is one idea.
+- **Find related cards** (`GET /cards/{id}/related`, `ask.related_cards`): the
+  board's own search (§35) run on the card's title and text, leaving out the
+  card, the cards it already links to, the groups it sits in and anything it
+  holds. Up to six, each with a Link button and a click to go to it. Uses the
+  search models only, not the question slot.
+- Fix the writing and Ask about this card (into the chat's context) as before.
+
+**Several cards** - an AI button on the selection bar:
+
+- **Summarise these, Quiz me on these** - through the chat, as above.
+- **Merge into one card** (`POST /cards/merge`, `ask.merge_cards`, 2 to 8
+  cards, not groups): one card drafted from their own words, every distinct
+  point kept. It is shown, editable, with "Replace with this"; accepted, the
+  merged card takes the place of the first, every link the cards had to cards
+  outside them is moved to it (kind and label kept, a link two of them shared
+  made once), and the cards go - one step, so Ctrl+Z brings them all back. A
+  reply that drops most of the words, or cannot be read, gives the cards side
+  by side instead.
+- The selection bar now keeps one size at any zoom (it was drawn inside the
+  board and shrank with it; at 12 % the merge draft was unreadable).
+
+All drafts are offered, never written, until the person accepts (CLAUDE.md
+rule 1); the model's JSON is parsed between the first `{` and last `}` and
+every field checked (rule 8); each call has a time limit (90 s). A menu opens
+above its bar unless the window's top would cut it off; then below.
+
+Measured with the real model (Qwen3.5) on the SWIFT Lab Visitors board: break
+15 s cold, 3 s warm, five cards taken faithfully from a four-line card; related
+2.8 s, the other visitors and their groups; merge 7.6 s, all points of two
+cards kept; Summarise 6.6 s, cited; fun fact 4 s, a playful refusal with 🤷 on
+a card holding only a title; the quiz asked question 1, then judged "B"
+right with a 🎉, gave 1/3 and asked question 2.
+
+**Three weak spots, then fixed** (the same day):
+
+- *A quiz question with three right choices*: "what is his official title?"
+  over a card listing three roles. The quiz shape now asks for exactly one
+  right answer by the cards, the wrong choices plainly wrong by them - never
+  another true fact from them. Two runs after: "which is NOT one of his
+  roles?" and "his role at Nottingham City Transport?" - one right each.
+- *Hub cards among the related*: the board's root, "External visitors",
+  "Internal visitors". Leaving out cards linked to six or more others was
+  tried first and was wrong both ways: the root had 2 links and "External
+  visitors" 4, while two meeting cards with real content had 6 and 7. What
+  marks structure on a board is being held: a card that two or more cards are
+  *part of* (`HOLDS`) - categories, organisations, meetings - is left out, as
+  groups are. For David Astill the six are now all people.
+- *Drafted cards placed without looking*: `actions.columnSpots` finds the
+  first column to the card's right where all of them fit clear of every card
+  on the level, starting level with it and stepping down past anything in the
+  way, further right if crowded. Five cards from David Astill's: no overlap
+  with any card, measured against their drawn sizes. `freeSpot` (pasting) read
+  a self-sizing card's width as 0 (`??` on 0); it now uses the guess.
+- Found on the way: a later run said "one idea" of the same four-line card;
+  the fallback now offers a card's separate lines when it has neither list
+  items nor paragraphs.
+
+290 tests.

@@ -127,6 +127,14 @@ class Handler(BaseHTTPRequestHandler):
             last = body["messages"][1]["content"]     # ask's order: the cards come second
         text = ("The word is MINDBOARD, beside a red circle." if isinstance(last, list)
                 else "A mind map lays out ideas and how they connect.")
+        system = body["messages"][0]["content"] if body["messages"][0]["role"] == "system" else ""
+        if isinstance(system, str) and system.startswith("You split one card"):
+            # breaking a card into smaller ones (DESIGN.md 72): two, as JSON
+            text = ('{"cards": [{"title": "First point", "text": "The first part."}, '
+                    '{"title": "Second point", "text": "The second part."}]}')
+        if isinstance(system, str) and system.startswith("You merge several cards"):
+            # merging cards into one (DESIGN.md 72), as JSON
+            text = '{"title": "Merged", "text": "Best angle at 4 m, and the range is 100 m."}'
         self._send(200, {
             "choices": [{"message": {"role": "assistant", "content": text}}],
             "timings": {"prompt_n": 12, "prompt_per_second": 120.0,

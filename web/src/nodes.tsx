@@ -1,19 +1,19 @@
 import { Handle, NodeResizer, NodeToolbar, Position, useStore as useFlow, type NodeProps } from '@xyflow/react'
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  addConnected, deleteNodes, duplicateNodes, linkifyNode, moveOut, refreshLinkPreview, setBodyList, setStyle, unwrapMeta, updateNode,
+  columnSpots, connect, linkifyNode, refreshLinkPreview, setStyle, spark, updateNode,
 } from './actions'
 import { api } from './api'
 import { askable, revealCard, useAsk } from './askStore'
 import { Icon } from './icons'
 import { GraphMini, toMini, type MiniEdge } from './Mini'
 import { useStore } from './store'
-import { continueList, detectList, URL_ONLY } from './text'
+import { continueList, URL_ONLY } from './text'
 import { Prose } from './Prose'
 import { withMath } from './Math'
 import { NODE_COLOURS } from './theme'
-import type { MNode, NodeTone } from './types'
+import { newEdge, newNode, type MNode, type NodeTone, type Op } from './types'
 import { useUI } from './ui'
 
 const PORTS: [string, Position][] = [
@@ -210,18 +210,329 @@ const TONES: { key: NodeTone; label: string }[] = [
   { key: 'solid', label: 'Solid card' },
 ]
 
-const SIZES = [11, 12, 13, 14, 16, 18, 20, 24, 28, 34]
 
-/** What a selected card's colour and text look like (DESIGN.md 71): a small
- *  dot just off the card's top right corner, in the card's colour, that opens
- *  a narrow strip under it - colours, any colour, fill, text size, lists. In
- *  xyflow's node toolbar, so it keeps its size at any zoom, and only while
- *  this card alone is selected. */
-function Looks({ node, selected }: { node: MNode; selected?: boolean }) {
+/** Text sizes by name: the menu offers these four; a card keeps any size it
+ *  already has, and the nearest name is marked. */
+const NAMED_SIZES: { label: string; size: number }[] = [
+  { label: 'S', size: 11 }, { label: 'M', size: 13 }, { label: 'L', size: 16 }, { label: 'XL', size: 20 },
+]
+
+type Menu = 'colour' | 'text' | 'ai'
+
+/** What the chat is asked, in words the person sees in it (DESIGN.md 72). */
+const ASK_ABOUT = {
+  summary: 'Summarise this card in a few short lines.',
+  explain: 'Explain this card in plain words, with an example or two.',
+  quiz: "Let's play a fun quiz on this card! Ask me question 1 of 3 right now - just that "
+    + 'one question (multiple choice or a short answer), then stop and wait for my answer. '
+    + 'When I answer, tell me cheerfully whether I got it right, explain briefly from the '
+    + 'card, keep score, and ask the next. After question 3, give my final score.',
+  funfact: 'Tell me one fun fact from this card, in one or two playful sentences - only from '
+    + 'what the card itself says. If the card does not hold enough for a fun fact, say so '
+    + 'instead in one short, funny line that ends with an emoji (like 🤷 or 🙈) - and make '
+    + 'nothing up.',
+}
+
+type AiView =
+  | { at: 'menu' }
+  | { at: 'breaking' }
+  | { at: 'break'; cards: { title: string; text: string; keep: boolean }[] }
+  | { at: 'finding' }
+  | { at: 'related'; cards: { id: string; title: string; snippet: string }[]; linked: string[] }
+  | { at: 'said'; note: string }
+
+/** What the chat is asked about several cards (DESIGN.md 72). */
+const ASK_ABOUT_MANY = {
+  summary: 'Summarise these cards together in a few short lines.',
+  quiz: "Let's play a fun quiz on these cards! Ask me question 1 of 4 right now - just that "
+    + 'one question (multiple choice or a short answer), then stop and wait for my answer. '
+    + 'When I answer, tell me cheerfully whether I got it right, explain briefly from the '
+    + 'cards, keep score, and ask the next. After question 4, give my final score.',
+}
+
+type ManyView =
+  | { at: 'menu' }
+  | { at: 'merging' }
+  | { at: 'merge'; title: string; text: string }
+  | { at: 'said'; note: string }
+
+/** The AI menu for several selected cards (DESIGN.md 72): summarise them or
+ *  be quizzed on them in the chat, or merge them - one card drafted from
+ *  their words, which replaces them, links and all, only when accepted. */
+export function SelectionAi({ ids }: { ids: string[] }) {
   const [open, setOpen] = useState(false)
-  const [sizeOpen, setSizeOpen] = useState(false)
+  const [view, setView] = useState<ManyView>({ at: 'menu' })
+  const boardId = useStore((s) => s.boardId)
+  const nodes = useStore((s) => s.nodes)
+  const picked = ids.map((i) => nodes[i]).filter(Boolean)
+  const textual = picked.filter((n) => n.type !== 'meta')
+  const canMerge = picked.length >= 2 && textual.length === picked.length && picked.length <= 8
+  const shut = () => { setOpen(false); setView({ at: 'menu' }) }
+  const ask = (q: string) => { shut(); useAsk.getState().askAbout(ids, q) }
+  const root = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const m = root.current
+    if (!m) return
+    m.classList.remove('below')
+    if (m.getBoundingClientRect().top < 8) m.classList.add('below')
+  })
+
+  const merge = async () => {
+    if (!boardId) return
+    setView({ at: 'merging' })
+    try {
+      const got = await api.mergeCards(boardId, ids)
+      setView({ at: 'merge', title: got.title, text: got.text })
+    } catch (e: any) {
+      setView({ at: 'said', note: e.message || 'Could not merge these cards' })
+    }
+  }
+  const replace = (title: string, text: string) => {
+    const store = useStore.getState()
+    const gone = new Set(picked.map((n) => n.id))
+    const x = Math.min(...picked.map((n) => n.pos[0]))
+    const y = Math.min(...picked.map((n) => n.pos[1]))
+    const merged = newNode({ pos: [Math.round(x), Math.round(y)], parent: picked[0].parent, type: 'text',
+                             title, content: { text }, provenance: 'ai' })
+    const ops: Op[] = [{ kind: 'node.create', node: merged }]
+    const seen = new Set<string>()
+    // every link the cards had to cards outside them now meets the merged card
+    for (const e of Object.values(store.edges)) {
+      const s = gone.has(e.source), t = gone.has(e.target)
+      if (s === t) continue
+      const source = s ? merged.id : e.source
+      const target = t ? merged.id : e.target
+      const key = `${source}>${target}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      ops.push({ kind: 'edge.create', edge: newEdge(source, target,
+        { kind: e.kind, label: e.label, directed: e.directed, style: e.style }) })
+    }
+    ops.push({ kind: 'node.delete', ids: [...gone] })
+    store.run(ops)
+    spark(merged.id)
+    store.say(`Merged ${gone.size} cards into one - Ctrl+Z to undo`)
+    shut()
+  }
+
+  return (
+    <span className="sel-ai">
+      <button className={open ? 'on' : ''} title="AI: summarise, quiz, merge"
+        onClick={() => { setOpen((v) => !v); setView({ at: 'menu' }) }}>
+        <Icon name="sparkle" size={14} /> AI
+      </button>
+      {open && (
+        <div ref={root} className={`tools-menu list ai ${view.at === 'menu' ? '' : 'wide'} sel-ai-menu`}>
+          {view.at === 'menu' && (
+            <>
+              <button className="tools-item" onClick={() => ask(ASK_ABOUT_MANY.summary)}>
+                <Icon name="type" size={15} /> Summarise these
+              </button>
+              <button className="tools-item" onClick={() => ask(ASK_ABOUT_MANY.quiz)}>
+                <Icon name="bulb" size={15} /> Quiz me on these
+              </button>
+              <span className="tools-rule" />
+              <button className="tools-item" disabled={!canMerge} onClick={() => void merge()}
+                title={canMerge ? 'One card from these, replacing them' : 'Merge 2 to 8 cards, not groups'}>
+                <Icon name="layers" size={15} /> Merge into one card
+              </button>
+            </>
+          )}
+          {view.at === 'merging' && (
+            <div className="tools-wait"><span className="tools-spin" />Merging {picked.length} cards…</div>
+          )}
+          {view.at === 'said' && (
+            <>
+              <div className="tools-note">{view.note}</div>
+              <button className="tools-item" onClick={() => setView({ at: 'menu' })}>
+                <Icon name="undo" size={15} /> Back
+              </button>
+            </>
+          )}
+          {view.at === 'merge' && (
+            <>
+              <div className="tools-label">
+                The merged card - it replaces these {picked.length}, and keeps their links
+              </div>
+              <div className="tools-merged">
+                <input value={view.title} aria-label="Title"
+                  onChange={(e) => setView({ ...view, title: e.target.value })} />
+                <textarea value={view.text} aria-label="Text" rows={6}
+                  onChange={(e) => setView({ ...view, text: e.target.value })} />
+              </div>
+              <div className="tools-actions">
+                <button className="tools-plain" onClick={shut}>Cancel</button>
+                <button className="tools-go" disabled={!view.title.trim() && !view.text.trim()}
+                  onClick={() => replace(view.title.trim(), view.text.trim())}>Replace with this</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </span>
+  )
+}
+
+/** The card's AI menu (DESIGN.md 72): ask the chat about it - summarise,
+ *  explain, quiz - break it into smaller cards, find the cards that belong
+ *  with it, fix its writing, or put it in the chat's context. Drafted cards
+ *  and found links are offered here and added only when the person says so. */
+function AiMenu({ node, close }: { node: MNode; close: () => void }) {
+  const [view, setView] = useState<AiView>({ at: 'menu' })
+  const boardId = useStore((s) => s.boardId)
+  const hasText = !!(node.title.trim() || String(node.content.text ?? '').trim())
+  // the card named by its title: "this card" alone was read as whichever card
+  // the conversation was last about
+  const named = node.title.trim() ? `the card "${node.title.trim().slice(0, 80)}"` : 'this card'
+  const ask = (q: string) => { close(); useAsk.getState().askAbout([node.id], q.replace(/this card/g, named)) }
+  // above the bar unless the window's top would cut it off (as CardTools does)
+  const root = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const m = root.current
+    if (!m) return
+    m.classList.remove('below')
+    if (m.getBoundingClientRect().top < 8) m.classList.add('below')
+  })
+
+  const breakUp = async () => {
+    if (!boardId) return
+    setView({ at: 'breaking' })
+    try {
+      const got = await api.breakCard(boardId, node.id)
+      setView(got.cards.length ? { at: 'break', cards: got.cards.map((c) => ({ ...c, keep: true })) }
+        : { at: 'said', note: got.note || 'Nothing to break up.' })
+    } catch (e: any) {
+      setView({ at: 'said', note: e.message || 'Could not break this card up' })
+    }
+  }
+  const addDrafts = (cards: { title: string; text: string; keep: boolean }[]) => {
+    const kept = cards.filter((c) => c.keep)
+    if (!kept.length) return
+    const store = useStore.getState()
+    // beside the card, where there is room (DESIGN.md 72)
+    const spots = columnSpots(node, kept.length)
+    const ops: Op[] = []
+    const ids: string[] = []
+    kept.forEach((c, i) => {
+      const child = newNode({ pos: spots[i], parent: node.parent,
+                              type: 'text', title: c.title, content: { text: c.text }, provenance: 'ai' })
+      const edge = newEdge(child.id, node.id, { kind: 'part-of' })
+      ops.push({ kind: 'node.create', node: child }, { kind: 'edge.create', edge })
+      ids.push(child.id, edge.id)
+    })
+    store.run(ops)
+    spark(...ids)
+    store.say(`Added ${kept.length} cards - Ctrl+Z to undo`)
+    close()
+  }
+  const findRelated = async () => {
+    if (!boardId) return
+    setView({ at: 'finding' })
+    try {
+      const got = await api.relatedCards(boardId, node.id)
+      setView(got.results.length ? { at: 'related', cards: got.results, linked: [] }
+        : { at: 'said', note: 'No other cards on this board seem to belong with this one.' })
+    } catch (e: any) {
+      setView({ at: 'said', note: e.message || 'Could not search the board' })
+    }
+  }
+
+  if (view.at === 'breaking' || view.at === 'finding') return (
+    <div ref={root} className="tools-menu list ai wide">
+      <div className="tools-wait"><span className="tools-spin" />
+        {view.at === 'breaking' ? 'Breaking it into cards…' : 'Looking for related cards…'}</div>
+    </div>
+  )
+  if (view.at === 'said') return (
+    <div ref={root} className="tools-menu list ai wide">
+      <div className="tools-note">{view.note}</div>
+      <button className="tools-item" onClick={() => setView({ at: 'menu' })}>
+        <Icon name="undo" size={15} /> Back
+      </button>
+    </div>
+  )
+  if (view.at === 'break') {
+    const n = view.cards.filter((c) => c.keep).length
+    return (
+      <div ref={root} className="tools-menu list ai wide">
+        <div className="tools-label">New cards, linked to this one - untick any you don't want</div>
+        <div className="tools-drafts">
+          {view.cards.map((c, i) => (
+            <label key={i} className={`tools-draft ${c.keep ? '' : 'off'}`}>
+              <input type="checkbox" checked={c.keep} onChange={() => setView({
+                ...view, cards: view.cards.map((x, j) => (j === i ? { ...x, keep: !x.keep } : x)) })} />
+              <span><b>{c.title}</b>{c.text && c.text !== c.title ? <em>{c.text}</em> : null}</span>
+            </label>
+          ))}
+        </div>
+        <div className="tools-actions">
+          <button className="tools-plain" onClick={() => setView({ at: 'menu' })}>Cancel</button>
+          <button className="tools-go" disabled={!n} onClick={() => addDrafts(view.cards)}>
+            Add {n} {n === 1 ? 'card' : 'cards'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+  if (view.at === 'related') return (
+    <div ref={root} className="tools-menu list ai wide">
+      <div className="tools-label">Cards that belong with this one</div>
+      <div className="tools-drafts">
+        {view.cards.map((c) => {
+          const done = view.linked.includes(c.id)
+          return (
+            <div key={c.id} className="tools-found">
+              <button className="tools-found-card" title="Go to this card" onClick={() => revealCard(c.id)}>
+                <b>{c.title}</b>{c.snippet ? <em>{c.snippet}</em> : null}
+              </button>
+              <button className={`tools-link ${done ? 'done' : ''}`} disabled={done}
+                onClick={() => { connect(node.id, c.id); setView({ ...view, linked: [...view.linked, c.id] }) }}>
+                {done ? <><Icon name="check" size={13} /> Linked</> : <><Icon name="link" size={13} /> Link</>}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+  return (
+    <div ref={root} className="tools-menu list ai">
+      <button className="tools-item" disabled={!hasText} onClick={() => ask(ASK_ABOUT.summary)}>
+        <Icon name="type" size={15} /> Summarise
+      </button>
+      <button className="tools-item" disabled={!hasText} onClick={() => ask(ASK_ABOUT.explain)}>
+        <Icon name="explain" size={15} /> Explain this card
+      </button>
+      <button className="tools-item" disabled={!hasText} onClick={() => ask(ASK_ABOUT.quiz)}>
+        <Icon name="bulb" size={15} /> Quiz me on this
+      </button>
+      <button className="tools-item" disabled={!hasText} onClick={() => ask(ASK_ABOUT.funfact)}>
+        <Icon name="sparkle" size={15} /> Fun fact
+      </button>
+      <span className="tools-rule" />
+      <button className="tools-item" disabled={!String(node.content.text ?? '').trim()}
+        onClick={() => void breakUp()}>
+        <Icon name="branch" size={15} /> Break it into cards
+      </button>
+      <button className="tools-item" disabled={!hasText} onClick={() => void findRelated()}>
+        <Icon name="search" size={15} /> Find related cards
+      </button>
+      <span className="tools-rule" />
+      <FixButton node={node} labelled after={close} />
+      <AskButton id={node.id} group={node.type === 'meta'} labelled after={close} />
+    </div>
+  )
+}
+
+/** The selected card's tools (DESIGN.md 71): one compact bar just above the
+ *  card - colour, text size, AI, connect. Each button opens only what
+ *  belongs to it, above the bar, so the card stays in view. In xyflow's node
+ *  toolbar, so it keeps one size at any zoom and shows only while this card
+ *  alone is selected. */
+function CardTools({ node, selected }: { node: MNode; selected?: boolean }) {
+  const [menu, setMenu] = useState<Menu | null>(null)
   const any = useRef<HTMLInputElement>(null)
-  useEffect(() => { if (!selected) { setOpen(false); setSizeOpen(false) } }, [selected])
+  useEffect(() => { if (!selected) setMenu(null) }, [selected])
   // the full picker commits once, when it is closed - not an op for every
   // step of a drag across the colour field
   useEffect(() => {
@@ -232,131 +543,85 @@ function Looks({ node, selected }: { node: MNode; selected?: boolean }) {
     return () => el.removeEventListener('change', done)
   })
   const size = sizeOf(node)
-  const listKind = detectList(bodyText(node))
+  const nearest = NAMED_SIZES.reduce((m, x) => (Math.abs(x.size - size) < Math.abs(m.size - size) ? x : m))
   const tone: NodeTone = node.style.tone ?? 'accent'
   const colour = node.style.color
   const own = !!colour && !NODE_COLOURS.slice(0, 6).includes(colour)
+  const flip = (m: Menu) => setMenu((v) => (v === m ? null : m))
+  const close = () => setMenu(null)
+  // a menu opens above the bar, so the card stays in view - unless the top
+  // of the window would cut it off; then it opens below, over the card
+  const bar = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const m = bar.current?.querySelector<HTMLElement>(':scope > .tools-menu')
+    if (!m) return
+    m.classList.remove('below')
+    if (m.getBoundingClientRect().top < 8) m.classList.add('below')
+  })
+  const btn = (m: Menu) => `tools-btn ${menu === m ? 'open' : ''}`
   return (
-    <NodeToolbar position={Position.Right} align="start" offset={8}
-      className="card-looks nodrag nopan">
-      <button className={`looks-dot ${open ? 'on' : ''}`} title="Colour and text"
-        aria-label="Colour and text" aria-expanded={open}
+    <NodeToolbar position={Position.Top} align="start" offset={16}
+      className="card-tools-bar nodrag nopan">
+      <div ref={bar} className="tools-bar" role="toolbar" aria-label="This card"
         style={{ ['--node-color' as string]: accentOf(node) }}
-        onClick={() => setOpen((v) => !v)} />
-      {open && (
-        <div className="looks-strip" onMouseLeave={() => setSizeOpen(false)}>
-          <div className="looks-colours">
+        onDoubleClick={(e) => e.stopPropagation()}>
+        <button className={btn('colour')} title="Colour" aria-expanded={menu === 'colour'}
+          onClick={() => flip('colour')}>
+          <span className="tools-dot" />
+        </button>
+        <button className={`${btn('text')} text`} title="Text size"
+          aria-expanded={menu === 'text'} onClick={() => flip('text')}>Aa</button>
+        <button className={btn('ai')} title="Fix the writing, ask about it"
+          aria-expanded={menu === 'ai'} onClick={() => flip('ai')}>
+          <Icon name="sparkle" size={16} />
+        </button>
+        <span className="sep" />
+        <button className="tools-btn" title="Connect to another card - then click it  (c)"
+          onClick={() => useUI.getState().set('linking', { sourceId: node.id })}>
+          <Icon name="link" size={15} />
+        </button>
+
+        {menu === 'colour' && (
+          <div className="tools-menu colours">
             {NODE_COLOURS.slice(0, 6).map((c) => (
-              <button key={c} className={`looks-swatch ${colour === c ? 'on' : ''}`}
-                title="Colour" style={{ ['--sw' as string]: c }}
+              <button key={c} className={`tools-swatch ${colour === c ? 'on' : ''}`}
+                title="Colour" style={{ background: c }}
                 onClick={() => setStyle(node, { color: c })} />
             ))}
-            <label className={`looks-swatch any ${own ? 'on' : ''}`} title="Any colour"
-              style={own ? { ['--sw' as string]: colour } : undefined}>
+            <label className={`tools-swatch any ${own ? 'on' : ''}`} title="Any colour"
+              style={own ? { background: colour } : undefined}>
               <input ref={any} type="color" value={colour && colour.startsWith('#') ? colour : '#8a8f98'}
                 onChange={() => { /* committed on change, above */ }} />
             </label>
-            <button className="looks-swatch none" title="Default colour"
+            <button className="tools-swatch none" title="Default colour"
               onClick={() => setStyle(node, { color: undefined })}>
               <Icon name="x" size={11} />
             </button>
+            <span className="sep" />
+            <span className="tone-group" title="How far the colour carries">
+              {TONES.map((t) => (
+                <button key={t.key} className={`tone-chip ${t.key} ${tone === t.key ? 'on' : ''}`}
+                  title={t.label} aria-label={t.label}
+                  onClick={() => setStyle(node, { tone: t.key })} />
+              ))}
+            </span>
           </div>
-          <span className="looks-sep" />
-          <span className="tone-group" title="How far the colour carries">
-            {TONES.map((t) => (
-              <button key={t.key} className={`tone-chip ${t.key} ${tone === t.key ? 'on' : ''}`}
-                title={t.label} aria-label={t.label}
-                style={{ ['--node-color' as string]: accentOf(node) }}
-                onClick={() => setStyle(node, { tone: t.key })} />
-            ))}
-          </span>
-          <span className="looks-sep" />
-          <span className="size-group">
-            <button className="icon-btn" title="Smaller text" aria-label="Smaller text"
-              onClick={() => setStyle(node, { fontSize: Math.max(11, size - 1) })}>
-              <span className="size-a small">A</span>
-            </button>
-            <button className="size-value" title="Pick a text size"
-              onClick={() => setSizeOpen((v) => !v)}>{size}</button>
-            <button className="icon-btn" title="Larger text" aria-label="Larger text"
-              onClick={() => setStyle(node, { fontSize: Math.min(34, size + 1) })}>
-              <span className="size-a big">A</span>
-            </button>
-            {sizeOpen && (
-              <div className="size-menu">
-                {SIZES.map((s) => (
-                  <button key={s} className={s === size ? 'on' : ''}
-                    onClick={() => { setStyle(node, { fontSize: s }); setSizeOpen(false) }}>
-                    <span className="sample" style={{ fontSize: Math.min(s, 19) }}>A</span>
-                    <span className="n">{s}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </span>
-          <span className="looks-sep" />
-          <span className="looks-lists">
-            <button className={`icon-btn ${listKind === 'bullet' ? 'on' : ''}`} title="Bullet list"
-              onClick={() => setBodyList(node, listKind === 'bullet' ? 'none' : 'bullet')}>
-              <Icon name="bullets" size={15} />
-            </button>
-            <button className={`icon-btn ${listKind === 'number' ? 'on' : ''}`} title="Numbered list"
-              onClick={() => setBodyList(node, listKind === 'number' ? 'none' : 'number')}>
-              <Icon name="numbers" size={15} />
-            </button>
-          </span>
-        </div>
-      )}
+        )}
+        {menu === 'text' && (
+          <div className="tools-menu list text">
+            <div className="tools-label">Size</div>
+            <div className="tools-sizes">
+              {NAMED_SIZES.map((x) => (
+                <button key={x.label} className={x === nearest ? 'on' : ''}
+                  title={`${x.size} px`} style={{ fontSize: 10 + x.size * 0.25 }}
+                  onClick={() => setStyle(node, { fontSize: x.size })}>{x.label}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {menu === 'ai' && <AiMenu node={node} close={close} />}
+      </div>
     </NodeToolbar>
-  )
-}
-
-/** What can be done to the selected card (DESIGN.md 71): a slim pill that
- *  comes down from the top of the canvas while one card is selected - not a
- *  panel over the cards above it. New card actions join this bar. */
-export function CardBar({ id }: { id: string }) {
-  const node = useStore((s) => s.nodes[id])
-  const enter = useStore((s) => s.enter)
-  if (!node) return null
-  return (
-    <div className="card-bar nodrag nopan" role="toolbar" aria-label="This card"
-      onDoubleClick={(e) => e.stopPropagation()}>
-      {node.type === 'meta' && (
-        <>
-          <button className="icon-btn" title="Open" onClick={() => enter(node.id)}>
-            <Icon name="enter" size={15} />
-          </button>
-          <button className="icon-btn" title="Ungroup" onClick={() => unwrapMeta(node.id)}>
-            <Icon name="layers" size={15} />
-          </button>
-          <span className="sep" />
-        </>
-      )}
-      <FixButton node={node} />
-      <AskButton id={node.id} group={node.type === 'meta'} />
-      <span className="sep" />
-      <button className="icon-btn" title="Connect to another node — then click it  (c)"
-        onClick={() => useUI.getState().set('linking', { sourceId: node.id })}>
-        <Icon name="link" size={15} />
-      </button>
-      <button className="icon-btn" title="Add connected node" onClick={() => addConnected(node)}>
-        <Icon name="branch" size={15} />
-      </button>
-      {node.parent && (
-        <button className="icon-btn" title="Move out of this group"
-          onClick={() => moveOut(node.id)}>
-          <Icon name="up" size={15} />
-        </button>
-      )}
-      <button className="icon-btn" title="Duplicate (Ctrl+D)"
-        onClick={() => void duplicateNodes([node.id])}>
-        <Icon name="copy" size={15} />
-      </button>
-      <span className="sep" />
-      <button className="icon-btn danger" title="Delete  (Del)" onClick={() => deleteNodes([node.id])}>
-        <Icon name="trash" size={15} />
-      </button>
-    </div>
   )
 }
 
@@ -364,7 +629,7 @@ export function CardBar({ id }: { id: string }) {
 /** Fix spelling and grammar (DESIGN.md 56): the local model corrects the
  *  card's title and text - the person's words, not a rewrite - and the card
  *  changes in one undoable step. */
-function FixButton({ node }: { node: MNode }) {
+function FixButton({ node, labelled, after }: { node: MNode; labelled?: boolean; after?: () => void }) {
   const [busy, setBusy] = useState(false)
   const boardId = useStore((s) => s.boardId)
   const text = String(node.content.text ?? '')
@@ -385,6 +650,12 @@ function FixButton({ node }: { node: MNode }) {
       store.say(e.message || 'Could not fix the writing', true)
     } finally { setBusy(false) }
   }
+  if (labelled) return (
+    <button className={`tools-item fix-btn ${busy ? 'busy' : ''}`} disabled={busy}
+      onClick={() => { void fix().then(() => after?.()) }}>
+      <Icon name="wand" size={15} /> {busy ? 'Fixing the writing…' : 'Fix the writing'}
+    </button>
+  )
   return (
     <button className={`icon-btn fix-btn ${busy ? 'busy' : ''}`} disabled={busy}
       title={busy ? 'Fixing spelling and grammar…' : 'Fix spelling and grammar with AI'}
@@ -394,8 +665,17 @@ function FixButton({ node }: { node: MNode }) {
   )
 }
 
-function AskButton({ id, group }: { id: string; group: boolean }) {
+function AskButton({ id, group, labelled, after }: {
+  id: string; group: boolean; labelled?: boolean; after?: () => void
+}) {
   const inside = useAsk((s) => s.context.includes(id))
+  if (labelled) return (
+    <button className={`tools-item ${inside ? 'on' : ''}`}
+      onClick={() => { useAsk.getState().toggle(id); after?.() }}>
+      <Icon name="askAdd" size={15} />
+      {inside ? 'Take out of the chat' : group ? 'Ask about this group' : 'Ask about this card'}
+    </button>
+  )
   return (
     <button className={`icon-btn ${inside ? 'on' : ''}`}
       title={inside ? 'In context — click to take it out'
@@ -426,7 +706,7 @@ function Shell({ node, selected, resizable, children }: {
           handleStyle={{ width: 7, height: 7, borderRadius: 2, background: 'var(--mb-accent)' }}
           onResizeEnd={(_, p) => updateNode(node.id, { size: [p.width, p.height] })} />
       )}
-      <Looks node={node} selected={selected} />
+      <CardTools node={node} selected={selected} />
       <div className={`mb-node ${node.type} ${node.provenance === 'ai' ? 'ai' : ''}`
         + ` tone-${node.style.tone ?? 'accent'}${node.style.color ? ' has-colour' : ''}`
         + `${sparked ? ' spark' : ''}${node.size[1] ? ' sized-h' : ''}`

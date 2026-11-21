@@ -132,3 +132,11 @@ def test_a_lone_search_step_is_the_search_already_made_and_is_dropped():
     two = tasks.clean({"task": "compare", "steps": [{"do": "search", "what": "A"}, {"do": "search", "what": "B"}]},
                       {"search": "", "work_out": ""})
     assert len(two["steps"]) == 2
+
+
+def test_a_quiz_is_its_own_task_asked_one_question_at_a_time():
+    # DESIGN.md 72: read as "plan", a quiz came back as a plan for a quiz
+    plan = tasks.clean({"task": "Quiz", "steps": []}, {"search": "x"})
+    assert plan["task"] == "quiz"
+    note = tasks.task_note(plan, [])
+    assert "only the NEXT question" in note and "never its answer" in note

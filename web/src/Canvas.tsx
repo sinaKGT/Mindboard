@@ -16,7 +16,7 @@ import { revealCard, useAsk } from './askStore'
 import { edgeTypes } from './edges'
 import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
-import { CardBar, CLICK_SLOP, nodeTypes } from './nodes'
+import { CLICK_SLOP, nodeTypes, SelectionAi } from './nodes'
 import { ancestorAtLevel, currentParent, useStore } from './store'
 import { PlacedCheck } from './PlacedCheck'
 import { Shortcuts } from './Shortcuts'
@@ -867,9 +867,7 @@ function CanvasInner() {
         )}
         {selectionBox && (
           <ViewportPortal>
-            <div className="selection-bar nodrag nopan"
-              style={{ position: 'absolute', transform:
-                `translate(-50%,-100%) translate(${selectionBox.x}px, ${selectionBox.y - 14}px)` }}>
+            <Unzoomed x={selectionBox.x} y={selectionBox.y} className="selection-bar nodrag nopan">
               <span className="count">{selectedIds.length} selected</span>
               <span className="sep" />
               <button onClick={() => wrapSelection(selectedIds)}>
@@ -882,10 +880,11 @@ function CanvasInner() {
                 onClick={() => useAsk.getState().add(selectedIds)}>
                 <Icon name="askAdd" size={14} /> Ask
               </button>
+              <SelectionAi key={selectedIds.join()} ids={selectedIds} />
               <button className="danger" onClick={() => deleteNodes(selectedIds)}>
                 <Icon name="trash" size={14} />
               </button>
-            </div>
+            </Unzoomed>
           </ViewportPortal>
         )}
         {minimap && (
@@ -899,9 +898,6 @@ function CanvasInner() {
             }} />
         )}
       </ReactFlow>
-      {/* one card in hand: its actions in a pill at the top (DESIGN.md 71) */}
-      {selectedIds.length === 1 && nodes[selectedIds[0]] && !linking
-        ? <CardBar key={selectedIds[0]} id={selectedIds[0]} /> : null}
 
       <Shortcuts />
 
@@ -981,4 +977,21 @@ export function Canvas() {
 function ZoomLevel() {
   const pct = useFlow((s) => Math.round(s.transform[2] * 100))
   return <span className="zoom">{pct}%</span>
+}
+
+
+/** A bar placed on the board at (x, y) - centred above that point - that
+ *  keeps one size at any zoom, as the card's own bar does (DESIGN.md 72).
+ *  Reads the zoom itself, so the canvas does not redraw as it changes. */
+function Unzoomed({ x, y, className, children }: {
+  x: number; y: number; className: string; children: React.ReactNode
+}) {
+  const zoom = useFlow((s) => s.transform[2])
+  return (
+    <div className={className}
+      style={{ position: 'absolute', transformOrigin: '0 0', transform:
+        `translate(${x}px, ${y - 14 / zoom}px) scale(${1 / zoom}) translate(-50%, -100%)` }}>
+      {children}
+    </div>
+  )
 }

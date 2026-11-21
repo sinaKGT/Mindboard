@@ -31,8 +31,8 @@ export function freeSpot(pos: [number, number], parent: string | null,
   let [x, y] = pos
   for (let i = 0; i < 30; i++) {
     const overlaps = siblings.some((n) => {
-      const w = n.size[0] ?? GUESS_W
-      const h = n.size[1] ?? GUESS_H
+      const w = n.size[0] || GUESS_W
+      const h = n.size[1] || GUESS_H
       return x < n.pos[0] + w && x + size[0] > n.pos[0]
         && y < n.pos[1] + h && y + size[1] > n.pos[1]
     })
@@ -41,6 +41,34 @@ export function freeSpot(pos: [number, number], parent: string | null,
     y += 36
   }
   return [Math.round(x), Math.round(y)]
+}
+
+/** Free places for `count` new cards in a column beside `beside` (DESIGN.md
+ *  72): the first column to its right where they fit without covering a card,
+ *  starting level with it and going down past anything in the way; further
+ *  right if that column is crowded. A card's size is its own, or a guess
+ *  when it sizes itself to its content. */
+export function columnSpots(beside: MNode, count: number,
+                            size: [number, number] = [300, 130]): [number, number][] {
+  const siblings = Object.values(S().nodes).filter((n) => (n.parent ?? null) === (beside.parent ?? null))
+  const boxes = siblings.map((n) => [n.pos[0], n.pos[1], n.size[0] || GUESS_W, n.size[1] || GUESS_H])
+  const gap = 24
+  const clear = (x: number, y: number, taken: number[][]) => ![...boxes, ...taken].some(([bx, by, bw, bh]) =>
+    x < bx + bw + gap && x + size[0] + gap > bx && y < by + bh + gap && y + size[1] + gap > by)
+  const left = beside.pos[0] + (beside.size[0] || GUESS_W) + 100
+  for (let col = 0; col < 6; col++) {
+    const x = left + col * (size[0] + 80)
+    const taken: number[][] = []
+    let y = beside.pos[1]
+    for (let tries = 0; taken.length < count && tries < count * 6; tries++) {
+      if (clear(x, y, taken)) taken.push([x, y, size[0], size[1]])
+      y += size[1] + gap
+    }
+    if (taken.length === count) return taken.map(([tx, ty]) => [Math.round(tx), Math.round(ty)])
+  }
+  // nowhere clear nearby: a column past the furthest card on this level
+  const far = Math.max(...boxes.map(([bx, , bw]) => bx + bw), left) + 120
+  return Array.from({ length: count }, (_, i) => [Math.round(far), Math.round(beside.pos[1] + i * (size[1] + gap))])
 }
 
 export function addTextNode(pos: [number, number], parent: string | null): MNode {

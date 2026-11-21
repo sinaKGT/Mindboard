@@ -122,7 +122,11 @@ interface Ask {
   setExpanded(on: boolean): void
   setExplain(on: boolean): void
   setOwn(on: boolean): void
-  send(question: string, pictures?: PastedPicture[]): Promise<void>
+  /** `fresh`: sent without the conversation before it (a card action, DESIGN.md 72) */
+  send(question: string, pictures?: PastedPicture[], fresh?: boolean): Promise<void>
+  /** ask about chosen cards (DESIGN.md 72): they alone in context, on the board's
+   *  own conversation with the board on, and the question in plain words */
+  askAbout(ids: string[], question: string): void
   stop(): void
   /** file conversations, and which is shown - null for the board's own */
   branches: FileBranch[]
@@ -268,7 +272,16 @@ export const useAsk = create<Ask>()((set, get) => ({
     controller.abort()
   },
 
-  async send(question, pictures = []) {
+  askAbout(ids, question) {
+    const s = get()
+    if (s.busy) { useStore.getState().say('Still answering - try again when it is done', true); return }
+    if (s.active) get().show(null)
+    set({ context: ids, own: false, open: true })
+    save(get())
+    void get().send(question, [], true)
+  },
+
+  async send(question, pictures = [], fresh = false) {
     const s = get()
     const boardId = s.boardId
     if (!question.trim() && pictures.length) question = PICTURE_ONLY
@@ -285,13 +298,13 @@ export const useAsk = create<Ask>()((set, get) => ({
       const answer = s.turns[s.turns[i].role === 'user' ? i + 1 : i]
       return answer?.role === 'assistant' && answer.mode === 'own'
     }
-    const history = s.turns
+    const history = (fresh ? [] : s.turns)
       .filter((t, i) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done')
         && (!own || ownTurn(i)))
       .slice(-HISTORY_TURNS)
       .map((t) => ({ role: t.role, text: t.role === 'user' ? withSaid(t.text, t.said) : t.text }))
     // the cards earlier answers drew on stay in the conversation (DESIGN 34)
-    const keep = [...new Set(s.turns.flatMap((t) => (t.status === 'done' && t.cited) || []))]
+    const keep = [...new Set((fresh ? [] : s.turns).flatMap((t) => (t.status === 'done' && t.cited) || []))]
       .filter((id) => nodes[id]).slice(-40)
     // Explain more holds in either view - the header icon in the small one,
     // the chip in the full screen one

@@ -33,7 +33,7 @@ from typing import Callable, Iterator, Optional
 log = logging.getLogger(__name__)
 
 TASKS = ("answer", "summarize", "explain", "compare", "extract", "analyze", "rewrite",
-         "translate", "plan")
+         "translate", "plan", "quiz")
 STEPS_MAX = 4
 UNDERSTAND_SECONDS = 60.0      # past this, the question is answered as it stands
 STEP_SECONDS = 150.0           # one step; past this it is skipped
@@ -58,6 +58,19 @@ SHAPES = {
     "translate": "Give the translation only, faithfully, then nothing else but the NEXT: lines.",
     "plan": ("Lay out a plan: numbered steps in order, each one line with what to do and why; "
              "then the main risk or open point."),
+    # DESIGN.md 72: a quiz is a game played over several turns, not a plan for one
+    "quiz": ("Play the quiz, in a playful, encouraging voice. If the person has just answered a "
+             "question from earlier in this conversation, first say whether they got it right, "
+             "explain in one or two sentences from the cards (cited), and give the score so far. "
+             "Then ask only the NEXT question - one, never a list, and never its answer - or, "
+             "after the last question, give the final score with a cheer. Questions come only "
+             "from what the cards say, and each has exactly one right answer by the cards: in "
+             "multiple choice, the wrong choices must be plainly wrong by the cards - never "
+             "another true fact from them (a card listing three roles gives \"which is NOT "
+             "one of his roles?\" or asks for one role with the others left out). "
+             "The three NEXT: lines are three answers the person can pick for the question "
+             "just asked (its choices, when it is multiple choice) - one of them right - never "
+             "follow-up questions."),
 }
 
 ACTIONS = {
@@ -72,7 +85,8 @@ Reply with JSON only:
   "steps": [{{"do": "...", "what": "...", "uses": 0}}]}}
 
 - task: one of answer (a question to answer), summarize, explain, compare, extract
-  (list every X), analyze (assess, critique), rewrite, translate, plan.
+  (list every X), analyze (assess, critique), rewrite, translate, plan, quiz (they
+  want to be quizzed - or they are answering a quiz question asked just before).
 - about: what it is about, in a few words ("the pasted slide", "this file", "the
   cards about funding", "general knowledge").
 - output: the shape and length wanted, from their words - "short", "5 bullet

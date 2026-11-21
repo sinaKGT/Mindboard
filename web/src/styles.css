@@ -421,139 +421,118 @@ a.btn { text-decoration: none; }
 .mb-node.ghost:hover { opacity: 1; }
 .mb-node.ghost .body { padding: 7px 10px; }
 
-/* The selected card's actions (DESIGN.md 71): a slim pill that comes down
-   from the top of the canvas, centred - not a panel three rows tall over the
-   cards above the selected one. Raised, not flat: a lit top edge, a darker
-   lower one, and a soft shadow below, so it reads as an object over the
-   board; its buttons rise under the pointer and press in when clicked. */
-.card-bar, .looks-strip {
-  --lift-hi: color-mix(in srgb, #fff 14%, transparent);
-  --lift-lo: color-mix(in srgb, #000 28%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, #fff 7%, transparent), transparent 55%),
-    color-mix(in srgb, var(--mb-surface-2) 86%, transparent);
-  border: 1px solid color-mix(in srgb, var(--mb-border-strong) 80%, transparent);
-  box-shadow:
-    inset 0 1px 0 var(--lift-hi),
-    inset 0 -1px 0 var(--lift-lo),
-    0 1px 2px color-mix(in srgb, #000 25%, transparent),
-    0 10px 24px -8px color-mix(in srgb, #000 45%, transparent),
-    0 22px 48px -18px color-mix(in srgb, var(--mb-accent) 35%, transparent);
-  backdrop-filter: blur(14px) saturate(1.3);
+/* The selected card's tools (DESIGN.md 71): one compact bar just above the
+   card - colour, text size, AI, connect - in the app's floating-panel
+   surface. Each button opens its own small menu above the bar. */
+.card-tools-bar { z-index: 6; }
+.tools-bar {
+  position: relative; display: flex; align-items: center; gap: 2px; padding: 4px;
+  border-radius: 12px; white-space: nowrap;
+  background: var(--mb-surface-2); border: 1px solid var(--mb-border-strong);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent), var(--mb-shadow-lg);
+  animation: pop 130ms var(--mb-ease);
 }
-.card-bar {
-  position: absolute; top: 14px; left: 50%; z-index: 7;
-  display: flex; align-items: center; gap: 3px; padding: 5px 7px;
-  border-radius: 999px; white-space: nowrap;
-  transform: translateX(-50%);
-  animation: cardBarIn 200ms cubic-bezier(.2, .9, .25, 1.15);
+.tools-bar .sep { width: 1px; height: 18px; margin: 0 3px; background: var(--mb-border); }
+.tools-btn {
+  display: grid; place-items: center; min-width: 32px; height: 32px; padding: 0 6px;
+  border-radius: 8px; color: var(--mb-text-dim);
+  transition: background 120ms var(--mb-ease), color 120ms var(--mb-ease);
 }
-@keyframes cardBarIn {
-  from { opacity: 0; transform: translate(-50%, -14px) scale(.96); }
+.tools-btn:hover, .tools-btn.open { color: var(--mb-text); background: var(--mb-surface-3); }
+.tools-btn.text { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+.tools-dot {
+  width: 16px; height: 16px; border-radius: 50%; background: var(--node-color);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #000 22%, transparent);
 }
-.card-bar .icon-btn, .looks-strip .icon-btn {
-  position: relative; color: var(--mb-text-dim);
-  transition: transform 140ms var(--mb-ease), background 140ms var(--mb-ease),
-    box-shadow 140ms var(--mb-ease), color 140ms var(--mb-ease);
+.tools-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 7;
+  background: var(--mb-surface-2); border: 1px solid var(--mb-border-strong);
+  border-radius: 12px; box-shadow: var(--mb-shadow-lg); animation: pop 130ms var(--mb-ease);
 }
-.card-bar .icon-btn { width: 34px; height: 34px; border-radius: 999px; }
-.card-bar .icon-btn:hover, .looks-strip .icon-btn:hover {
-  color: var(--mb-text); transform: translateY(-1.5px);
-  background: linear-gradient(180deg, color-mix(in srgb, #fff 10%, var(--mb-surface-3)), var(--mb-surface-3));
-  box-shadow: inset 0 1px 0 var(--lift-hi), 0 4px 10px -4px color-mix(in srgb, #000 55%, transparent);
+.tools-menu.colours { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.tools-menu.colours .sep { width: 1px; height: 18px; background: var(--mb-border); }
+.tools-menu .tone-group { gap: 4px; padding: 0; }
+.tools-menu .tone-chip { width: 18px; height: 18px; border-radius: 5px; }
+.tools-swatch {
+  position: relative; width: 20px; height: 20px; border-radius: 50%; padding: 0; flex: none;
+  display: grid; place-items: center; cursor: pointer; color: var(--mb-text-faint);
+  border: 1px solid color-mix(in srgb, #000 22%, transparent);
+  transition: transform 120ms var(--mb-ease);
 }
-.card-bar .icon-btn:active, .looks-strip .icon-btn:active {
-  transform: translateY(0) scale(.94);
-  box-shadow: inset 0 2px 4px color-mix(in srgb, #000 40%, transparent);
+.tools-swatch:hover { transform: scale(1.12); }
+.tools-swatch.on { box-shadow: 0 0 0 2px var(--mb-surface-2), 0 0 0 3.5px var(--mb-accent); }
+.tools-swatch.any:not(.on) {
+  background: conic-gradient(#f97583, #f6c177, #9ece6a, #4fd1c5, #7aa2f7, #bb9af7, #f97583);
 }
-.card-bar .icon-btn.on, .looks-strip .icon-btn.on {
-  color: var(--mb-accent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--mb-accent) 24%, transparent),
-    color-mix(in srgb, var(--mb-accent) 12%, transparent));
-  box-shadow: inset 0 1px 0 var(--lift-hi), 0 0 0 1px color-mix(in srgb, var(--mb-accent) 45%, transparent);
+.tools-swatch.any input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; border: 0; padding: 0; }
+.tools-swatch.none { background: transparent; border: 1px dashed var(--mb-border-strong); }
+.tools-swatch.none:hover { color: var(--mb-text); border-color: var(--mb-text-faint); }
+.tools-menu.list { display: flex; flex-direction: column; padding: 6px; min-width: 200px; }
+.tools-menu.text { left: 34px; min-width: 0; }
+.tools-menu.ai { left: 68px; }
+.tools-label { padding: 4px 8px 2px; font-size: 11px; color: var(--mb-text-faint); }
+.tools-sizes { display: flex; gap: 4px; padding: 2px 4px 2px; }
+.tools-sizes button { min-width: 38px; }
+.tools-sizes button {
+  flex: 1; height: 30px; border-radius: 8px; font-weight: 600; color: var(--mb-text-dim);
+  transition: background 120ms var(--mb-ease), color 120ms var(--mb-ease);
 }
-.card-bar .sep, .looks-sep {
-  background: linear-gradient(var(--lift-lo), var(--lift-lo)) left / 1px 100% no-repeat,
-    linear-gradient(var(--lift-hi), var(--lift-hi)) right / 1px 100% no-repeat;
+.tools-sizes button:hover { background: var(--mb-surface-3); color: var(--mb-text); }
+.tools-sizes button.on { background: var(--mb-accent-soft); color: var(--mb-accent); }
+.tools-rule { height: 1px; margin: 4px 2px; background: var(--mb-border); }
+.tools-item {
+  display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px;
+  border-radius: 8px; font-size: 13px; color: var(--mb-text); text-align: left;
+  transition: background 120ms var(--mb-ease);
 }
-.card-bar .sep { width: 2px; height: 20px; margin: 0 4px; }
-.card-bar .icon-btn.danger:hover {
-  color: var(--mb-danger);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--mb-danger) 22%, transparent),
-    color-mix(in srgb, var(--mb-danger) 10%, transparent));
+.tools-item svg { color: var(--mb-text-dim); flex: none; }
+.tools-item:hover { background: var(--mb-surface-3); }
+.tools-item.on, .tools-item.on svg { color: var(--mb-accent); }
+.tools-item kbd { margin-left: auto; font: inherit; font-size: 11px; color: var(--mb-text-faint); }
+.tools-item.danger, .tools-item.danger svg { color: var(--mb-danger); }
+.tools-item.danger:hover { background: #f9758322; }
+.tools-item:disabled { opacity: .45; cursor: default; }
+.tools-item:disabled:hover { background: none; }
+/* the AI menu's drafts and finds (DESIGN.md 72) */
+.tools-menu.ai.wide { width: 320px; }
+.tools-wait { display: flex; align-items: center; gap: 10px; padding: 10px; font-size: 13px; color: var(--mb-text-dim); }
+.tools-spin {
+  width: 14px; height: 14px; border-radius: 50%; flex: none;
+  border: 2px solid var(--mb-border-strong); border-top-color: var(--mb-accent);
+  animation: toolsSpin 700ms linear infinite;
 }
-
-/* The card's look: a dot off its top right corner, in its colour, and the
-   strip it opens - kept at one size at any zoom by xyflow's node toolbar.
-   The dot and the swatches are drawn as small glossy beads: a highlight up
-   and to the left, the colour, a darker rim, a shadow under. */
-.card-looks { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; z-index: 6; }
-.looks-dot, .looks-swatch {
-  --sw: var(--node-color);
-  background:
-    radial-gradient(circle at 34% 28%, color-mix(in srgb, #fff 75%, transparent) 0 8%, transparent 42%),
-    radial-gradient(circle at 50% 60%, var(--sw) 45%, color-mix(in srgb, var(--sw) 62%, #000) 100%);
-  box-shadow:
-    inset 0 -2px 3px color-mix(in srgb, #000 30%, transparent),
-    0 2px 4px color-mix(in srgb, #000 40%, transparent),
-    0 4px 10px -3px color-mix(in srgb, var(--sw) 60%, transparent);
+@keyframes toolsSpin { to { transform: rotate(360deg); } }
+.tools-note { padding: 8px 10px; font-size: 13px; color: var(--mb-text-dim); white-space: normal; line-height: 1.45; }
+.tools-menu.ai .tools-label { white-space: normal; padding: 4px 8px 6px; }
+.tools-drafts { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow-y: auto; }
+.tools-draft {
+  display: flex; align-items: flex-start; gap: 9px; padding: 7px 8px; border-radius: 8px;
+  cursor: pointer; white-space: normal; transition: background 120ms var(--mb-ease), opacity 120ms;
 }
-.looks-dot {
-  width: 20px; height: 20px; border-radius: 50%; padding: 0; border: 0;
-  transition: transform 160ms var(--mb-spring, var(--mb-ease)), box-shadow 160ms var(--mb-ease);
+.tools-draft:hover { background: var(--mb-surface-3); }
+.tools-draft.off { opacity: .5; }
+.tools-draft input { margin-top: 2px; accent-color: var(--mb-accent); flex: none; }
+.tools-draft span, .tools-found-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; }
+.tools-draft b, .tools-found-card b { font-size: 13px; font-weight: 600; color: var(--mb-text); }
+.tools-draft em, .tools-found-card em {
+  font-style: normal; font-size: 12px; color: var(--mb-text-dim); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.looks-dot:hover { transform: translateY(-1px) scale(1.15); }
-.looks-dot.on {
-  box-shadow: inset 0 -2px 3px color-mix(in srgb, #000 30%, transparent),
-    0 0 0 2px var(--mb-surface-2), 0 0 0 4px var(--mb-accent), 0 6px 14px -4px var(--mb-accent);
+.tools-actions { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 4px 2px; }
+.tools-plain, .tools-go { height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; }
+.tools-plain { color: var(--mb-text-dim); }
+.tools-plain:hover { background: var(--mb-surface-3); color: var(--mb-text); }
+.tools-go { background: var(--mb-accent); color: var(--mb-bg); font-weight: 600; }
+.tools-go:disabled { opacity: .4; cursor: default; }
+.tools-found { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; border-radius: 8px; white-space: normal; }
+.tools-found:hover { background: var(--mb-surface-3); }
+.tools-found-card { flex: 1; padding: 3px 0; }
+.tools-link {
+  display: inline-flex; align-items: center; gap: 5px; flex: none; height: 28px; padding: 0 10px;
+  border-radius: 8px; font-size: 12px; color: var(--mb-accent); border: 1px solid color-mix(in srgb, var(--mb-accent) 40%, transparent);
 }
-.looks-strip {
-  --lift-hi: color-mix(in srgb, #fff 14%, transparent);
-  --lift-lo: color-mix(in srgb, #000 28%, transparent);
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  width: 80px; padding: 10px 7px; border-radius: 18px;
-  animation: stripIn 180ms cubic-bezier(.2, .9, .25, 1.15); transform-origin: top left;
-}
-@keyframes stripIn { from { opacity: 0; transform: translateY(-6px) scale(.94); } }
-.looks-colours { display: grid; grid-template-columns: repeat(2, 24px); gap: 9px; justify-content: center; }
-.looks-swatch {
-  position: relative; width: 24px; height: 24px; border-radius: 50%; padding: 0; border: 0;
-  display: grid; place-items: center; cursor: pointer; color: var(--mb-text-dim);
-  transition: transform 160ms var(--mb-spring, var(--mb-ease)), box-shadow 160ms var(--mb-ease);
-}
-.looks-swatch:hover { transform: translateY(-2px) scale(1.12); }
-.looks-swatch:active { transform: scale(.92); }
-.looks-swatch.on {
-  box-shadow: inset 0 -2px 3px color-mix(in srgb, #000 30%, transparent),
-    0 0 0 2px var(--mb-surface-2), 0 0 0 3.5px var(--mb-accent),
-    0 4px 10px -3px color-mix(in srgb, var(--sw) 60%, transparent);
-}
-.looks-swatch.any:not(.on) {
-  background:
-    radial-gradient(circle at 34% 28%, color-mix(in srgb, #fff 75%, transparent) 0 8%, transparent 42%),
-    radial-gradient(circle, transparent 50%, color-mix(in srgb, #000 30%, transparent) 100%),
-    conic-gradient(#f97583, #f6c177, #9ece6a, #4fd1c5, #7aa2f7, #bb9af7, #f97583);
-}
-.looks-swatch.any input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; border: 0; padding: 0; }
-.looks-swatch.none {
-  --sw: var(--mb-surface-3);
-  color: var(--mb-text);
-}
-.looks-sep { width: 100%; height: 2px;
-  background: linear-gradient(var(--lift-lo), var(--lift-lo)) top / 100% 1px no-repeat,
-    linear-gradient(var(--lift-hi), var(--lift-hi)) bottom / 100% 1px no-repeat; }
-.looks-strip .tone-group { padding: 0; gap: 4px; }
-.looks-strip .tone-chip {
-  width: 19px; height: 19px; border-radius: 6px;
-  box-shadow: inset 0 1px 0 var(--lift-hi), 0 2px 4px -1px color-mix(in srgb, #000 45%, transparent);
-}
-.looks-strip .tone-chip:hover { transform: translateY(-1.5px) scale(1.08); }
-.looks-strip .size-group { gap: 0; }
-.looks-strip .size-group .icon-btn { width: 22px; height: 26px; border-radius: 8px; }
-.looks-strip .size-group .size-value { min-width: 24px; padding: 0 2px; }
-.looks-strip .size-menu { top: 0; left: calc(100% + 12px); transform: none; }
-.looks-lists { display: flex; gap: 4px; }
-.looks-lists .icon-btn { width: 30px; height: 30px; border-radius: 10px; }
+.tools-link:hover { background: var(--mb-accent-soft); }
+.tools-link.done { color: var(--mb-text-faint); border-color: var(--mb-border); }
 
 /* ----------------------------------------------------------------- edges -- */
 .mb-edge-path { fill: none; stroke: var(--mb-edge); stroke-width: 1.6;
@@ -885,7 +864,6 @@ a.btn { text-decoration: none; }
 
 /* ----------------------------------------------------------- image export -- */
 /* Chrome, ports and live video have no business in an exported picture. */
-.stage.exporting .card-bar,
 .stage.exporting .react-flow__node-toolbar,
 .stage.exporting .react-flow__handle,
 .stage.exporting .react-flow__node[data-id^="ghost:"],
@@ -1894,3 +1872,17 @@ button.file-tab { padding: 5px 10px; gap: 5px; }
   linear-gradient(color-mix(in srgb, var(--g) 45%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--g) 45%, transparent) 1px, transparent 1px);
   background-size: 24px 24px, 24px 24px, 6px 6px, 6px 6px; }
 .pattern-swatch.cross { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M5 3v4M3 5h4' stroke='%23888' stroke-width='1'/%3E%3C/svg%3E"); background-size: 10px 10px; }
+/* no room above: the menu opens below the bar, over the card */
+.tools-menu.below { bottom: auto; top: calc(100% + 6px); }
+/* the AI menu for several cards, from the selection bar (DESIGN.md 72) */
+.sel-ai { position: relative; display: inline-flex; }
+.selection-bar .sel-ai > button.on { background: var(--mb-accent-soft); color: var(--mb-accent); }
+.sel-ai-menu { left: 50%; transform: translateX(-50%); white-space: normal; text-align: left; }
+.sel-ai-menu .tools-item { width: 100%; }
+.tools-merged { display: flex; flex-direction: column; gap: 6px; padding: 0 4px; }
+.tools-merged input, .tools-merged textarea {
+  width: 100%; padding: 7px 9px; border-radius: 8px; font: inherit; font-size: 13px; color: var(--mb-text);
+  background: var(--mb-surface); border: 1px solid var(--mb-border-strong); resize: vertical;
+}
+.tools-merged input { font-weight: 600; }
+.tools-merged input:focus, .tools-merged textarea:focus { outline: none; border-color: var(--mb-accent); }
