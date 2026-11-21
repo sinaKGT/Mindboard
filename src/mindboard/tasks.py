@@ -67,7 +67,9 @@ SHAPES = {
              "from what the cards say, and each has exactly one right answer by the cards: in "
              "multiple choice, the wrong choices must be plainly wrong by the cards - never "
              "another true fact from them (a card listing three roles gives \"which is NOT "
-             "one of his roles?\" or asks for one role with the others left out). "
+             "one of his roles?\" or asks for one role with the others left out). Before asking, "
+             "find the right answer written in the cards; if it is not there - what a title "
+             "stands for, what kind of organisation it is - ask about something else. "
              "The three NEXT: lines are three answers the person can pick for the question "
              "just asked (its choices, when it is multiple choice) - one of them right - never "
              "follow-up questions."),

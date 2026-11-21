@@ -224,7 +224,8 @@ const ASK_ABOUT = {
   summary: 'Summarise this card in a few short lines.',
   explain: 'Explain this card in plain words, with an example or two.',
   quiz: "Let's play a fun quiz on this card! Ask me question 1 of 3 right now - just that "
-    + 'one question (multiple choice or a short answer), then stop and wait for my answer. '
+    + 'one question (multiple choice with exactly one right choice, or a short answer), then '
+    + 'stop and wait for my answer. '
     + 'When I answer, tell me cheerfully whether I got it right, explain briefly from the '
     + 'card, keep score, and ask the next. After question 3, give my final score.',
   funfact: 'Tell me one fun fact from this card, in one or two playful sentences - only from '
@@ -245,7 +246,8 @@ type AiView =
 const ASK_ABOUT_MANY = {
   summary: 'Summarise these cards together in a few short lines.',
   quiz: "Let's play a fun quiz on these cards! Ask me question 1 of 4 right now - just that "
-    + 'one question (multiple choice or a short answer), then stop and wait for my answer. '
+    + 'one question (multiple choice with exactly one right choice, or a short answer), then '
+    + 'stop and wait for my answer. '
     + 'When I answer, tell me cheerfully whether I got it right, explain briefly from the '
     + 'cards, keep score, and ask the next. After question 4, give my final score.',
 }

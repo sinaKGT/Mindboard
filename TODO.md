@@ -2,7 +2,8 @@
 
 Only what is left, in the order we plan to take it. Each item says what was
 asked, what was decided, and what done looks like.
-Last updated 2026-11-21 - A and B done (DESIGN.md §70-71); next: C.
+Last updated 2026-11-21 - A and B done (DESIGN.md §70-71), card AI added
+(§72), v2 merged into main (PR #2); next: C.
 
 ---
 
@@ -26,6 +27,13 @@ Last updated 2026-11-21 - A and B done (DESIGN.md §70-71); next: C.
 - **Export picture wrong when the board is zoomed** (`exportImage.ts`).
   To confirm when we start: what exactly goes wrong (cut off, blurred,
   shifted) and whether this is the export or something else.
+- **Lists in the card editor.** Bullet and numbered lists left the card bar's
+  Aa menu (DESIGN.md §71) to go into the editor; the editor does not have them
+  yet. Done looks like: a list button (or `- ` / `1. ` typed at a line start)
+  while editing a card, as an op like any edit.
+- **A way to move a card out of its group.** "Move out of this group" lost its
+  button with the card bar's "more" menu (§71); nothing else does it now.
+  To decide: where it goes (dragging out, a key, or back on the bar).
 
 ## E. Search
 
@@ -54,8 +62,6 @@ Last updated 2026-11-21 - A and B done (DESIGN.md §70-71); next: C.
 - **A guide for coding agents** (`AGENTS.md`): how an AI agent installs and
   sets up Mindboard on a new computer by itself - steps, checks, what to ask
   the person.
-- **Merge `v2` into `main`** - after the fixes above, with the tests and
-  build passing.
 
 ---
 

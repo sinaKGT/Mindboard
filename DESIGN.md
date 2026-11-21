@@ -3731,4 +3731,22 @@ right with a 🎉, gave 1/3 and asked question 2.
   the fallback now offers a card's separate lines when it has neither list
   items nor paragraphs.
 
-290 tests.
+**The quiz, played through** (asked after the weak spots): the three NEXT
+lines meant to be the answers to pick never came - told to stop and wait for
+an answer, the model writes none. So the server reads them from the question:
+an answer with no NEXT lines that ends with a run of two to four lettered
+choices, A) to D) in order, close to the end (`ask.choices`), sends those
+as its offers, marked `choices`; the page heads them "Your answer" and a tap
+sends the choice as the answer. Played to the end with the real model: three
+questions answered by tapping, a kind correction for a wrong pick, a score
+after each, a final score; then the offers went back to questions. Two
+questions in that run were not answerable from the card (what "MBE" stands
+for; what kind of company Nottingham City Transport is - with no right
+choice). The quiz shape now says to find the right answer written in the
+cards before asking, and the request itself asks for exactly one right choice;
+the next full run had three answerable questions, and three of four first
+questions on two selected cards had exactly one right choice (the fourth run's
+selection could not be confirmed). Summarise these, on the same two cards:
+4.5 s, the people, the visits and the reports.
+
+291 tests.
