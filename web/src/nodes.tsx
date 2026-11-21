@@ -301,6 +301,13 @@ function AiAnswer({ ids, act, back }: { ids: string[]; act: Exclude<Act, 'quiz'>
   }, [boardId, act, ids.join()])
 
   const shown = text.replace(/\n*NEXT:[\s\S]*$/, '').trim()
+    // the panel heads it already: no "Fun fact:" or "Summary:" said again
+    .replace(new RegExp(`^\\**(${ANSWER_HEAD[act]}|fun fact|summary|explanation)\\**\\s*[:\\-–]\\s*`, 'i'), '')
+    // "The most delightful detail is that ..." - the fact, said
+    .replace(/^the most \w+ (detail|fact|thing)( here)? is( that)?\s+/i, '')
+    .replace(/^./, (c) => c.toUpperCase())
+    // a full stop after a citation, alone on a line: moved before it
+    .replace(/\s*(\[\[[0-9A-Za-z]{26}\]\])\s*([.!?])/g, '$2 $1')
   const addCard = () => {
     const store = useStore.getState()
     const from = store.nodes[ids[0]]
@@ -421,6 +428,55 @@ function AiQuiz({ ids, back }: { ids: string[]; back: () => void }) {
   )
 }
 
+/** Beautify (DESIGN.md 78): the card's text laid out as Markdown - lists, a
+ *  table, bold labels - with the same words; shown first, applied only when
+ *  the person says so, as one undoable change. */
+function AiBeautify({ node, back }: { node: MNode; back: () => void }) {
+  const boardId = useStore((s) => s.boardId)
+  const [laid, setLaid] = useState<string | null>(null)
+  const [note, setNote] = useState('')
+  const text = String(node.content.text ?? '')
+  useEffect(() => {
+    if (!boardId) return
+    let live = true
+    api.beautify(boardId, { title: node.title, text })
+      .then((got) => {
+        if (!live) return
+        if (got.changed) setLaid(got.text)
+        else setNote('It already reads well - nothing to change.')
+      })
+      .catch((e: any) => { if (live) setNote(e.message || 'Could not beautify this card') })
+    return () => { live = false }
+  }, [boardId, node.id])
+  const apply = () => {
+    const now = useStore.getState().nodes[node.id]
+    if (!now || laid === null) return
+    useStore.getState().run([{ kind: 'node.update', id: node.id, patch: { content: { ...now.content, text: laid } } }])
+    useStore.getState().say('Beautified - Ctrl+Z to undo')
+    back()
+  }
+  return (
+    <div className="ai-panel">
+      <div className="ai-panel-head">
+        <button className="ai-back" onClick={back} aria-label="Back"><Icon name="undo" size={14} /></button>
+        <b>Beautify</b>
+        {laid === null && !note && <span className="tools-spin" />}
+      </div>
+      <div className="ai-panel-body nowheel">
+        {note ? <div className="tools-note">{note}</div>
+          : laid === null ? <div className="tools-wait">Laying it out…</div>
+          : <Prose text={laid} cite={cardRef} breaks className="card-prose ai-prose" />}
+      </div>
+      {laid !== null && (
+        <div className="tools-actions">
+          <button className="tools-plain" onClick={back}>Cancel</button>
+          <button className="tools-go" onClick={apply}>Apply</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Summarise, explain, fun fact or quiz on these cards - in the panel. */
 function AiPanel({ ids, act, back }: { ids: string[]; act: Act; back: () => void }) {
   return act === 'quiz' ? <AiQuiz ids={ids} back={back} /> : <AiAnswer ids={ids} act={act} back={back} />
@@ -428,6 +484,7 @@ function AiPanel({ ids, act, back }: { ids: string[]; act: Act; back: () => void
 
 type AiView =
   | { at: 'menu' }
+  | { at: 'beautify' }
   | { at: 'panel'; act: Act }
   | { at: 'breaking' }
   | { at: 'break'; cards: { title: string; text: string; keep: boolean }[] }
@@ -612,6 +669,11 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
     }
   }
 
+  if (view.at === 'beautify') return (
+    <div ref={root} className="tools-menu list ai wide nowheel">
+      <AiBeautify node={node} back={() => setView({ at: 'menu' })} />
+    </div>
+  )
   if (view.at === 'panel') return (
     <div ref={root} className="tools-menu list ai wide nowheel">
       <AiPanel ids={[node.id]} act={view.act} back={() => setView({ at: 'menu' })} />
@@ -690,6 +752,10 @@ function AiMenu({ node, close }: { node: MNode; close: () => void }) {
         <Icon name="sparkle" size={15} /> Fun fact
       </button>
       <span className="tools-rule" />
+      <button className="tools-item" disabled={!String(node.content.text ?? '').trim()}
+        onClick={() => setView({ at: 'beautify' })}>
+        <Icon name="bullets" size={15} /> Beautify
+      </button>
       <button className="tools-item" disabled={!String(node.content.text ?? '').trim()}
         onClick={() => void breakUp()}>
         <Icon name="branch" size={15} /> Break it into cards

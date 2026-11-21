@@ -132,6 +132,9 @@ class Handler(BaseHTTPRequestHandler):
             # breaking a card into smaller ones (DESIGN.md 72): two, as JSON
             text = ('{"cards": [{"title": "First point", "text": "The first part."}, '
                     '{"title": "Second point", "text": "The second part."}]}')
+        if isinstance(system, str) and system.startswith("You lay out the text"):
+            # beautifying a card (DESIGN.md 78): its words, as a list
+            text = '{"text": "- **Role:** director\\n- **Visit:** 22 Sep"}'
         if isinstance(system, str) and system.startswith("You write ONE quiz question"):
             # a quiz question as data (DESIGN.md 77)
             text = ('{"question": "What is the best angle at?", "choices": ["4 m", "9 m", "1 m"], '

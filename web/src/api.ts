@@ -242,6 +242,10 @@ const apiMore = {
   breakCard: (boardId: string, id: string) =>
     req<{ cards: { title: string; text: string }[]; note: string }>(
       `/boards/${boardId}/cards/${id}/break`, { method: 'POST' }),
+  /** A card's text laid out as Markdown, the same words (DESIGN.md 78). */
+  beautify: (boardId: string, body: { title: string; text: string }) =>
+    req<{ text: string; changed: boolean }>(`/boards/${boardId}/beautify`,
+      { method: 'POST', body: JSON.stringify(body) }),
   /** One quiz question about these cards, as data (DESIGN.md 77). */
   quizCard: (boardId: string, ids: string[], asked: string[]) =>
     req<{ question: string; choices: string[]; answer: number; why: string } | { note: string }>(

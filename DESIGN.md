@@ -3956,3 +3956,32 @@ card showed a list; a drag let go over the middle of another card made one
 link and no new card.
 
 296 tests.
+
+## 78. A plainer fun fact, and Beautify (2026-11-21)
+
+**The fun fact** opened with "Fun fact:" under a panel already headed Fun
+fact, or with "The most delightful detail is that ...", and once compared a
+card's date with today's and called a past visit "from the future". Its shape
+now says to state the fact itself, without a label or that opener, and to
+work nothing out - no sums of dates, no comparing with today; the panel
+strips such an opener if it comes anyway, and moves a full stop left alone
+after a citation back before it. A fun fact is no longer given today's date
+(`Context.no_dates`; the dates note is left out for it). Three runs after:
+no label, no opener; one still called a date "future" from the card's own
+words - the model's slip, said here.
+
+**Beautify** - asked for by the owner: the card's text laid out as Markdown,
+the same words (`POST /beautify`, `ask.beautify`). Separate items become a
+bullet list, ordered steps a numbered one, items sharing the same fields a
+small table, "Label: value" lines bold labels, a short heading only where
+the text has parts; no emoji, no title. The model's text is checked against
+the card's: at least 90 % of its distinct words still there and at most 15 %
+new, or the card is left as it was - layout only, never content. The AI menu
+shows it drawn as the card would draw it, with Apply and Cancel; Apply is one
+op, so Ctrl+Z puts the old text back.
+
+Checked with the real model: David Astill's four "Label: value" lines came
+back as four bold labels and the two report files as a list, every word kept,
+in 7.2 s; applied and undone.
+
+299 tests.

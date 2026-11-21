@@ -651,6 +651,30 @@ def test_a_field_sent_as_a_list_is_joined_not_shown_as_a_list():
     assert got["text"] == "- First.\n- Second." and "[" not in got["text"]
 
 
+def test_beautify_lays_text_out_and_never_loses_or_adds_words():
+    import json as js
+    plain = "Role: director\nVisit: 22 Sep"
+    got = ask.beautify(DraftModel(js.dumps({"text": "- **Role:** director\n- **Visit:** 22 Sep"})), "T", plain)
+    assert got == {"text": "- **Role:** director\n- **Visit:** 22 Sep", "changed": True}
+    assert "change the layout only" in ask.BEAUTIFY_SYSTEM.lower()
+    # words lost, words added, or no JSON: left exactly as it was
+    for bad in ['{"text": "- **Role:** director"}',
+                '{"text": "- Role: director, a brilliant leader\\n- Visit: 22 Sep, a sunny autumn day"}',
+                "not json"]:
+        assert ask.beautify(DraftModel(bad), "T", plain) == {"text": plain, "changed": False}
+    assert ask.beautify(DraftModel("{}"), "T", "  ")["changed"] is False
+
+
+def test_beautify_route_writes_nothing(client, board, cards):
+    h = {"X-Mindboard-Token": TOKEN}
+    before = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    res = client.post(f"/api/boards/{board['id']}/beautify", headers=h,
+                      json={"title": "T", "text": "Role: director\nVisit: 22 Sep"})
+    assert res.status_code == 200, res.text
+    assert res.json()["changed"] is True and res.json()["text"].startswith("- **Role:**")
+    assert client.get(f"/api/boards/{board['id']}/graph", headers=h).json()["revision"] == before["revision"]
+
+
 def test_quiz_route_gives_a_question(client, board, cards):
     h = {"X-Mindboard-Token": TOKEN}
     res = client.post(f"/api/boards/{board['id']}/cards/quiz", headers=h, json={"ids": [cards["mount"]]})

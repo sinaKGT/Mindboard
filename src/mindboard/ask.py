@@ -378,6 +378,9 @@ class Context:
     # what the task's steps found and the shape the task asks for (tasks.py,
     # DESIGN.md 66) - said with the question, so the cached start stays put
     task_note: str = ""
+    # leave out today's date (DESIGN.md 78): a fun fact compared the cards'
+    # dates with it and called a past visit "from the future"
+    no_dates: bool = False
 
     @property
     def tokens(self) -> int:
@@ -749,6 +752,9 @@ def dates_note(ctx: "Context", question: str, today=None) -> str:
     newest first, each with the card it is on."""
     import datetime as dt
 
+    if getattr(ctx, "no_dates", False):
+        return ""
+
     today = today or dt.date.today()
     note = f"\n\n(Today is {dt.date.strftime(today, '%A')} {say_date(today)}.)"
     if not TIME_WORDS.search(question) or ctx.mode in ("own", "file"):
@@ -1083,6 +1089,59 @@ def proofread(model, title: str, text: str) -> dict:
         return {"title": title, "text": text, "changed": False}
     return {"title": fixed_title, "text": fixed_text,
             "changed": fixed_title != title or fixed_text != text}
+
+
+# ------------------------------------------------------------- beautify --
+# DESIGN.md 78: a card's text laid out as Markdown - the same words, a better shape
+
+BEAUTIFY_SYSTEM = """You lay out the text of one card of a person's mind map as clean Markdown.
+
+Reply with JSON only, no other text: {"text": "..."}
+
+Change the layout only - never the content:
+- Keep every fact, name, number and date, in the person's own words. Add
+  nothing, remove nothing, do not summarise or explain.
+- Separate items become a "- " bullet list; steps in order become a numbered list.
+- Several items that share the same fields (name, role, date...) become a
+  small Markdown table.
+- "Label: value" lines become "**Label:** value".
+- A short "### " heading only when the text has clear parts.
+- Bold a key term sparingly. No emoji, no title (the card has one already).
+- If the text is already well laid out, return it as it is."""
+
+BEAUTIFY_CHARS = 6000
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[0-9A-Za-zÀ-￿]+", text.lower())
+
+
+def beautify(model, title: str, text: str) -> dict:
+    """The card's text laid out as Markdown, with nothing added or lost - or as
+    it was when the reply cannot be used: {"text", "changed"}. Writes nothing."""
+    text = text or ""
+    if not text.strip():
+        return {"text": text, "changed": False}
+    try:
+        reply = model.chat([{"role": "system", "content": BEAUTIFY_SYSTEM},
+                            {"role": "user", "content": f"TITLE\n{(title or '').strip()}\n\nTEXT\n{text[:BEAUTIFY_CHARS]}"}],
+                           max_tokens=min(4000, 300 + len(text) // 2), think=False, temperature=0.1,
+                           timeout=BREAK_SECONDS)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+        laid = CITE.sub("", _plain(got.get("text") if isinstance(got, dict) else "")).strip()
+    except Exception:
+        return {"text": text, "changed": False}
+    laid += text[BEAUTIFY_CHARS:]
+    # the same words: nearly all of the old ones still there, few new ones
+    old, new = _words(text), _words(laid)
+    if not laid or not old:
+        return {"text": text, "changed": False}
+    kept = sum(1 for w in set(old) if w in set(new)) / len(set(old))
+    added = sum(1 for w in set(new) if w not in set(old)) / max(len(set(new)), 1)
+    if kept < 0.9 or added > 0.15:
+        log.info("a beautified card lost or added words (kept %.2f, added %.2f); left as it was", kept, added)
+        return {"text": text, "changed": False}
+    return {"text": laid, "changed": laid.strip() != text.strip()}
 
 
 # ------------------------------------------------------------ to a card --

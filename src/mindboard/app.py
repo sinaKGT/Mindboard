@@ -367,6 +367,24 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         finally:
             model._asking.release()
 
+    @app.post("/api/boards/{bid}/beautify")
+    def api_beautify(bid: str, body: dict):
+        """A card's text laid out as Markdown, the same words (DESIGN.md 78).
+        Writes nothing: the interface shows it, and changes the card only if
+        the person applies it, undoably."""
+        from .ask import beautify
+
+        board_or_404(bid)
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Set up the AI first - choose 6 in the Mindboard menu")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
+        try:
+            return beautify(model, str(body.get("title") or "")[:300], str(body.get("text") or "")[:20000])
+        finally:
+            model._asking.release()
+
     @app.post("/api/boards/{bid}/cards/{nid}/break")
     def api_break_card(bid: str, nid: str):
         """Smaller cards drafted from one card's own words (DESIGN.md 72).

@@ -64,8 +64,11 @@ SHAPES = {
     # DESIGN.md 75: a fact that surprises, not the card's first line read back
     "funfact": ("Give ONE fun fact from the cards: the most surprising, delightful or unexpected "
                 "detail they hold - a striking number, a contrast, an odd name, a link between two "
-                "things - told in one or two playful sentences that begin \"Fun fact:\", with one "
-                "fitting emoji, and the card cited. Never just restate a card's opening line or its "
+                "things - told straight away in one or two playful sentences, with one fitting "
+                "emoji, and the card cited. Do not open with \"Fun fact\" or any label - the page "
+                "already heads it so (DESIGN.md 78) - nor with \"The most surprising detail is\": "
+                "say the fact itself. Work nothing out - no sums of dates or ages, no comparing "
+                "with today - only what the cards state. Never just restate a card's opening line or its "
                 "definition. Only what the cards say: if they hold nothing that could surprise or "
                 "delight, say so instead in one short, funny line ending with an emoji (like 🤷 or "
                 "🙈). Nothing else - no lists, no headings."),
@@ -261,6 +264,8 @@ def run(model, ctx, question: str, history: list[dict], tools: Tools,
         yield {"event": "task", **{k: plan[k] for k in ("task", "about", "output", "reading")},
                "steps": [], "trouble": ""}
         ctx.task_note = task_note(plan, [])
+        if known == "funfact":
+            ctx.no_dates = True
         return
     plan, trouble = understand(model, question, history, tools)
     if model.cancelled():
