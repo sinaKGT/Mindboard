@@ -5,9 +5,11 @@
  *  Shown as it came, that was a wall of `###` and `*`. Here it is read into
  *  blocks first and then drawn: headings as headings, lists with their real
  *  depth, citations as chips through `cite`. Nothing in an answer is ever
- *  treated as HTML; everything is text in React elements.
+ *  treated as HTML; everything is text in React elements - formulas apart,
+ *  drawn by KaTeX from its own reading of them (Math.tsx, DESIGN.md 61).
  */
 import { Fragment, type ReactNode } from 'react'
+import { MATH_SOURCE, Tex, texOf } from './Math'
 
 export type Block =
   | { k: 'h'; level: number; text: string }
@@ -21,12 +23,13 @@ export type Block =
 const TABLE_ROW = /^\s*\|.*\|\s*$/
 
 /** the answer as blocks */
-export function blocks(src: string): Block[] {
+export function blocks(src: string, breaks = false): Block[] {
   const out: Block[] = []
   const lines = src.replace(/\r/g, '').replace(/\t/g, '    ').split('\n')
   let para: string[] = []
   let indents: number[] = []                     // the open list's indentation, outermost first
-  const flush = () => { if (para.length) { out.push({ k: 'p', text: para.join(' ') }); para = [] } }
+  // a card keeps its line breaks (breaks); an answer's lines run on as a paragraph
+  const flush = () => { if (para.length) { out.push({ k: 'p', text: para.join(breaks ? '\n' : ' ') }); para = [] } }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     let m: RegExpMatchArray | null
@@ -72,46 +75,76 @@ export function blocks(src: string): Block[] {
   return out
 }
 
-const INLINE = /(\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))/g
+// maths first (DESIGN.md 61): a formula's _ and * are not italics
+const INLINE = new RegExp(`(${MATH_SOURCE}|` + String.raw`\((?:p|pp)\.\s?\d{1,4}(?:\s?[-–]\s?\d{1,4})?\)|\[[^\]\n]{1,200}\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'"]|~~[^~\n]+~~|\[\[[^\]\n]{1,40}\]\]|\*\*[^*\n]+\*\*|__[^_\n]+__|` + '`[^`\\n]+`' + String.raw`|\*[^*\s][^*\n]*\*|(?<![\w])_[^_\s][^_\n]*_(?![\w]))`, 'g')
 
 /** one line's light formatting; citations through `cite` */
-function inline(text: string, cite: (id: string) => ReactNode, key = ''): ReactNode[] {
+type PageCite = (page: number, label: string) => ReactNode
+
+function inline(text: string, cite: (id: string) => ReactNode, key = '', page?: PageCite): ReactNode[] {
   // "... [[id]] ." - no gap left between a citation and the stop after it
   const clean = text.replace(/\]\]\s+(?=[.,;:!?)])/g, ']]')
   return clean.split(INLINE).map((piece, j) => {
     const k = `${key}${j}`
     if (!piece) return null
+    if (j % 2 && texOf(piece)) return <Tex key={k} piece={piece} />
+    // a file's page, cited "(p. 12)" (DESIGN.md 64): a link to it, where there is one
+    const pg = j % 2 ? piece.match(/^\((?:p|pp)\.\s?(\d{1,4})/) : null
+    if (pg) return <Fragment key={k}>{page ? page(Number(pg[1]), piece) : piece}</Fragment>
     if (piece.startsWith('[[')) {
       const id = piece.match(/^\[\[([0-9A-Za-z]{26})\]\]$/)
       return id ? <Fragment key={k}>{cite(id[1])}</Fragment> : null   // a citation the model got wrong: left out
     }
-    if (/^(\*\*|__).+\1$/.test(piece)) return <strong key={k}>{inline(piece.slice(2, -2), cite, k)}</strong>
+    // links (DESIGN.md 69): [words](https://...) and bare addresses; only http(s)
+    const md = j % 2 ? piece.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/) : null
+    if (md) return <a key={k} {...LINK} href={md[2]} title={md[2]}>{inline(md[1], cite, k, page)}</a>
+    if (j % 2 && /^https?:\/\//.test(piece)) return <a key={k} {...LINK} href={piece}>{piece}</a>
+    if (/^~~.+~~$/.test(piece)) return <del key={k}>{inline(piece.slice(2, -2), cite, k, page)}</del>
+    if (/^(\*\*|__).+\1$/.test(piece)) return <strong key={k}>{inline(piece.slice(2, -2), cite, k, page)}</strong>
     if (/^`.+`$/.test(piece)) return <code key={k}>{piece.slice(1, -1)}</code>
-    if (/^([*_]).+\1$/.test(piece)) return <em key={k}>{inline(piece.slice(1, -1), cite, k)}</em>
+    if (/^([*_]).+\1$/.test(piece)) return <em key={k}>{inline(piece.slice(1, -1), cite, k, page)}</em>
     return <Fragment key={k}>{piece}</Fragment>
   })
 }
 
 const BULLETS = ['•', '◦', '▪', '◦', '▪']
 
-export function Prose({ text, cite, className = '' }: {
+/** a link opens in a new tab, and a press on it is not a press on the card */
+const stop = (e: React.SyntheticEvent) => e.stopPropagation()
+const LINK = { className: 'prose-link nodrag', target: '_blank', rel: 'noreferrer noopener',
+               onPointerDown: stop, onMouseDown: stop, onClick: stop, onDoubleClick: stop }
+
+/** "[ ] task" and "[x] done" at the start of a list item */
+const TASK = /^\[([ xX])\]\s+/
+
+export function Prose({ text, cite, className = '', page, breaks = false }: {
   text: string
   cite: (id: string) => ReactNode
   className?: string
+  /** keep single line breaks - a card's text, written by hand */
+  breaks?: boolean
+  /** a file's page cited "(p. 12)" - drawn by this, when given (DESIGN.md 64) */
+  page?: PageCite
 }) {
   return (
     <div className={`prose ${className}`}>
-      {blocks(text).map((b, i) => {
+      {blocks(text, breaks).map((b, i) => {
         switch (b.k) {
-          case 'h': return <div key={i} className={`prose-h prose-h${Math.min(b.level, 4)}`}>{inline(b.text, cite)}</div>
-          case 'p': return <p key={i} className="prose-p">{inline(b.text, cite)}</p>
-          case 'li': return (
-            <div key={i} className="prose-li" style={{ paddingLeft: `${b.depth * 1.35}em` }}>
-              <span className={`prose-mark ${b.mark ? 'num' : ''}`}>{b.mark ?? BULLETS[b.depth]}</span>
-              <span className="prose-li-text">{inline(b.text, cite)}</span>
-            </div>
-          )
-          case 'quote': return <div key={i} className="prose-quote">{inline(b.text, cite)}</div>
+          case 'h': return <div key={i} className={`prose-h prose-h${Math.min(b.level, 4)}`}>{inline(b.text, cite, '', page)}</div>
+          case 'p': return <p key={i} className="prose-p">{inline(b.text, cite, '', page)}</p>
+          case 'li': {
+            const task = b.text.match(TASK)
+            const done = !!task && task[1] !== ' '
+            return (
+              <div key={i} className={`prose-li${task ? ' task' : ''}${done ? ' done' : ''}`}
+                style={{ paddingLeft: `${b.depth * 1.35}em` }}>
+                <span className={`prose-mark ${b.mark ? 'num' : ''}`}>
+                  {task ? (done ? '☑' : '☐') : b.mark ?? BULLETS[b.depth]}</span>
+                <span className="prose-li-text">{inline(task ? b.text.slice(task[0].length) : b.text, cite, '', page)}</span>
+              </div>
+            )
+          }
+          case 'quote': return <div key={i} className="prose-quote">{inline(b.text, cite, '', page)}</div>
           case 'code': return <pre key={i} className="prose-code">{b.text}</pre>
           case 'hr': return <hr key={i} className="prose-hr" />
           case 'table': return (
@@ -119,7 +152,7 @@ export function Prose({ text, cite, className = '' }: {
               <table className="prose-table"><tbody>
                 {b.rows.map((r, ri) => (
                   <tr key={ri}>{r.map((c, ci) => ri === 0
-                    ? <th key={ci}>{inline(c, cite)}</th> : <td key={ci}>{inline(c, cite)}</td>)}</tr>
+                    ? <th key={ci}>{inline(c, cite, '', page)}</th> : <td key={ci}>{inline(c, cite, '', page)}</td>)}</tr>
                 ))}
               </tbody></table>
             </div>

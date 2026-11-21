@@ -2,6 +2,19 @@ const P = (d: string, extra?: Record<string, any>) => ({ d, ...extra })
 
 const PATHS: Record<string, ReturnType<typeof P>[]> = {
   plus: [P('M8 3.5v9M3.5 8h9')],
+  check: [P('M3.5 8.5l3 3 6-7')],
+  folder: [P('M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z')],
+  // a magic wand: fix spelling and grammar
+  wand: [P('M3 13l7.5-7.5'), P('M9.5 4.5l2 2'), P('M12 2.5v1.6M12.8 3.3h-1.6M14 6.5v1.2M14.6 7.1h-1.2M7 2v1.2M7.6 2.6H6.4')],
+  // an open book: Explain more
+  explain: [P('M8 4.6C6.6 3.6 4.6 3.3 2.5 3.6v8.6c2.1-.3 4.1 0 5.5 1 1.4-1 3.4-1.3 5.5-1V3.6c-2.1-.3-4.1 0-5.5 1Z'), P('M8 4.6v8.6')],
+  // the ankh: the chat bar, as for the experts
+  ankh: [P('M8 7.3C6.2 6.1 5.5 5 5.5 3.9 5.5 2.5 6.6 1.5 8 1.5s2.5 1 2.5 2.4c0 1.1-.7 2.2-2.5 3.4Z'),
+         P('M3.8 8.4h8.4'), P('M8 7.3v7.2')],
+  // the chat panel along the left edge, or back in the middle
+  'dock-left': [P('M2.5 3.5h11v9h-11z'), P('M6.5 3.5v9')],
+  'dock-center': [P('M2.5 3.5h11v9h-11z'), P('M5.5 6.5h5v3h-5z')],
+  bulb: [P('M6.2 12.3h3.6M6.7 14h2.6'), P('M8 2.4a3.8 3.8 0 0 0-2.3 6.8c.5.4.8.9.8 1.5v.2h3v-.2c0-.6.3-1.1.8-1.5A3.8 3.8 0 0 0 8 2.4Z')],
   trash: [P('M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8.2a1 1 0 0 0 1 .8h2.8a1 1 0 0 0 1-.8L11 4.5')],
   branch: [P('M4 4v3.5a2 2 0 0 0 2 2h6'), P('M9.5 7l2.5 2.5-2.5 2.5')],
   enter: [P('M6 3.5h4.5A1.5 1.5 0 0 1 12 5v6a1.5 1.5 0 0 1-1.5 1.5H6'), P('M3.5 8h5M6.5 6l2 2-2 2')],
@@ -35,6 +48,11 @@ const PATHS: Record<string, ReturnType<typeof P>[]> = {
   copy: [P('M6 6h7.5v7.5H6z'), P('M10.5 6V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1H6')],
   keys: [P('M2 4.5h12v7H2z'), P('M4.6 7h.01M7.3 7h.01M10 7h.01M12.7 7h.01M5.4 9.4h5.2',
     {strokeWidth: 1.6})],
+  // three dots: more of what can be done to a card
+  more: [P('M3.5 8h.01M8 8h.01M12.5 8h.01', {strokeWidth: 2.4})],
+  // sparkles: the AI's actions on a card
+  sparkle: [P('M7 2.5c.4 2.4 1.6 3.6 4 4-2.4.4-3.6 1.6-4 4-.4-2.4-1.6-3.6-4-4 2.4-.4 3.6-1.6 4-4Z'),
+            P('M12 10v3M10.5 11.5h3')],
   external: [P('M9 3.5h3.5V7'), P('M12.5 3.5 7.5 8.5'), P('M11 9.5v2.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2.5')],
 }
 

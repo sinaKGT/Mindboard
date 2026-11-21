@@ -13,6 +13,7 @@ made here and played here.
 from __future__ import annotations
 
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -141,10 +142,78 @@ def _whisper_dir(home: Optional[Path] = None) -> Path:
     return (home or llm_home()) / "whisper" / WHISPER_BUILD
 
 
+# On a Mac (DESIGN.md 50): whisper.cpp publishes no program for macOS - only a
+# framework for apps - but Homebrew builds it for Apple silicon, with Metal.
+# So a Mac listens through Homebrew's whisper-cpp: setting up the voice
+# installs it (`brew install whisper-cpp`), and it is found where Homebrew puts
+# it even when a double-clicked launcher has a short PATH. The model it reads
+# is the same pinned, checked file as everywhere else. Homebrew checks its own
+# downloads; the program is not pinned here, so its flags are the only thing
+# relied on, and they are whisper.cpp's long-standing ones.
+BREW_FORMULA = "whisper-cpp"
+BREW_PREFIXES = ("/opt/homebrew/bin", "/usr/local/bin")
+# the program's name since whisper.cpp 1.7; before that Homebrew called it whisper-cpp
+MAC_NAMES = ("whisper-cli", "whisper-cpp")
+
+
+def _on_path(name: str) -> Optional[Path]:
+    """A program on PATH, or in Homebrew's folders - which a double-clicked
+    launcher's PATH may lack."""
+    found = shutil.which(name)
+    if found:
+        return Path(found)
+    for prefix in BREW_PREFIXES:
+        candidate = Path(prefix) / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def brew() -> Optional[Path]:
+    return _on_path("brew") if sys.platform == "darwin" else None
+
+
 def whisper_cli(home: Optional[Path] = None) -> Optional[Path]:
     name = "whisper-cli.exe" if sys.platform == "win32" else "whisper-cli"
     found = sorted(_whisper_dir(home).rglob(name)) if _whisper_dir(home).exists() else []
-    return found[0] if found else None
+    if found:
+        return found[0]
+    if sys.platform == "darwin":
+        for n in MAC_NAMES:
+            cli = _on_path(n)
+            if cli is not None:
+                return cli
+    return None
+
+
+def setup_note() -> str:
+    """What setting up the voice will do here beyond downloading, said first."""
+    if sys.platform == "darwin" and whisper_cli() is None:
+        return ("On a Mac, listening is installed with Homebrew (brew install whisper-cpp)."
+                if brew() else "On a Mac, listening needs Homebrew (brew.sh) - speaking works without it.")
+    return ""
+
+
+def _install_with_brew(progress: Optional[Progress]) -> None:
+    """whisper.cpp on a Mac, through Homebrew - a minute or two, once."""
+    b = brew()
+    if b is None:
+        raise VoiceError("speaking to experts on a Mac uses Homebrew's whisper-cpp. Install Homebrew "
+                         "(brew.sh), then choose Set up the AI again - or run: brew install whisper-cpp")
+    if progress:
+        progress(f"{BREW_FORMULA} (Homebrew)", 0, 1)
+    try:
+        done = subprocess.run([str(b), "install", BREW_FORMULA], capture_output=True, text=True,
+                              timeout=1800, env={**os.environ, "HOMEBREW_NO_AUTO_UPDATE": "1"})
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise VoiceError(f"Homebrew could not install whisper-cpp ({exc.__class__.__name__}) - "
+                         "run: brew install whisper-cpp") from exc
+    if done.returncode != 0 or whisper_cli() is None:
+        said = (done.stderr or done.stdout).strip().splitlines()[-1:] or [""]
+        raise VoiceError(f"Homebrew could not install whisper-cpp: {said[0][:200]} - "
+                         "run: brew install whisper-cpp")
+    if progress:
+        progress(f"{BREW_FORMULA} (Homebrew)", 1, 1)
 
 
 def can_listen(home: Optional[Path] = None) -> bool:
@@ -165,12 +234,16 @@ def install_listening(home: Optional[Path] = None, progress: Optional[Progress] 
     import tarfile
     import zipfile
 
-    plat = "windows" if sys.platform == "win32" else "linux" if sys.platform.startswith("linux") else ""
+    plat = ("windows" if sys.platform == "win32" else "linux" if sys.platform.startswith("linux")
+            else "macos" if sys.platform == "darwin" else "")
     if not plat:
         raise VoiceError("speaking to experts is not available on this kind of computer yet")
-    pin, target = WHISPER_BIN[plat], _whisper_dir(home)
-    archive = download(pin, target.parent / "downloads", progress)
-    if whisper_cli(home) is None:
+    if plat == "macos":
+        if whisper_cli(home) is None:
+            _install_with_brew(progress)
+    elif whisper_cli(home) is None:
+        pin, target = WHISPER_BIN[plat], _whisper_dir(home)
+        archive = download(pin, target.parent / "downloads", progress)
         target.mkdir(parents=True, exist_ok=True)
         root = target.resolve()
         if pin.name.endswith(".zip"):

@@ -131,3 +131,100 @@ def test_menu_backup_folder_is_created(dd):
 
     folder = backups_dir(dd)
     assert folder.is_dir()
+
+
+# ------------------------------------------------- every file, or said why --
+
+def picture_board(dd, title, data: bytes, card_title: str):
+    """A board with one picture card, its file stored on the board."""
+    from mindboard.assets import store_bytes
+
+    board = create_board(dd, title, "")
+    c = conn_for(dd, board["id"])
+    stored = store_bytes(dd, c, board["id"], data, declared_mime="image/png", orig_name="p.png")
+    node = {"id": ulid(), "type": "image", "pos": [0, 0], "title": card_title,
+            "content": {"sha256": stored["sha256"]}}
+    assert not apply_envelopes(c, board["id"], [{"opId": ulid(), "op": {"kind": "node.create", "node": node}}])["rejected"]
+    return board, stored["sha256"]
+
+
+def png_bytes(colour):
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (8, 8), colour).save(out, "PNG")
+    return out.getvalue()
+
+
+def test_a_file_lost_from_its_board_is_taken_from_another_boards_copy(dd, tmp_path):
+    """DESIGN.md 49: files are named by their hash, so the same file kept by
+    another board is the very same bytes."""
+    from mindboard.assets import resolve
+
+    same = png_bytes("#123456")
+    a, sha = picture_board(dd, "Alpha", same, "Site plan")
+    b, sha_b = picture_board(dd, "Beta", same, "Site plan again")
+    assert sha == sha_b
+    resolve(dd, conn_for(dd, a["id"]), a["id"], sha).unlink()       # lost from Alpha only
+
+    out = create_backup(dd, tmp_path / "b.zip")
+    assert out["missing"] == [] and out["recovered"] == 1
+    fresh = DataDir(tmp_path / "elsewhere").ensure()
+    restore_backup(fresh, out["path"])
+    path = resolve(fresh, conn_for(fresh, a["id"]), a["id"], sha)
+    assert path is not None and path.read_bytes() == same, "Alpha comes back whole"
+
+
+def test_a_file_found_nowhere_is_named_never_passed_over(dd, tmp_path):
+    from mindboard.assets import resolve
+    from mindboard.bundle import check_files
+
+    a, sha = picture_board(dd, "Alpha", png_bytes("#654321"), "Site plan")
+    seed(dd, "Beta", 2)
+    resolve(dd, conn_for(dd, a["id"]), a["id"], sha).unlink()
+
+    check = check_files(dd)
+    assert check["files"] == 1 and check["recovered"] == 0
+    assert check["missing"] == [{"sha": sha, "board": a["id"], "board_title": "Alpha", "cards": ["Site plan"]}]
+
+    out = create_backup(dd, tmp_path / "b.zip")
+    assert len(out["boards"]) == 2, "the backup is still made - everything else is in it"
+    assert out["missing"] == check["missing"]
+    with zipfile.ZipFile(out["path"]) as z:
+        note = z.read("MISSING-FILES.txt").decode("utf-8")
+        import json
+        manifest = json.loads(z.read("manifest.json"))
+    assert note.startswith("1 file on your boards could not be found on this computer")
+    assert 'board "Alpha": Site plan' in note and sha[:12] in note
+    assert manifest["missing_files"][0]["cards"] == ["Site plan"]
+
+    fresh = DataDir(tmp_path / "elsewhere").ensure()
+    restored = restore_backup(fresh, out["path"])
+    assert len(restored["restored"]) == 2 and not restored["failed"], "and it restores"
+
+
+def test_a_whole_backup_says_nothing_is_missing(dd, tmp_path):
+    picture_board(dd, "Alpha", png_bytes("#abcdef"), "Site plan")
+    out = create_backup(dd, tmp_path / "b.zip")
+    assert out["missing"] == [] and out["recovered"] == 0
+    with zipfile.ZipFile(out["path"]) as z:
+        assert "MISSING-FILES.txt" not in z.namelist()
+
+
+def test_the_app_checks_before_backing_up(dd):
+    from fastapi.testclient import TestClient
+
+    from mindboard.app import create_app
+    from mindboard.assets import resolve
+
+    a, sha = picture_board(dd, "Alpha", png_bytes("#0f0f0f"), "Site plan")
+    h = {"X-Mindboard-Token": "t"}
+    with TestClient(create_app(dd, "t")) as c:
+        assert c.get("/api/backup/check", headers=h).json() == {"files": 1, "missing": [], "recovered": 0}
+        resolve(dd, conn_for(dd, a["id"]), a["id"], sha).unlink()
+        got = c.get("/api/backup/check", headers=h).json()
+        assert got["missing"][0]["cards"] == ["Site plan"]
+        res = c.get("/api/backup", headers=h)
+        assert res.status_code == 200 and res.headers["X-Mindboard-Missing-Files"] == "1"

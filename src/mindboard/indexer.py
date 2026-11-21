@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from .boards import conn_for
 from .ops import read_graph
 from .paths import DataDir
-from .search_index import BoardIndex, PictureNotes, picture_of
+from .search_index import BoardIndex, FileNotes, PictureNotes, card_notes, file_of, picture_of
 
 log = logging.getLogger("mindboard.indexer")
 
@@ -41,7 +41,7 @@ class Indexer:
                  describer: Optional[Callable[[], Optional[object]]] = None):
         self.dd = dd
         self.embedder = embedder
-        # the chat model, to describe pictures - only while it is loaded anyway
+        # the chat model, to describe pictures (DESIGN.md 38, 51)
         self.describer = describer
         self.quiet = quiet
         self.batch = batch
@@ -124,37 +124,92 @@ class Indexer:
         row = conn.execute("SELECT revision FROM board WHERE id=?", (bid,)).fetchone()
         if row is None:
             return                                  # the board is gone
-        nodes = {n["id"]: n for n in read_graph(conn, bid)["nodes"]}
+        graph = read_graph(conn, bid)
+        nodes = {n["id"]: n for n in graph["nodes"]}
         index = BoardIndex.get(self.dd, bid)
         notes = PictureNotes.get(self.dd)
-        index.sync_text(nodes, row["revision"], model.inst.embedder.name, notes.notes)
+        self._read_files(bid, conn, nodes)
+        index.sync_text(nodes, row["revision"], model.inst.embedder.name, card_notes(self.dd))
         try:
             # stop between batches if the board changed again: it is back in
             # the queue, and its next round starts from the new cards
             while index.pending() and not self._changed_again(bid):
                 index.embed_some(model, self.batch)
             if self._describe(bid, conn, nodes, notes):
-                index.sync_text(nodes, row["revision"], model.inst.embedder.name, notes.notes)
+                index.sync_text(nodes, row["revision"], model.inst.embedder.name, card_notes(self.dd))
                 while index.pending() and not self._changed_again(bid):
                     index.embed_some(model, self.batch)
         finally:
             index.flush()
 
+    @staticmethod
+    def _may_load(chat) -> bool:
+        """Whether to load the model just to describe pictures: only when it
+        would load whole, onto the graphics card (llm.memory_shortfall)."""
+        note = getattr(chat, "memory_note", None)
+        try:
+            return note is None or note() is None
+        except Exception:
+            return False
+
+    def _read_files(self, bid: str, conn, nodes: dict) -> None:
+        """Read the text of the board's PDFs not yet read (DESIGN.md 48). No
+        model is needed - a few tenths of a second a file - so it is done first,
+        and the PDFs are searchable by what they cover from this round on."""
+        from .assets import pdf_text, resolve
+
+        files = FileNotes.get(self.dd)
+        for sha in dict.fromkeys(s for n in nodes.values() if (s := file_of(n)) and s not in files.notes):
+            if self._changed_again(bid):
+                return
+            path = resolve(self.dd, conn, bid, sha)
+            if path is not None:
+                files.put(sha, pdf_text(path))
+
     def _describe(self, bid: str, conn, nodes: dict, notes: PictureNotes) -> bool:
-        """Describe the board's pictures not yet described (DESIGN.md 38) -
-        only while the chat model is loaded anyway, so opening a board never
-        loads it, and never while it answers a question: then it stops, and
-        the next round carries on. True if any were described."""
+        """Describe the board's pictures (DESIGN.md 38, 51), never while the
+        model answers a question: then it stops, and the next round carries on.
+        True if any were described.
+
+        A picture never described is found by nothing but its title, so for
+        one the model is loaded if it is not already - soon after the picture
+        is added, not whenever a question happens to load it. Not when the
+        graphics card is short of memory: then the model would load slowly,
+        partly on the processor, for a task nobody is waiting on, so it waits
+        for the next question. A picture with only an older, shorter
+        description is redone only while the model is loaded anyway."""
         from .ask import describe_picture
 
         chat = self.describer() if self.describer else None
-        if chat is None or not chat.running():
+        if chat is None:
             return False
-        todo = list(dict.fromkeys(s for n in nodes.values()
-                                  if (s := picture_of(n)) and s not in notes.notes))
+        from .assets import resolve
+
+        # a picture whose file is not on this computer cannot be described, and
+        # must not load the model at every round (DESIGN.md 49)
+        pictures = dict.fromkeys(p for p in map(picture_of, nodes.values()) if p)
+        shas = [s for s in pictures if resolve(self.dd, conn, bid, s) is not None]
+        new = [s for s in shas if s not in notes.notes]
+        again = [s for s in shas if s in notes.notes and not notes.done(s)]
+        if not chat.running():
+            if not new or not self._may_load(chat):
+                return False
+            try:
+                chat.start()          # outside the question slot: a question asked
+            except Exception:         # meanwhile waits for the load, then goes first
+                log.exception("loading the model to describe pictures")
+                return False
+        todo = new + again
         done = False
         for sha in todo:
-            if self._changed_again(bid) or not chat._asking.acquire(blocking=False):
+            # a question waiting for the model goes first (DESIGN.md 60): one
+            # picture at a time, and none started while somebody is asking
+            if self._changed_again(bid) or getattr(chat, "waiting", 0):
+                break
+            if not chat._asking.acquire(blocking=False):
+                break
+            if getattr(chat, "waiting", 0):
+                chat._asking.release()
                 break
             try:
                 text = describe_picture(chat, self.dd, conn, bid, sha)

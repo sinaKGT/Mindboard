@@ -318,8 +318,16 @@ def test_not_set_up_until_every_piece_is_there(tmp_path):
     for pin in (tier.model, tier.vision):
         f = llm.model_path(tmp_path, tier, pin)
         f.parent.mkdir(parents=True, exist_ok=True)
-        with f.open("wb") as fh:
-            fh.truncate(pin.size)                 # sparse: the right size, no 10 GB written
+        f.touch()
+        if sys.platform == "win32":
+            # on NTFS a truncated file takes its whole size on disk unless it is
+            # marked sparse first - without this, each run left 6 GB in the temp folder
+            subprocess.run(["fsutil", "sparse", "setflag", str(f)], capture_output=True, check=False)
+        with f.open("r+b") as fh:
+            # not truncate(): on Windows it extends by writing zeros. Writing only
+            # the last byte leaves the gap unallocated - the right size, no 6 GB written
+            fh.seek(pin.size - 1)
+            fh.write(b"\0")
         llm._verified_mark(f).write_text(pin.sha256)
     found = llm.find_install(tmp_path)
     assert found is not None and found.server.exists() and found.tier.key == "compact"

@@ -151,7 +151,8 @@ def test_a_search_brings_pictures_only_while_they_fit(dd, board, cards, monkeypa
                       "the site plan and the drone pass")
     assert {cards["plan"], cards["video"]} <= set(found.cards)
     assert len(found.pictures) == 1 and found.pictures_left_out == 1
-    assert "Drone pass" in found.text and "Site plan" in found.text,         "a left-out picture's card still goes in"
+    assert "Drone pass" in found.text and "Site plan" in found.text, \
+        "a left-out picture's card still goes in"
     chosen = ask.build(dd, conn_for(dd, board["id"]), board["id"],
                        [cards["plan"], cards["video"]])
     assert len(chosen.pictures) == 2, "cards chosen by hand always bring their pictures"
@@ -170,7 +171,7 @@ def test_the_cards_come_first_so_follow_ups_are_not_read_again(dd, board, cards)
     assert [m["role"] for m in second] == ["system", "user", "assistant", "user", "assistant", "user"], \
         "history cannot smuggle in a system message"
     assert second[1]["content"][0]["text"].startswith("CARDS")
-    assert second[-1] == {"role": "user", "content": "and now?"}
+    assert second[-1]["role"] == "user" and second[-1]["content"].startswith("and now?\n\n(Today is ")
 
 
 def test_too_much_is_refused_up_front_not_cut_off(dd, board, cards, monkeypatch):
@@ -254,11 +255,16 @@ def client(dd, model):
         app.state.ask["model"].stop()
 
 
-def events(res) -> list[tuple[str, dict]]:
+TASK_EVENTS = ("task", "step", "task_step")
+
+
+def events(res, tasks: bool = False) -> list[tuple[str, dict]]:
+    """The answer's events - without the task's own (DESIGN.md 66) unless asked."""
     out = []
     for block in res.text.strip().split("\n\n"):
         lines = dict(line.split(": ", 1) for line in block.splitlines())
-        out.append((lines["event"], json.loads(lines["data"])))
+        if tasks or lines["event"] not in TASK_EVENTS:
+            out.append((lines["event"], json.loads(lines["data"])))
     return out
 
 
@@ -304,15 +310,30 @@ def test_says_why_it_cannot_ask(client, board, cards, monkeypatch):
                        headers=h).status_code == 413
 
 
-def test_one_question_at_a_time(client, board, cards):
+def test_one_question_at_a_time_and_a_question_waits_its_turn(client, board, cards, monkeypatch):
+    """DESIGN.md 60: the model busy a moment - a picture being described after
+    the last answer - is no reason to refuse the next question. It waits, goes
+    first, and is told "still answering" only if the model never comes free."""
+    import threading as th
+
     h = {"X-Mindboard-Token": TOKEN}
     body = {"question": "q", "cards": [cards["mount"]]}
     assert client.post(ask_url(board["id"]), json=body, headers=h).status_code == 200
     held = client.app.state.ask["model"]
     held._asking.acquire()
+    seen = []
+    def let_go():
+        seen.append(held.waiting)            # the question was waiting meanwhile
+        held._asking.release()
+    th.Timer(0.6, let_go).start()
+    res = client.post(ask_url(board["id"]), json=body, headers=h)
+    assert res.status_code == 200 and events(res)[-1][0] == "done"
+    assert seen == [1] and held.waiting == 0 and not held._asking.locked()
+    monkeypatch.setattr(llm, "TURN_WAIT", 0.2)
+    held._asking.acquire()
     try:
         res = client.post(ask_url(board["id"]), json=body, headers=h)
-        assert res.status_code == 409 and "still answering" in res.json()["detail"]
+        assert events(res)[-1] == ("error", {"message": "still answering the last question"})
     finally:
         held._asking.release()
 
@@ -499,9 +520,108 @@ def test_drafting_writes_nothing_to_the_board(client, board, cards, model):
     res = client.post(f"/api/boards/{board['id']}/ask/draft", headers={"X-Mindboard-Token": TOKEN},
                       json={"question": "where?", "answer": "On the corner.", "cited": [cards["mount"]]})
     assert res.status_code == 200, res.text
-    assert set(res.json()) == {"title", "text", "link_to", "kind"}
+    assert set(res.json()) == {"title", "text", "link_to", "kind", "label", "why"}
     after = client.get(f"/api/boards/{board['id']}/graph", headers={"X-Mindboard-Token": TOKEN}).json()
     assert after["revision"] == before["revision"]
+
+
+# ------------------------------------------- one card: break it, relate it --
+
+def test_a_card_is_broken_into_smaller_cards_from_its_own_words():
+    import json as js
+    model = DraftModel(js.dumps({"cards": [{"title": "Plan", "text": "Plan the route [[" + "A" * 26 + "]]."},
+                                           {"title": "Mount", "text": "Mount at 4 m."}, "junk", {}]}))
+    got = ask.break_card(model, "Site visit", "Plan the route. Mount at 4 m.")
+    assert got == {"cards": [{"title": "Plan", "text": "Plan the route ."},
+                             {"title": "Mount", "text": "Mount at 4 m."}], "note": ""}
+    assert "Use only what the card says" in model.asked[0][0]["content"]
+
+
+def test_breaking_falls_back_to_the_cards_own_list_and_says_when_there_is_nothing():
+    listed = "Things:\n- check the wind\n- order two poles\n- ask the council"
+    got = ask.break_card(DraftModel("not json"), "To do", listed)
+    assert [c["text"] for c in got["cards"]] == ["check the wind", "order two poles", "ask the council"]
+    lines = ask.break_card(DraftModel('{"cards": []}'), "Visitor", "Role: director\nVisit: 22 Sep")
+    assert [c["text"] for c in lines["cards"]] == ["Role: director", "Visit: 22 Sep"]
+    one = ask.break_card(DraftModel('{"cards": []}'), "Idea", "A single thought.")
+    assert one["cards"] == [] and "one idea" in one["note"]
+    assert "no text" in ask.break_card(DraftModel("{}"), "Empty", "")["note"]
+    many = ask.break_card(DraftModel(js_cards(9)), "Many", "x")
+    assert len(many["cards"]) == ask.BREAK_MAX
+
+
+def js_cards(n):
+    import json as js
+    return js.dumps({"cards": [{"title": f"T{i}", "text": f"t{i}"} for i in range(n)]})
+
+
+def test_breaking_a_card_writes_nothing_to_the_board(client, board, cards, model):
+    h = {"X-Mindboard-Token": TOKEN}
+    before = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    res = client.post(f"/api/boards/{board['id']}/cards/{cards['mount']}/break", headers=h)
+    assert res.status_code == 200, res.text
+    assert [c["title"] for c in res.json()["cards"]] == ["First point", "Second point"]
+    after = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    assert after["revision"] == before["revision"]
+    assert client.post(f"/api/boards/{board['id']}/cards/{'Z' * 26}/break", headers=h).status_code == 404
+
+
+def test_related_cards_leave_out_the_card_its_links_and_its_groups(dd, board, cards):
+    c = conn_for(dd, board["id"])
+    extra = node(title="Pole height", content={"text": "the mount angle at 4 m on the corner"})
+    assert not apply_envelopes(c, board["id"], [{"opId": ulid(), "op": {"kind": "node.create", "node": extra}}])["rejected"]
+    got = ask.related_cards(dd, c, board["id"], cards["mount"])
+    ids = [g["id"] for g in got]
+    assert extra["id"] in ids
+    # itself, and the plan and wind cards it already links to, never come back
+    assert not {cards["mount"], cards["plan"], cards["link"]} & set(ids)
+    inside = ask.related_cards(dd, c, board["id"], cards["lidar"])
+    assert cards["sensors"] not in [g["id"] for g in inside]
+    # groups never, and a card others are part of is a container, not a neighbour
+    hub = node(title="Pole hub", content={"text": "mount angle corner pole 4 m"})
+    spokes = [node(title=f"Spoke {i}") for i in range(ask.HOLDS)]
+    env = [{"opId": ulid(), "op": {"kind": "node.create", "node": v}} for v in [hub, *spokes]]
+    env += [{"opId": ulid(), "op": {"kind": "edge.create", "edge": {
+        "id": ulid(), "source": s["id"], "target": hub["id"], "kind": "part-of"}}} for s in spokes]
+    assert not apply_envelopes(c, board["id"], env)["rejected"]
+    again = [g["id"] for g in ask.related_cards(dd, c, board["id"], cards["mount"], limit=40)]
+    assert hub["id"] not in again and extra["id"] in again
+    assert not {cards["sensors"], cards["power"]} & set(again)
+    assert set(got[0]) == {"id", "type", "title", "snippet"}
+    with pytest.raises(ask.AskError):
+        ask.related_cards(dd, c, board["id"], "Z" * 26)
+
+
+def test_cards_are_merged_from_their_own_words_or_set_side_by_side():
+    import json as js
+    two = [{"title": "Mount", "text": "best angle at 4 m"}, {"title": "Lidar", "text": "range 100 m"}]
+    model = DraftModel(js.dumps({"title": "Pole", "text": "Best angle at 4 m; range 100 m [[" + "A" * 26 + "]]."}))
+    assert ask.merge_cards(model, two) == {"title": "Pole", "text": "Best angle at 4 m; range 100 m ."}
+    assert "Use only what the cards say" in model.asked[0][0]["content"]
+    side = ask.merge_cards(DraftModel("no json"), two)
+    assert side == {"title": "Mount / Lidar", "text": "best angle at 4 m\n\nrange 100 m"}
+    # a merge that drops most of the words falls back too
+    long = [{"title": "A", "text": "word " * 200}, {"title": "B", "text": "other " * 200}]
+    assert ask.merge_cards(DraftModel('{"title": "T", "text": "short"}'), long)["title"] == "A / B"
+
+
+def test_merging_writes_nothing_and_needs_two_cards(client, board, cards):
+    h = {"X-Mindboard-Token": TOKEN}
+    url = f"/api/boards/{board['id']}/cards/merge"
+    before = client.get(f"/api/boards/{board['id']}/graph", headers=h).json()
+    res = client.post(url, headers=h, json={"ids": [cards["mount"], cards["lidar"]]})
+    assert res.status_code == 200, res.text
+    assert res.json() == {"title": "Merged", "text": "Best angle at 4 m, and the range is 100 m."}
+    assert client.get(f"/api/boards/{board['id']}/graph", headers=h).json()["revision"] == before["revision"]
+    assert client.post(url, headers=h, json={"ids": [cards["mount"]]}).status_code == 400
+
+
+def test_related_cards_route(client, board, cards):
+    h = {"X-Mindboard-Token": TOKEN}
+    res = client.get(f"/api/boards/{board['id']}/cards/{cards['mount']}/related", headers=h)
+    assert res.status_code == 200, res.text
+    assert cards["mount"] not in [g["id"] for g in res.json()["results"]]
+    assert client.get(f"/api/boards/{board['id']}/cards/{'Z' * 26}/related", headers=h).status_code == 404
 
 
 # --------------------------------------------------------------- pictures --
@@ -510,15 +630,24 @@ class Seeing:
     """The chat model as the indexer sees it: loaded, one question at a time,
     and a picture described as whatever it was told to say."""
 
-    def __init__(self, said="A site plan showing junction 4 and a red pole.", running=True):
+    def __init__(self, said="A site plan showing junction 4 and a red pole.", running=True, short=None):
         import threading as th
-        self.said, self._running, self.asked = said, running, 0
+        self.said, self._running, self.asked, self.started, self.short = said, running, 0, 0, short
         self._asking = th.Lock()
 
     def running(self):
         return self._running
 
+    def start(self):
+        self._running, self.started = True, self.started + 1
+
+    def memory_note(self):
+        return self.short
+
     def chat(self, messages, **kw):
+        # a request with no picture in it is not a picture being described
+        if isinstance(messages[-1]["content"], str):
+            return {"text": "fine"}
         self.asked += 1
         assert any(p.get("type") == "image_url" for p in messages[-1]["content"]), "it is shown the picture"
         return {"text": self.said}
@@ -564,28 +693,316 @@ def test_a_picture_left_out_still_goes_in_as_words(dd, board, cards, monkeypatch
     BoardIndex.drop(dd, board["id"])
 
 
-def test_pictures_are_described_only_while_the_model_is_loaded_and_free(dd, board, cards):
+def test_a_new_picture_is_described_soon_but_never_ahead_of_a_question(dd, board, cards):
+    """DESIGN.md 51: a picture never described loads the model - unless the
+    graphics card is short of memory - and a question always goes first."""
     from mindboard.indexer import Indexer
     from mindboard.search_index import BoardIndex, PictureNotes
 
-    asleep = Seeing(running=False)
-    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: asleep)
+    short = Seeing(running=False, short="only 1.1 GB is free")
+    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: short)
     try:
         indexer.want(board["id"]); assert indexer.idle(20)
-        assert asleep.asked == 0, "opening a board never loads the chat model"
+        assert short.started == 0 and short.asked == 0, "not loaded onto a full graphics card"
         busy = Seeing()
         busy._asking.acquire()                      # answering a question
         indexer.describer = lambda: busy
         indexer.want(board["id"]); assert indexer.idle(20)
         assert busy.asked == 0, "a question is never kept waiting"
-        free = Seeing()
-        indexer.describer = lambda: free
+        waited = Seeing()
+        waited.waiting = 1                          # a question waiting for the model
+        indexer.describer = lambda: waited
         indexer.want(board["id"]); assert indexer.idle(20)
-        assert free.asked == 2, "the site plan and the video's cover, once each"
+        assert waited.asked == 0 and not waited._asking.locked(), "the question goes first"
+        asleep = Seeing(running=False)
+        indexer.describer = lambda: asleep
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert asleep.started == 1, "loaded for pictures nobody has described"
+        assert asleep.asked == 2, "the site plan and the video's cover, once each"
         assert len(PictureNotes.get(dd).notes) == 2
         assert cards["plan"] in BoardIndex.get(dd, board["id"]).keyword("red pole")
         indexer.want(board["id"]); assert indexer.idle(20)
-        assert free.asked == 2, "never described twice"
+        assert asleep.asked == 2, "never described twice"
     finally:
         indexer.stop()
         BoardIndex.drop(dd, board["id"])
+
+
+def test_a_run_holds_the_model_once_and_a_stop_holds_for_the_rest_of_it(model):
+    """An expert's plan, steps and answer are one run (DESIGN.md 47): the run
+    takes the slot, its calls (hold=False) neither take it again nor clear a
+    Stop given earlier in the run."""
+    m = llm.LocalModel(model, start_timeout=20)
+    hi = [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+    try:
+        assert m._asking.acquire(blocking=False)
+        m._cancel.clear()
+        first = list(m.stream(hi, hold=False))
+        assert first[-1]["type"] == "done" and not first[-1]["stopped"]
+        assert m._asking.locked(), "the run still holds the slot"
+        m.cancel()
+        after = list(m.stream(hi, hold=False))
+        assert after == [{"type": "done", "stopped": True, "tokens": 0, "tokens_per_second": None,
+                          "prompt_tokens": 0}], "nothing more is asked once stopped"
+        assert m.cancelled()
+        m._asking.release()
+        again = list(m.stream(hi))
+        assert again[-1]["type"] == "done" and not again[-1]["stopped"], "a new question starts afresh"
+    finally:
+        m.stop()
+
+
+def test_an_image_the_model_writes_is_taken_out():
+    """The citation shows a picture (DESIGN.md 48); a markdown image the model
+    writes - once with an address it made up - is removed."""
+    cid = "A" * 26
+    got = ask.check_citations(
+        f"Here is the diagram:\n\n[![Pipeline](pipeline.png)](https://user-images.example.com/1)\n\n"
+        f"It starts with the query [[{cid}]], see ![x](y.png) there.", {cid})
+    assert "![" not in got["answer"] and "example.com" not in got["answer"]
+    assert got["answer"].startswith("Here is the diagram:\n\nIt starts with the query")
+    assert got["cited"] == [cid]
+
+
+def test_older_short_descriptions_are_redone_only_while_the_model_is_loaded(dd, board, cards):
+    """The short descriptions of DESIGN.md 38 stay in use until each picture is
+    described again with its text written out (51) - and the model is never
+    loaded just for that."""
+    import json
+
+    from mindboard.indexer import Indexer
+    from mindboard.search_index import BoardIndex, PictureNotes, picture_of
+
+    nodes = nodes_of(dd, board)
+    shas = [picture_of(nodes[cards[k]]) for k in ("plan", "video")]
+    old = dd.root / "search" / "pictures.json"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text(json.dumps({s: "an old short description" for s in shas}), encoding="utf-8")
+    PictureNotes._all.clear()
+    notes = PictureNotes.get(dd)
+    assert notes.notes[shas[0]] == "an old short description" and not notes.done(shas[0])
+
+    asleep = Seeing(running=False, said="A site plan. Text: JUNCTION 4, red pole, scale 1:500")
+    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: asleep)
+    try:
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert asleep.started == 0, "not loaded just to redo a description"
+        assert cards["plan"] in BoardIndex.get(dd, board["id"]).keyword("old short description"), \
+            "meanwhile the old one still finds it"
+        loaded = Seeing(said="A site plan. Text: JUNCTION 4, red pole, scale 1:500")
+        indexer.describer = lambda: loaded
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert loaded.asked == 2 and all(notes.done(s) for s in shas)
+        assert cards["plan"] in BoardIndex.get(dd, board["id"]).keyword("scale 1:500"), \
+            "a detail written in the picture is found"
+        assert json.loads(old.read_text(encoding="utf-8"))[shas[0]] == "an old short description", \
+            "the old file is left as it was"
+    finally:
+        indexer.stop()
+        BoardIndex.drop(dd, board["id"])
+        PictureNotes._all.clear()
+
+
+def test_a_long_description_is_kept_whole_for_search_but_shortened_in_the_prompt():
+    long = "Text: " + "word " * 500
+    assert len(ask.seen_line(long)) < len(long)
+    assert ask.seen_line(long).startswith("\n    picture shows: Text: word")
+    assert ask.seen_line("") == ""
+    assert "every word, number and label you can read" in ask.DESCRIBE
+
+
+def test_a_picture_whose_file_is_missing_never_loads_the_model(dd, board, cards):
+    from mindboard.assets import resolve
+    from mindboard.indexer import Indexer
+    from mindboard.search_index import BoardIndex, picture_of
+
+    nodes = nodes_of(dd, board)
+    c = conn_for(dd, board["id"])
+    for k in ("plan", "video"):
+        resolve(dd, c, board["id"], picture_of(nodes[cards[k]])).unlink()
+    asleep = Seeing(running=False)
+    indexer = Indexer(dd, Embeds, quiet=0.01, describer=lambda: asleep)
+    try:
+        indexer.want(board["id"]); assert indexer.idle(20)
+        assert asleep.started == 0 and asleep.asked == 0
+    finally:
+        indexer.stop()
+        BoardIndex.drop(dd, board["id"])
+
+
+def test_an_explain_more_answer_links_to_a_card_the_conversation_found(dd, board, cards):
+    """DESIGN.md 53: Explain more cites nothing of its own, so the drafter is
+    given every card the conversation brought up, and the conversation, and
+    names the relation - a kind, and a label of its own where it is too coarse."""
+    import json as js
+
+    model = DraftModel(js.dumps({"title": "Ice loads the pole", "text": "Ice adds weight [[" + "A" * 26 + "]].",
+                                 "link_to": cards["link"], "kind": "causes",
+                                 "label": "adds stress to the mount, really a lot", "why": "Ice is another load."}))
+    got = ask.draft_card(model, nodes_of(dd, board), "explain more", "In winter, ice also loads the pole.",
+                         [], candidates=[cards["mount"], cards["link"]],
+                         history=[{"role": "user", "text": "where should it go?"},
+                                  {"role": "assistant", "text": f"On the corner [[{cards['mount']}]]."}])
+    assert got["link_to"] == cards["link"], "a card from earlier in the conversation, though not cited"
+    assert got["kind"] == "causes" and got["label"] == "adds stress to the mount,", "five words at most"
+    assert got["why"] == "Ice is another load." and "[[" not in got["text"]
+    prompt = model.asked[0][1]["content"]
+    assert "CONVERSATION BEFORE" in prompt and "where should it go?" in prompt and "[[" not in prompt.split("LAST QUESTION")[0]
+    assert "gusts to 30 m/s" in prompt, "it reads a card's words, not only its title"
+    assert "never write about" in ask.DRAFT_SYSTEM.lower() or "never repeat" in ask.DRAFT_SYSTEM.lower()
+
+
+def test_with_nothing_to_link_to_a_draft_stands_alone(dd, board, cards):
+    import json as js
+
+    got = ask.draft_card(DraftModel(js.dumps({"title": "T", "text": "x", "link_to": "nowhere",
+                                              "label": "explains", "why": "because"})),
+                         nodes_of(dd, board), "q", "a", [])
+    assert got["link_to"] == "" and got["label"] == "" and got["why"] == ""
+
+
+# ------------------------------------------------------- dates and loops --
+
+def test_dates_are_read_as_dates_and_listed_newest_first():
+    """DESIGN.md 56: "latest" was answered with 3 Nov on a board whose newest
+    date was 11 Nov; the dates are now worked out and handed over, newest first."""
+    import datetime as dt
+
+    today = dt.date(2026, 11, 12)
+    got = ask.found_dates("Visit 22 Sep and 29 Oct 2026; Nov 3, 2026; 2026-11-05; on 19 Oct 2026", today)
+    assert [str(d) for d in got] == ["2026-09-22", "2026-10-19", "2026-10-29", "2026-11-03", "2026-11-05"]
+    assert ask.found_dates("Oct 2026 and 3rd Nov", today) == [dt.date(2026, 11, 3)], "no day out of a year"
+    a, b = "A" * 26, "B" * 26
+    ctx = ask.Context([a, b], f"CARDS\n[{a}] (text) IP meeting - 3 Nov 2026\n    notes\n\n"
+                              f"[{b}] (text) Business School - 11 Nov 2026", [])
+    note = ask.dates_note(ctx, "when was the latest visit?", today)
+    assert "Today is Thursday 12 November 2026." in note
+    assert note.index("11 November 2026: Business School") < note.index("3 November 2026: IP meeting")
+    assert f"[{b}]" in note and "(text)" not in note
+    plain = ask.dates_note(ctx, "who works on diversions?", today)
+    assert plain.strip() == "(Today is Thursday 12 November 2026.)", "only today's date when time is not asked"
+    assert "Today is" in ask.messages(ctx, "when?", [])[-1]["content"], "said with the question, after the cards"
+
+
+def test_thinking_that_goes_round_in_circles_is_cut_short():
+    guard = ask.LoopGuard()
+    line = "* Wait, I need to check if I should mention the 3 Nov meeting in the NEXT section.\n"
+    assert not guard.feed(line + "* Yes.\n* Okay.\n" + line)
+    assert guard.feed("* Yes.\n" + line), "the same line a third time"
+    assert not ask.LoopGuard().feed("Yes.\nYes.\nYes.\nYes.\n"), "short lines do not count"
+
+
+def test_an_answer_whose_thinking_loops_is_answered_without_it():
+    loop = "Wait, I need to check the NEXT section again.\n"
+
+    class Looping:
+        def __init__(self):
+            self.calls, self.closed = [], False
+
+        def stream(self, messages, *, think=False, **kw):
+            self.calls.append(think)
+            if think:
+                try:
+                    for _ in range(50):
+                        yield {"type": "thinking", "text": loop}
+                finally:
+                    self.closed = True
+                return
+            yield {"type": "text", "text": "The latest visit was on 11 Nov.\nNEXT: a\nNEXT: b\nNEXT: c"}
+            yield {"type": "done"}
+
+    model = Looping()
+    ctx = ask.Context(["A" * 26], f"CARDS\n[{'A' * 26}] visit 11 Nov 2026", [])
+    evs = list(ask.answer_events(model, ctx, "when was the latest visit?", [], think=True))
+    thinking = "".join(e["text"] for e in evs if e["event"] == "thinking")
+    assert thinking.count(loop) == 3 and "went round in circles" in thinking, "stopped at the third repeat"
+    assert model.calls == [True, False] and model.closed, "hung up, then answered without thinking"
+    assert evs[-1]["event"] == "done" and evs[-1]["answer"].startswith("The latest visit was on 11 Nov.")
+
+
+def test_fixing_the_writing_keeps_the_note_and_says_if_anything_changed():
+    import json as js
+
+    model = DraftModel(js.dumps({"title": "Meeting with Sarah", "text": "We discussed the budget.\n- next step"}))
+    got = ask.proofread(model, "Meting with Sarah", "We discused the budjet.\n- next step")
+    assert got == {"title": "Meeting with Sarah", "text": "We discussed the budget.\n- next step", "changed": True}
+    assert "Do not add, remove, shorten" in model.asked[0][0]["content"]
+    same = ask.proofread(DraftModel(js.dumps({"title": "Fine", "text": "Already right."})), "Fine", "Already right.")
+    assert not same["changed"]
+    cut = ask.proofread(DraftModel(js.dumps({"title": "T", "text": "short"})), "T", "a long note " * 20)
+    assert cut["text"] == "a long note " * 20 and not cut["changed"], "a reply that drops the note is not a fix"
+    assert ask.proofread(DraftModel("no json here"), "T", "x")["changed"] is False
+
+
+# ------------------------------------------------------ pictures pasted in --
+
+def png_url(colour=(200, 30, 30), size=(64, 40)) -> str:
+    import base64 as b64
+    import io as _io
+
+    from PIL import Image
+    buf = _io.BytesIO()
+    Image.new("RGB", size, colour).save(buf, "PNG")
+    return "data:image/png;base64," + b64.b64encode(buf.getvalue()).decode()
+
+
+def test_a_pasted_picture_is_read_as_a_plain_jpeg_and_a_bad_one_refused():
+    """DESIGN.md 62: whatever was pasted, the model gets a shrunk JPEG."""
+    got = ask.take_pasted([png_url(size=(3000, 1500))] * 6)
+    assert len(got) == ask.PASTED_MAX
+    assert got[0].data_url.startswith("data:image/jpeg;base64,") and got[0].card == "pasted 1"
+    assert got[0].tokens == (1024 * 512) // (32 * 32) + 16, "shrunk to MAX_SIDE first"
+    for bad in ["data:text/html;base64,PGI+", "data:image/png;base64,bm90IGEgcGljdHVyZQ==", "http://x/y.png"]:
+        with pytest.raises(ask.AskError):
+            ask.take_pasted([bad])
+
+
+def test_pasted_pictures_go_with_the_newest_question_after_the_cards():
+    pic = ask.take_pasted([png_url()])[0]
+    ctx = ask.Context(["A" * 26], "CARDS\n[" + "A" * 26 + "] a card", attached=[pic])
+    q = ask.with_pasted("what is this?", ["A red square."])
+    assert q == "what is this?\n\n(The person pasted a picture with this question. It shows: A red square.)"
+    msgs = ask.messages(ctx, q, [{"role": "user", "text": "hi"}, {"role": "assistant", "text": "hello"}])
+    assert msgs[1]["content"][0]["text"].startswith("CARDS"), "the cards still come first"
+    last = msgs[-1]["content"]
+    assert last[0]["text"] == ask.PASTED_HEAD and last[1]["image_url"]["url"] == pic.data_url
+    assert last[-1]["text"].startswith("what is this?")
+    assert ctx.tokens > ask.estimate(ctx.text), "a pasted picture counts towards what fits"
+    assert ask.with_pasted("q", ["", ""]) == "q"
+
+
+def test_asking_with_a_pasted_picture_looks_at_it_then_searches_and_answers(client, board, cards, model):
+    h = {"X-Mindboard-Token": TOKEN}
+    res = client.post(ask_url(board["id"]), headers=h,
+                      json={"question": "what is in my picture?", "cards": [], "images": [png_url()]})
+    assert res.status_code == 200, res.text
+    evs = events(res)
+    assert evs[0] == ("pasted", {"said": ["The word is MINDBOARD, beside a red circle."]})
+    assert evs[1][0] == "context" and evs[-1][0] == "done"
+    log = (model.home / "logs" / "llama-server.log").read_text()
+    seen = evs[1][1]["pictures"] + 1                # the cards' pictures, and the pasted one
+    assert f"asked: images={seen} " in log, "the answer saw the pasted picture"
+    bad = client.post(ask_url(board["id"]), headers=h,
+                      json={"question": "q", "cards": [], "images": ["data:image/png;base64,AAAA"]})
+    assert bad.status_code == 400 and "could not be read" in bad.json()["detail"]
+
+
+def test_board_off_asks_the_model_alone(client, board, cards, model):
+    """DESIGN.md 63: no search, no cards, no board in the instructions - the
+    conversation and a pasted picture still go."""
+    h = {"X-Mindboard-Token": TOKEN}
+    res = client.post(ask_url(board["id"]), headers=h, json={
+        "question": "what is a mind map?", "cards": [cards["mount"]], "own": True, "images": [png_url()],
+        "history": [{"role": "user", "text": "hi"}, {"role": "assistant", "text": "hello"}]})
+    assert res.status_code == 200, res.text
+    evs = events(res)
+    assert [n for n, _ in evs if n == "pasted"] == [], "nothing to search, so no look first"
+    ctx = evs[0]
+    assert ctx[0] == "context" and ctx[1]["mode"] == "own" and ctx[1]["cards"] == [] and ctx[1]["pictures"] == 0
+    assert evs[-1][0] == "done" and evs[-1][1]["cited"] == []
+    log = (model.home / "logs" / "llama-server.log").read_text()
+    assert "asked: images=1 messages=4 roles=system,user,assistant,user" in log, \
+        "the system prompt, the conversation and the question with its picture - no cards"
+    msgs = ask.messages(ask.own_context(), "q", [])
+    assert msgs[0]["content"] == ask.OWN_SYSTEM and "board" not in msgs[-1]["content"].lower()
+    assert "CARDS" not in ask.OWN_SYSTEM

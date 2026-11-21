@@ -20,16 +20,16 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from . import retrieve
 from .ask import (SEARCH_PICTURE_TOKENS, Context, Picture, _picture, board_index,
-                  card_text, estimate)
+                  card_text, file_excerpt, seen_line)
 from .boards import conn_for, list_boards
 from .ids import ulid
 from .ops import read_graph
 from .paths import DataDir
-from .search_index import card_fields, card_passage
+from .search_index import PictureNotes, card_fields, card_passage, file_of, picture_of
 
 # The monument each expert stands as on the Experts page, all in sand - earned,
 # not chosen freely: each needs a library of a certain size, from the simplest
@@ -209,17 +209,26 @@ def library(dd: DataDir, expert: dict, embedder=None, embed_model: str = "",
 
 
 def search(lib: Library, question: str, embedder=None, reranker=None,
-           budget: Optional[int] = None) -> retrieve.Found:
+           budget: Optional[int] = None, also: Optional[list[str]] = None,
+           first: Optional[list[str]] = None) -> retrieve.Found:
     """Each board searched as a board is (retrieve.score), merged by
     reciprocal rank so every board's best cards come near the top, then the
-    strongest that fit one budget."""
+    strongest that fit one budget. `also`: what the plan's steps looked up
+    (DESIGN.md 47) - added beside the question, which counts twice, never
+    instead of it (37). `first`: cards the steps' findings cite, put at the
+    top so the answer can cite them too."""
     rankings, used = [], ["keywords"]
+    if first:
+        rankings += [[i for i in dict.fromkeys(first) if i in lib.nodes]] * 3
     for bid, index in lib.indexes.items():
         mine = {k: v for k, v in lib.nodes.items() if lib.board_of[k] == bid}
         if not mine:
             continue
         scored, how = retrieve.score(index, question, mine, lib.edges, embedder, reranker)
-        rankings.append(retrieve.ranked(scored))
+        rankings += [retrieve.ranked(scored)] * (2 if also else 1)
+        for phrase in also or []:
+            extra, _ = retrieve.score(index, phrase, mine, lib.edges, embedder, reranker)
+            rankings.append(retrieve.ranked(extra))
         used = how
     cost = {}
     for index in lib.indexes.values():
@@ -228,26 +237,52 @@ def search(lib: Library, question: str, embedder=None, reranker=None,
                         retrieve.BUDGET if budget is None else budget, used)
 
 
+def where(lib: Library, card: str) -> dict:
+    """Where a cited card is - its board and title, so a citation can open it -
+    and its picture, so the answer can show it, or its PDF, so the answer can
+    offer it to read (DESIGN.md 48)."""
+    n = lib.nodes[card]
+    out = {"board": lib.board_of[card], "title": n.get("title") or "Untitled"}
+    pic, pdf = picture_of(n), file_of(n)
+    if pic:
+        out["pic"] = pic
+    if pdf:
+        c = n.get("content") or {}
+        out["pdf"] = pdf
+        out["file"] = str(c.get("filename") or c.get("alt") or n.get("title") or "file.pdf")
+    return out
+
+
 def context(dd: DataDir, expert: dict, question: str, history: Optional[list[dict]] = None,
-            embedder=None, embed_model: str = "", reranker=None) -> tuple[Context, Library]:
-    """What the model reads to answer as this expert."""
-    lib = library(dd, expert, embedder, embed_model)
+            embedder=None, embed_model: str = "", reranker=None,
+            reading: Optional[dict] = None, lib: Optional[Library] = None,
+            offer: Optional[list[str]] = None) -> tuple[Context, Library]:
+    """What the model reads to answer as this expert - with its plan for the
+    question, if one was made (ask.make_plan, run_plan). `offer`: PDFs that
+    match the question itself, kept in so the answer can offer them - the
+    steps' cards would otherwise push them out (DESIGN.md 48)."""
+    lib = lib or library(dd, expert, embedder, embed_model)
     if not lib.nodes:
         raise ExpertError("this expert's boards have no cards yet")
+    plan = reading or {}
     asked = [str(t.get("text", "")) for t in (history or []) if t.get("role") == "user"]
-    found = search(lib, " ".join(asked[-2:] + [question]), embedder, reranker)
+    found = search(lib, " ".join(asked[-2:] + [question]), embedder, reranker,
+                   also=[s["find"] for s in plan.get("steps") or [] if s.get("find")] or None,
+                   first=[c for f in plan.get("findings") or [] for c in f.get("cards", [])]
+                   + list(offer or []) or None)
     ids = found.ids
-    blocks = {i: card_text(lib.nodes[i], lib.nodes) + f"\n    (on the board {lib.titles[lib.board_of[i]]!r})"
-              for i in ids}
+    blocks = {i: card_text(lib.nodes[i], lib.nodes) + file_excerpt(dd, lib.nodes[i])
+              + f"\n    (on the board {lib.titles[lib.board_of[i]]!r})" for i in ids}
     pictures, budget, left = [], SEARCH_PICTURE_TOKENS, 0
+    seen = PictureNotes.get(dd).notes
     for i in ids:
-        n = lib.nodes[i]
-        c = n.get("content") or {}
-        sha = c.get("sha256") if n["type"] == "image" else c.get("poster") if n["type"] == "video" else None
+        sha = picture_of(lib.nodes[i])
         if not sha:
             continue
         if budget <= 0:
-            left += 1
+            left += 1                 # its title still goes in - and, as for a board,
+            if seen.get(sha):         # what the picture shows, in words (DESIGN.md 39)
+                blocks[i] += seen_line(seen[sha])
             continue
         bid = lib.board_of[i]
         got = _picture(dd, lib.conns[bid], bid, sha)
@@ -266,9 +301,110 @@ def context(dd: DataDir, expert: dict, question: str, history: Optional[list[dic
     persona = f"You are {expert['name']}." + (f" {expert['brief']}" if expert.get("brief") else "")
     ctx = Context(ids, text, pictures, whole=True, pictures_left_out=left, mode="search",
                   total=len(lib.nodes), how=found.how, persona=persona,
-                  where={i: {"board": lib.board_of[i], "title": lib.nodes[i].get("title") or "Untitled"}
-                         for i in ids})
+                  where={i: where(lib, i) for i in ids}, reading=reading or {},
+                  offer=[c for c in offer or [] if c in ids])
     return ctx, lib
+
+
+# ------------------------------------------------------- planned answers --
+#
+# DESIGN.md 47. The plan's steps run in turn: each searches the expert's boards
+# for what it must find, and the model works out from those cards - and what
+# the earlier steps found - only what the step asks. The answer is then written
+# from the question's own search, the steps' cards and their findings. One
+# question holds the model for the whole run, so nothing else slips in between
+# its calls, and a Stop, or a new question, ends it between steps or mid-step.
+
+STEP = """You do one step of a plan for answering a person's question from
+their notes. Read the CARDS and work out only what this step asks - not the
+whole question. Write 1 to 5 short lines of plain notes, no preamble and no
+advice to the person, each citing the cards it comes from straight after, like
+[[01ABC...]]. Use only ids you were given. If the cards do not hold it, write
+one line starting "Not in the cards:" and say what is missing. A step that
+looks nothing up - a weighing - has no cards of its own: it works from what the
+earlier steps found, citing the cards they cite."""
+
+STEP_BUDGET = 2500       # tokens of cards one step reads
+STEP_TOKENS = 320
+PLAN_TITLES = 30         # card titles the planner sees: what the notes hold
+OFFER_FROM = 8           # a PDF among the question's best matches is offered to read
+PLAN_BUDGET = 4000
+
+
+def run_plan(model, lib: Library, question: str, plan: dict, embedder=None,
+             reranker=None, seen: Optional[dict] = None) -> Iterator[dict]:
+    """Each step of the plan in turn, as events: {"event": "step", "i",
+    "status": "running"} as it starts, then "done" (or "stopped") with what it
+    found. The findings are kept on the plan, for the answer."""
+    from .ask import STEP_MARK, check_citations, collect
+
+    findings: list[dict] = plan.setdefault("findings", [])
+    for i, step in enumerate(plan.get("steps") or []):
+        if model.cancelled():
+            return
+        yield {"event": "step", "i": i, "status": "running"}
+        query = step["find"]
+        earlier = findings[step["uses"] - 1] if 0 < step["uses"] <= len(findings) else None
+        if query and earlier:
+            # a link in a chain: look for what the earlier step found, by name
+            named = [lib.nodes[c].get("title") or "" for c in earlier["cards"][:3] if c in lib.nodes]
+            query = " ".join([query, *named])
+        ids = search(lib, query, embedder, reranker, budget=STEP_BUDGET).ids if query else []
+        def shown(c: str) -> str:
+            pic = picture_of(lib.nodes[c])
+            return seen_line(seen[pic]) if pic and seen and seen.get(pic) else ""
+
+        cards = "\n\n".join(card_text(lib.nodes[c], lib.nodes) + shown(c)
+                            + f"\n    (on the board {lib.titles[lib.board_of[c]]!r})" for c in ids)
+        before = "\n\n".join(f"{f['i'] + 1}. {plan['steps'][f['i']]['work_out']}\n{f['text']}"
+                             for f in findings)
+        prompt = (f"QUESTION\n{question.strip()}\n\n"
+                  + (f"WHAT EARLIER STEPS FOUND\n{before}\n\n" if before else "")
+                  + f"{STEP_MARK} {i + 1}\n{step['work_out']}\n\n"
+                  + (f"CARDS\n{cards}" if cards else
+                     "CARDS\n(this step looks nothing up: work it out from what the earlier steps "
+                     "found above, citing the cards they cite)"))
+        text, stopped = collect(model, [{"role": "system", "content": STEP},
+                                        {"role": "user", "content": prompt}],
+                                max_tokens=STEP_TOKENS, temperature=0.2)
+        allowed = set(ids) | {c for f in findings for c in f["cards"]}
+        checked = check_citations(text.strip(), allowed)
+        found = {"i": i, "text": checked["answer"], "cards": checked["cited"],
+                 "searched": query, "looked_at": len(ids)}
+        if not stopped:
+            findings.append(found)
+        yield {"event": "step", "i": i, "status": "stopped" if stopped else "done",
+               "text": found["text"], "cards": found["cards"], "looked_at": len(ids),
+               "where": {c: where(lib, c) for c in found["cards"]}}
+        if stopped:
+            return
+
+
+def answer(model, dd: DataDir, expert: dict, lib: Library, question: str, history: list[dict],
+           embedder=None, embed_model: str = "", reranker=None, think: bool = False,
+           attached: Optional[list] = None) -> Iterator[dict]:
+    """Ask an expert, planned (DESIGN.md 47): the plan, its steps, then the
+    answer, as one run of events. The caller holds the model for all of it."""
+    from .ask import answer_events, check_citations, make_plan
+
+    # what the notes hold, so the plan is made from them
+    asked = [str(h.get("text", "")) for h in history if h.get("role") == "user"]
+    glimpse = search(lib, " ".join(asked[-2:] + [question]), embedder, reranker, budget=PLAN_BUDGET)
+    titles = [lib.nodes[c].get("title") or "" for c in glimpse.ids[:PLAN_TITLES]]
+    offer = [c for c in glimpse.ids[:OFFER_FROM] if file_of(lib.nodes[c])]
+    plan = make_plan(model, question, history, titles)
+    if plan:
+        yield {"event": "plan", **plan}
+    if plan.get("steps"):
+        yield from run_plan(model, lib, question, plan, embedder, reranker, PictureNotes.get(dd).notes)
+    if model.cancelled():
+        yield {"event": "done", **check_citations("", set()), "next": "", "nexts": [],
+               "stopped": True, "tokens_per_second": None}
+        return
+    ctx, _ = context(dd, expert, question, history, embedder, embed_model, reranker, plan, lib=lib,
+                     offer=offer)
+    ctx.attached = list(attached or [])        # pictures pasted with the question (DESIGN.md 62)
+    yield from answer_events(model, ctx, question, history, think, hold=False)
 
 
 # ----------------------------------------------------------------- guide --

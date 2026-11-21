@@ -1,7 +1,7 @@
 """Wire shapes. Deliberately identical to what graph.json holds, so export is
 just this serialisation written to a file - one representation, not two."""
 
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -10,7 +10,9 @@ EDGE_KINDS = ("relates", "causes", "supports", "contradicts", "part-of", "exampl
 PROVENANCE = ("user", "import", "ai")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "theme": "midnight",
+    # a new board starts light - near-white, white cards (DESIGN.md 68); boards
+    # made before keep the theme they have
+    "theme": "daylight",
     "palette": {},
     "viewport": {"x": 0, "y": 0, "zoom": 1},
 }
@@ -81,6 +83,10 @@ class AskRequest(BaseModel):
     keep: list[str] = Field(default_factory=list, max_length=200)
     # Explain more: answer from the conversation and its cards - no search
     explain: bool = False
+    # Board off: the model alone - no search, no cards (DESIGN.md 63)
+    own: bool = False
+    # pictures pasted into the chat box, as data: URLs (DESIGN.md 62)
+    images: list[Annotated[str, Field(max_length=21_000_000)]] = Field(default_factory=list, max_length=4)
 
 
 class DraftRequest(BaseModel):
@@ -88,6 +94,10 @@ class DraftRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     answer: str = Field(min_length=1, max_length=20000)
     cited: list[str] = Field(default_factory=list, max_length=100)
+    # every card the conversation brought up, and the conversation itself
+    # (DESIGN.md 53): an Explain more answer cites nothing to link to
+    candidates: list[str] = Field(default_factory=list, max_length=200)
+    history: list[AskTurn] = Field(default_factory=list, max_length=40)
 
 
 class GuideRequest(BaseModel):

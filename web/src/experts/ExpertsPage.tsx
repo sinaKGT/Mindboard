@@ -9,8 +9,11 @@
  */
 import { useEffect, useRef, useState } from 'react'
 
+import { AnswerFiles, filesToOffer } from '../AnswerFiles'
+import { AnswerPictures, picturesToShow } from '../AnswerPictures'
 import { api, type Expert, type ExpertDraft, type ShapeState } from '../api'
 import { Prose } from '../Prose'
+import { AskedWith, PastedStrip, PickPicture, PICTURE_ONLY, usePasted, withSaid, type PastedPicture } from '../Pasted'
 import type { BoardMeta } from '../types'
 import { ExpertScene } from './scene'
 import './experts.css'
@@ -22,11 +25,23 @@ import { SPEEDS, Voice } from './voice'
 const BEYOND = 'Beyond your board:'
 /** **Beyond your board:**, or a heading of it, read as the plain line (as ask.BEYOND_MARK) */
 const BEYOND_MARK = /(^[ \t]*#{1,6}[ \t]*)?(\*\*|__)?[ \t]*Beyond your board:[ \t]*(\*\*|__)?/m
-const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
+const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/i
 const COLOURS = ['#f0c070', '#7fd3c4', '#e9967a', '#d8c8a8', '#b4a0e8', '#8fc8f0', '#e6d36a', '#e88fb4']
 
-interface Turn { role: 'user' | 'expert'; text: string; where?: Record<string, { board: string; title: string }>;
-  next?: string; status?: 'thinking' | 'writing' | 'done'; error?: string; stopped?: boolean }
+/** where each card is, and its picture or PDF if it has one (DESIGN.md 48) */
+type Where = Record<string, { board: string; title: string; pic?: string; pdf?: string; file?: string }>
+/** how the expert read the question before answering (DESIGN.md 46) */
+interface Reading { kind?: string; reading?: string; weigh?: string[] }
+/** a step of its plan (DESIGN.md 47): what to look for, and what to work out from it */
+interface PlanStep { find: string; work_out: string; uses: number }
+/** a step as it runs, and what it found */
+interface StepRun { status: 'waiting' | 'running' | 'done' | 'stopped'; text?: string; where?: Where; looked_at?: number }
+
+interface Turn { role: 'user' | 'expert'; text: string; where?: Where; cited?: string[]; offer?: string[];
+  nexts?: string[]; reading?: Reading; plan?: PlanStep[]; steps?: StepRun[];
+  status?: 'thinking' | 'writing' | 'done'; error?: string; stopped?: boolean
+  /** a question's pasted pictures, small, and what the model saw in them (DESIGN.md 62) */
+  images?: string[]; said?: string[] }
 
 /** where a conversation waits while you look at a card it cited */
 const RETURN = 'mb_xp_return'
@@ -45,6 +60,35 @@ const SpeakerIcon = ({ on }: { on: boolean }) => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
     <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
     {on ? <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /> : <path d="M16 9.5l5 5M21 9.5l-5 5" />}</svg>)
+
+/** the plan, as it runs: each step, waiting, running or done, with what it found */
+function Plan({ turn, onCard }: { turn: Turn; onCard: (board: string, card: string) => void }) {
+  const mark = { waiting: '\u25cb', running: '\u25cc', done: '\u2713', stopped: '\u2013' }
+  return (
+    <ol className="xp-plan">
+      {turn.plan!.map((s, j) => {
+        const run = turn.steps?.[j] ?? { status: 'waiting' as const }
+        return (
+          <li key={j} className={`xp-step is-${run.status}`}>
+            <span className="xp-step-mark">{mark[run.status]}</span>
+            <div className="xp-step-body">
+              <div className="xp-step-what">{s.work_out}</div>
+              <div className="xp-step-find">
+                {s.find ? <>looks for “{s.find}”</> : <>from the steps before</>}
+                {run.status === 'done' && run.looked_at ? <> · read {run.looked_at} cards</> : null}
+              </div>
+              {run.text ? (
+                <details className="xp-found"><summary>What it found</summary>
+                  <Said turn={{ role: 'expert', text: run.text, where: run.where, status: 'done' }} onCard={onCard} />
+                </details>
+              ) : null}
+            </div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
 
 /** an answer, laid out (Prose), its citations as chips that open their card */
 function Said({ turn, onCard }: { turn: Turn; onCard: (board: string, card: string) => void }) {
@@ -152,6 +196,7 @@ export function ExpertsPage() {
   const busyRef = useRef(false)
   const setBusy = (b: boolean) => { busyRef.current = b; setBusyState(b) }
   const [draft, setDraft] = useState('')
+  const pasted = usePasted()
   const [editing, setEditing] = useState<Expert | null | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
   const [shapes, setShapes] = useState<ShapeState[]>([])
@@ -278,34 +323,61 @@ export function ExpertsPage() {
   }
 
   /** talking to the expert inside */
-  const askExpert = async (question: string) => {
+  const askExpert = async (question: string, pictures: PastedPicture[] = []) => {
     const e = experts[current], s = scene.current!
     const history = turns.filter((t) => t.status === 'done' || t.role === 'user').slice(-10)
-      .map((t) => ({ role: t.role === 'user' ? 'user' : 'assistant', text: t.text }))
+      .map((t) => ({ role: t.role === 'user' ? 'user' : 'assistant',
+                     text: t.role === 'user' ? withSaid(t.text, t.said) : t.text }))
     stick.current = true
-    setTurns((ts) => [...ts, { role: 'user', text: question }, { role: 'expert', text: '', status: 'thinking' }])
-    const patch = (p: Partial<Turn>) => setTurns((ts) => { const c = ts.slice(); c[c.length - 1] = { ...c[c.length - 1], ...p }; return c })
+    setTurns((ts) => [...ts,
+      { role: 'user', text: question, ...(pictures.length ? { images: pictures.map((p) => p.thumb) } : {}) },
+      { role: 'expert', text: '', status: 'thinking' }])
+    const update = (f: (t: Turn) => Partial<Turn>) =>
+      setTurns((ts) => { const c = ts.slice(); c[c.length - 1] = { ...c[c.length - 1], ...f(c[c.length - 1]) }; return c })
+    const patch = (p: Partial<Turn>) => update(() => p)
     const ctl = new AbortController(); controller.current = ctl
     setBusy(true); s.thinking = true
     voice.current.stop()
     let text = ''
+    // it speaks while it writes (DESIGN.md 46): each sentence as soon as it is finished
+    const speaking = voiceReady && voiceOn
+    const who = expertsRef.current.findIndex((x) => x.id === e.id)
+    const name = e.voice || cast[Math.max(who, 0) % Math.max(cast.length, 1)] || 'af_heart'
+    let started = false
     try {
-      await api.askExpert(e.id, { question, history }, (name, data) => {
-        if (name === 'context') patch({ where: data.where })
-        else if (name === 'text') {
+      await api.askExpert(e.id, { question, history, images: pictures.map((p) => p.url) }, (kind, data) => {
+        if (kind === 'pasted') {
+          // what the model saw in the pictures, kept with the question
+          setTurns((ts) => { const c = ts.slice(); const q = c.length - 2
+            if (q >= 0) c[q] = { ...c[q], said: data.said }; return c })
+        } else if (kind === 'plan') {
+          // its plan, shown before it looks anything up (DESIGN.md 47)
+          patch({ reading: data, plan: data.steps?.length ? data.steps : undefined,
+                  steps: data.steps?.map(() => ({ status: 'waiting' as const })) })
+        } else if (kind === 'step') {
+          update((t) => {
+            const steps = (t.steps ?? []).slice()
+            steps[data.i] = { status: data.status, text: data.text, where: data.where, looked_at: data.looked_at }
+            return { steps }
+          })
+        } else if (kind === 'context') patch({ where: data.where, reading: data.reading, offer: data.offer })
+        else if (kind === 'text') {
           text += data.text
           s.thinking = false
           patch({ text, status: 'writing' })
-        } else if (name === 'done') {
-          patch({ text: data.answer, next: data.next || undefined, status: 'done' })
-          // and it says it, in its own voice
-          if (voiceReady && voiceOn && data.answer) {
-            const i = expertsRef.current.findIndex((x) => x.id === e.id)
-            const spoken = data.next ? `${data.answer}\n\nWould you like to know: ${data.next}` : data.answer
-            void voice.current.say(spoken, e.voice || cast[Math.max(i, 0) % Math.max(cast.length, 1)] || 'af_heart')
+          if (speaking) {
+            if (!started) { voice.current.begin(name); started = true }
+            voice.current.feed(text)
+          }
+        } else if (kind === 'done') {
+          const nexts: string[] = data.nexts?.length ? data.nexts : data.next ? [data.next] : []
+          patch({ text: data.answer, nexts, cited: data.cited, status: 'done', stopped: data.stopped || undefined })
+          if (speaking && (text || data.answer)) {
+            if (!started) voice.current.begin(name)
+            voice.current.end(text || data.answer, nexts[0] ? `Would you like to know: ${nexts[0]}` : '')
           }
         }
-        else if (name === 'error') patch({ error: data.message, status: 'done' })
+        else if (kind === 'error') { patch({ error: data.message, status: 'done' }); if (started) voice.current.end(text) }
       }, ctl.signal)
     } catch (err: any) {
       if (!ctl.signal.aborted) patch({ error: err.message || 'could not ask', status: 'done' })
@@ -314,18 +386,23 @@ export function ExpertsPage() {
   }
 
   const send = (text: string) => {
-    if (!text.trim()) return
+    const pictures = inside ? pastedRef.current.pictures : []
+    if (!text.trim() && pictures.length) text = PICTURE_ONLY
+    if (!text.trim() || pastedRef.current.reading) return
     if (busyRef.current) {
       // spoken over an answer: it is being stopped - ask as soon as it has
       if (talk.current?.on) { interrupt(); setTimeout(() => sendRef.current(text), 150) }
       return
     }
     setDraft('')
-    if (inside) void askExpert(text.trim())
+    pastedRef.current.clear()
+    if (inside) void askExpert(text.trim(), pictures)
     else void askGuide(text.trim())
   }
   const e = experts[current]
 
+  const pastedRef = useRef(pasted)
+  pastedRef.current = pasted
   const sendRef = useRef(send)
   sendRef.current = send
   const interruptRef = useRef(interrupt)
@@ -400,23 +477,58 @@ export function ExpertsPage() {
           <div className="xp-who">{e.name}</div>
           <div className="xp-cartouches">{e.boards.map((b) => <span key={b.id} className="xp-cartouche">{b.title}</span>)}</div>
           <div className="xp-turns" ref={scroller}
-            onScroll={(ev) => { const el = ev.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60 }}>
+            onScroll={(ev) => { const el = ev.currentTarget; if (el.scrollHeight - el.scrollTop - el.clientHeight < 24) stick.current = true }}
+            // scrolling up lets go at once, even while the answer is written (DESIGN.md 68)
+            onWheel={(ev) => { if (ev.deltaY < 0) stick.current = false }}
+            onTouchMove={() => { stick.current = false }}
+            onPointerDown={(ev) => { if (ev.target === ev.currentTarget) stick.current = false }}>
             {turns.map((t, i) => t.role === 'user'
-              ? <div key={i} className="xp-q">{t.text}</div>
+              ? <div key={i} className="xp-q"><AskedWith thumbs={t.images} />{t.text}</div>
               : (
                 <div key={i} className="xp-a">
-                  {t.status === 'thinking' ? <div className="xp-note">Thinking…</div> : <Said turn={t} onCard={goToCard} />}
+                  {t.reading?.weigh?.length || t.plan?.length ? (
+                    <div className="xp-reading" title="How the expert read your question, and its plan, before answering">
+                      {t.reading?.reading ? <><span className="xp-reading-head">Read as</span> {t.reading.reading}</> : null}
+                      {t.reading?.weigh?.length ? (
+                        <div className="xp-weigh">{t.reading.weigh.map((w, j) => <span key={j}>{w}</span>)}</div>
+                      ) : null}
+                      {t.plan?.length ? <><div className="xp-reading-head xp-plan-head">Its plan</div>
+                        <Plan turn={t} onCard={goToCard} /></> : null}
+                    </div>
+                  ) : null}
+                  {t.status === 'thinking' ? (
+                    <div className="xp-note">{(() => {
+                      const at = t.steps?.findIndex((r) => r.status === 'waiting' || r.status === 'running') ?? -1
+                      return t.plan?.length && at >= 0 ? `Working through step ${at + 1} of ${t.plan.length}…`
+                        : t.plan?.length ? 'Writing the answer…'
+                        : turns[i - 1]?.images?.length && !turns[i - 1]?.said ? 'Looking at your picture…' : 'Thinking…'
+                    })()}</div>
+                  ) : <Said turn={t} onCard={goToCard} />}
+                  {t.status === 'done' ? (
+                    <AnswerPictures className="xp-pictures" onShow={(p) => goToCard(p.board, p.card)}
+                      pictures={picturesToShow(t.cited ?? [], Object.keys(t.where ?? {}), (id) => {
+                        const w = t.where?.[id]
+                        return w?.pic ? { card: id, board: w.board, sha: w.pic, title: w.title } : null
+                      })} />
+                  ) : null}
+                  {t.status === 'done' ? (
+                    <AnswerFiles className="xp-files" onShow={(f) => goToCard(f.board, f.card)}
+                      files={filesToOffer(t.cited ?? [], [...(t.offer ?? []), ...Object.keys(t.where ?? {})], (id) => {
+                        const w = t.where?.[id]
+                        return w?.pdf ? { card: id, board: w.board, sha: w.pdf, name: w.file || w.title } : null
+                      })} />
+                  ) : null}
                   {t.stopped ? <div className="xp-note">Stopped</div> : null}
                   {t.error ? <div className="xp-error">{t.error}</div> : null}
                   {adding === i ? (
-                    <AddCard boards={e.boards} question={turns[i - 1]?.text ?? ''} answer={t.text} where={t.where ?? {}}
+                    <AddCard expertId={e.id} boards={e.boards} turns={turns} at={i}
                       onDone={() => setAdding(null)} onOpen={goToCard} />
                   ) : t.status === 'done' && t.text.trim() && !t.error && !(busy && i === turns.length - 1) ? (
                     <button className="xp-add" onClick={() => setAdding(i)}>+ Add to board</button>
                   ) : null}
-                  {t.next && i === turns.length - 1 && !busy ? (
-                    <div className="xp-next"><span>Would you like to know</span>
-                      <button onClick={() => send(t.next!)}>{t.next}</button></div>
+                  {t.nexts?.length && i === turns.length - 1 && !busy ? (
+                    <div className="xp-next"><span>You could ask next</span>
+                      {t.nexts.map((q, j) => <button key={j} onClick={() => send(q)}>{q}</button>)}</div>
                   ) : null}
                 </div>
               ))}
@@ -436,12 +548,17 @@ export function ExpertsPage() {
 
       {notice ? <div className="xp-notice" onClick={() => setNotice('')}>{notice}</div> : null}
       {experts.length ? (
-        <div className={`xp-bar ${busy ? 'busy' : ''} talk-${talkState}`} ref={bar}>
+        <div className={`xp-bar ${busy ? 'busy' : ''} talk-${talkState} ${inside && (pasted.pictures.length || pasted.reading) ? 'has-pictures' : ''}`} ref={bar}
+          onDragOver={inside ? pasted.onDragOver : undefined} onDrop={inside ? pasted.onDrop : undefined}>
+          {inside ? <PastedStrip pictures={pasted.pictures} reading={pasted.reading} remove={pasted.remove}
+            className="xp-pasted" /> : null}
           {talkState !== 'off' ? <span className="xp-wave" aria-hidden="true"><i /><i /><i /><i /><i /></span> : null}
           <input value={talking ? heard : draft} readOnly={talking} className={talking ? 'heard' : ''}
             onChange={(ev) => setDraft(ev.target.value)}
             onKeyDown={(ev) => { if (ev.key === 'Enter') send(draft) }}
+            onPaste={inside ? pasted.onPaste : undefined}
             placeholder={hint} />
+          {inside ? <PickPicture add={pasted.add} className="xp-pick" size={15} /> : null}
           {canListen ? (
             <button className={`xp-mic ${talkState !== 'off' ? 'on' : ''}`}
               title={talkState !== 'off' ? 'Listening - press to stop' : 'Talk - just speak, hands-free'}

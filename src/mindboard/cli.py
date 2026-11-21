@@ -201,6 +201,11 @@ def backup(
                 f"{'' if len(result['boards']) == 1 else 's'}", bold=True)
     for b in result["boards"]:
         typer.echo(f"  {b['title'][:38]:<38}  {b['nodes']:>4} nodes")
+    if result["missing"]:
+        from .bundle import missing_note
+
+        typer.echo()
+        typer.secho(missing_note(result["missing"]).rstrip(), fg=typer.colors.YELLOW)
     size = result["bytes"] / 1024 / 1024
     typer.echo()
     typer.secho(f"  {result['path']}", fg=typer.colors.CYAN)
@@ -512,6 +517,8 @@ def ai_voice():
     con.print("  listen, and Smart Turn (BSD-2) to know when you have finished - about 520 MB,")
     con.print("  once. Everything stays on this computer.")
     con.print("  Its pronunciation step uses espeak-ng (GPL-3.0); it runs only on this computer.")
+    if voice.setup_note():
+        con.print(f"  {voice.setup_note()}")
 
     def show(name, done, total):
         con.print(f"\r  {name}: {100 * done // max(total, 1):3d}%", end="")
@@ -522,6 +529,15 @@ def ai_voice():
         con.print(f"\n  [red]{exc}[/red]")
         raise typer.Exit(1)
     con.print("\n  Done. Experts now speak their answers - and you can speak to them.")
+
+
+@app.command("update")
+def update(force: bool = typer.Option(False, "--force", help="Reinstall even when already up to date.")):
+    """Get the latest version from GitHub and reinstall (your boards are not touched)."""
+    from .menu import update_and_reinstall
+
+    if not update_and_reinstall(interactive=False, force=force):
+        raise typer.Exit(1)
 
 
 @ai_app.command("status")

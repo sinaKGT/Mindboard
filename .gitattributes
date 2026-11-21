@@ -1,0 +1,4 @@
+# Shell scripts run on macOS and Linux: a Windows line ending breaks them
+# ("bad interpreter"), so they always keep Unix ones, whoever edits them.
+*.sh       text eol=lf
+*.command  text eol=lf

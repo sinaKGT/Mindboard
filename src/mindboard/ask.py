@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import io
+import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -18,9 +19,11 @@ from typing import Any, Iterator, Optional
 
 from . import retrieve
 from .assets import resolve
-from .search_index import BoardIndex, PictureNotes
+from .search_index import BoardIndex, FileNotes, PictureNotes, card_notes, file_of
 from .ops import read_graph
 from .paths import DataDir
+
+log = logging.getLogger("mindboard.ask")
 
 MAX_SIDE = 1024            # pictures are shrunk to this; larger costs time, not insight
 CONTEXT_TOKENS = 32768     # what the model is started with (llm.LocalModel)
@@ -45,6 +48,10 @@ BEYOND_MARK = re.compile(r"(?:^[ \t]*#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*Beyond your
                          r"(?:\*\*|__)?", re.MULTILINE)
 CITE = re.compile(r"\[\[([0-9A-Za-z]{26})\]\]")
 LONE_ID = re.compile(r"(?<!\[)\[([0-9A-Z]{26})\](?!\])")
+# Told its cited pictures are shown, the model once also wrote a markdown image
+# - "[![diagram](file.png)](https://...)" with an address it made up. The
+# citation shows the picture (DESIGN.md 48); an image it writes is taken out.
+MD_IMAGE = re.compile(r"\[?!\[[^\]\n]*\]\([^)\n]*\)(?:\]\([^)\n]*\))?")
 # the question the model offers to answer next, on the answer's last line
 NEXT = "NEXT:"
 NEXT_LINE = re.compile(r"^[ \t*_>#-]*NEXT:[ \t*_]*(.*?)[ \t*_]*$", re.MULTILINE)
@@ -59,7 +66,14 @@ SYSTEM = f"""You help one person think, using their own mind map.
 CARDS are their notes. Each starts with its id in brackets, like [01ABC...]. A
 PICTURE belongs to the card named just before it. RELATIONSHIPS are claims the
 person made about how their cards connect - treat them as their judgement, not
-yours; "contradicts" means they think the two disagree.
+yours; "contradicts" means they think the two disagree. Anything you take from
+a PICTURE is cited like a card's text: cite the card it belongs to. A picture card you cite
+is shown to the person beside your answer: when they ask to see, show or find a
+picture, diagram or screenshot, cite the cards whose pictures show it - never
+say you cannot show pictures, and never write an image or a link to one: the
+citation is what shows it. A FILE card's text is excerpted under it ("file
+holds"): when a file covers what they ask, cite it - it is offered to them to
+read more.
 
 How to answer:
 1. Answer from the cards first. Every time you use something from a card, cite
@@ -70,10 +84,260 @@ How to answer:
    read next - put it after a line that reads exactly "{BEYOND}", and cite
    nothing there.
 3. If the cards do not answer the question, say so plainly first.
-4. Be direct and brief. Plain sentences and short lists; no tables.
-5. Finish with one last line that starts exactly "{NEXT}" and holds one
-   question the person could ask next: short, in their words, taking what they
-   just asked one step further, answerable from their cards or your knowledge."""
+4. Start with the answer itself. Never open with "Based on your cards", "Your
+   board says" or the like, and do not keep mentioning the cards or the board -
+   the citations already show where things come from.
+5. Short and exact by default: a few sentences or a short list, nothing
+   padded. Explain at length - steps, examples - only when they ask you to
+   explain, or ask how or why. Plain sentences and short lists; no tables.
+   Write a formula in LaTeX between dollar signs, like $E = mc^2$.
+6. Finish with three lines, each starting exactly "{NEXT}", each holding one
+   question the person could ask next: short, in their words, about what they
+   just asked and the cards in front of you - one going deeper, one putting it
+   to use, one on a neighbouring idea from the cards."""
+
+
+# Board off (DESIGN.md 63): the person asked for the model alone - no search,
+# no cards, and instructions that do not talk of a board, so nothing pulls the
+# answer towards their notes. The conversation and pasted pictures still count.
+OWN_SYSTEM = f"""You are a clear, careful assistant. The person has switched their board
+of notes off for this question: answer from your own knowledge, and do not
+mention cards, notes or a board.
+
+Start with the answer itself. Short and exact by default: a few sentences or a
+short list. Explain at length - steps, examples - only when they ask you to
+explain, or ask how or why. Say plainly when you are unsure or something may
+be out of date. Write a formula in LaTeX between dollar signs, like $E = mc^2$.
+
+Finish with three lines, each starting exactly "{NEXT}", each holding one
+question the person could ask next: short, in their words - one going deeper,
+one putting it to use, one on a neighbouring idea."""
+
+
+FILE_SYSTEM = f"""You answer questions about one document, from PASSAGES found in it for
+each question - its best-matching parts, not the whole document. A page given
+as a picture is that page itself: read its figures, tables and formulas from
+the picture.
+
+How to answer:
+1. Answer from the passages first. After each thing you take from them, say
+   where it is, in brackets as the passage is labelled: (p. 12), (Sales, rows
+   2-21), (table 2). Never invent a page. Figures under CALCULATED were
+   worked out over the whole sheet with tools: use them for totals, counts,
+   averages and rankings, and say "(calculated)" after each.
+2. If the passages do not answer the question, say so plainly first: the
+   answer may be in a part of the document not found this time - suggest
+   other words to ask with. The passages are only part of the document:
+   never present a total, count, average or "all of them" worked out from
+   passages as if it covered the whole document, and never fill a gap with
+   a guess. Say what is known and from where.
+3. Anything you add from your own knowledge goes after a line that reads
+   exactly "{BEYOND}" - meaning beyond this document.
+4. Start with the answer itself. Short and exact by default: a few sentences
+   or a short list. Explain at length only when asked to explain, or asked how
+   or why. Write a formula in LaTeX between dollar signs, like $E = mc^2$.
+5. Finish with three lines, each starting exactly "{NEXT}", each holding one
+   question the person could ask next about this document: short, in their
+   words - one going deeper, one putting it to use, one on a neighbouring
+   part of the document."""
+
+
+def own_context(attached: Optional[list[Picture]] = None) -> Context:
+    """What a Board off question takes: nothing from the board."""
+    return Context([], "", mode="own", attached=list(attached or []))
+
+
+# ------------------------------------------------------ planning the answer --
+#
+# DESIGN.md 46-47. Asked "which architecture for a RAG system for a school,
+# where students ask about their lectures?", an expert answered for "a school
+# project" and recommended the simplest thing, weighing nothing: it answered in
+# one pass, its rules pushing it to summarise the cards that matched. Now it
+# first plans. It reads the question - what kind it is, the person's situation
+# in their own terms, the points that decide the answer - and, when one search
+# cannot answer it, writes the steps to take first: what to find in the cards
+# and what to work out from it, one step per look. The steps are run in turn
+# (experts.run_plan), each seeing what the earlier ones found, and the answer is
+# written from their findings. The plan is shown as it runs, so a misreading is
+# seen at once.
+#
+# A question about one thing gets no steps and is answered as before: the
+# planner of DESIGN.md 37 split every question into phrases and made search
+# worse, so here the steps are added beside the question's own search, never
+# instead of it, and a single step - no better than that search - is dropped.
+
+PLAN = """You plan how an expert will answer a person's question from their
+notes (the cards) before the answer is written. Reply with JSON only:
+{"kind": "...", "reading": "...", "weigh": ["..."],
+ "steps": [{"find": "...", "work_out": "...", "uses": 0}]}
+
+- kind: "fact" (what is, define, recall), "explain" (how or why), "advice"
+  (what should they do or choose, for their situation), "compare" (which of
+  these, how they differ), "design" (how to build something), "summarize",
+  "extract" (list every X), "analyze" (assess, critique), "rewrite",
+  "translate" or "plan" (the steps to do something).
+- reading: their situation and what they want, in one plain sentence in the
+  second person ("You want ..."), in their terms. Keep their goal as big as
+  they said it: never call it a project, homework, prototype or toy unless
+  they did, and do not decide they are a beginner.
+- weigh: for advice, compare and design only - the 3 to 6 things about their
+  situation that decide the answer: who will use it and how, the material,
+  its scale, how accurate it must be, what must be kept apart. Use only what
+  they said or what plainly follows from it; where something that matters is
+  left open, name it as an open point ("how many courses - unknown") rather
+  than assume it. Never add a budget, deadline or limit they did not give.
+  Short phrases. [] otherwise.
+- steps: what must be looked up and worked out, in order, before the answer
+  can be written - one step for each separate look in the notes. Plan from
+  WHAT THE NOTES HOLD: an option worth checking is one the notes name, called
+  by the name they give it; never plan a step for something they do not hold.
+  Only when a single search cannot answer the question:
+    * several parts: one step per part;
+    * a chain - find one thing, then what it leads to: the later step names
+      the earlier one in "uses";
+    * advice, compare or design: one step for each option the notes name
+      that could fit (2 or 3 of them - never just one: an answer that checks
+      one option has weighed nothing), and a last step that weighs them
+      against the points above.
+  A fact or an explanation of one thing needs no steps: []. At most 4 steps.
+    find: a short search phrase for the notes that hold it - its specific
+      names and terms, not the whole question. "" for a step that only works
+      from the earlier steps, like the weighing.
+    work_out: what to work out, in one short sentence.
+    uses: the number of the earlier step whose result it needs (1 is the
+      first), or 0.
+
+For example, asked "which database should our clinic use for patient
+records?" (design) with notes titled "PostgreSQL", "MongoDB", "Backups" and
+"Indexes", the steps are one per option the notes hold - not one per topic -
+and then the weighing:
+  {"find": "PostgreSQL", "work_out": "Does PostgreSQL fit a clinic's patient records?", "uses": 0},
+  {"find": "MongoDB", "work_out": "Does MongoDB fit them?", "uses": 0},
+  {"find": "", "work_out": "Weigh the two against the deciding points.", "uses": 0}
+and "what is a foreign key?" (fact) gets "steps": []."""
+
+STEP_MARK = "STEP"
+KINDS = ("fact", "explain", "advice", "compare", "design", "summarize", "extract", "analyze",
+         "rewrite", "translate", "plan")
+WEIGHED = ("advice", "compare", "design")
+MAX_STEPS = 4
+
+
+def collect(model, messages: list[dict], max_tokens: int, temperature: float) -> tuple[str, bool]:
+    """One reply, whole, inside a run that already holds the model (hold=False):
+    the reply's text, and whether it was stopped."""
+    text, stopped = [], False
+    for ev in model.stream(messages, max_tokens=max_tokens, think=False,
+                           temperature=temperature, hold=False):
+        if ev["type"] == "text":
+            text.append(ev["text"])
+        elif ev["type"] == "done":
+            stopped = bool(ev.get("stopped"))
+    return "".join(text), stopped
+
+
+def make_plan(model, question: str, history: Optional[list[dict]] = None,
+              titles: Optional[list[str]] = None) -> dict:
+    """The question, read and planned before it is answered: {kind, reading,
+    weigh, steps} - or {} if the model's reply cannot be used, and the
+    question is then answered as it stands. `titles`: the cards that best
+    match the question, so the plan is made from what the notes hold rather
+    than blind - planned blind, it asked for embedding models and vector
+    databases the notes never mention, and every step came back empty."""
+    convo = "\n".join(f"{t.get('role')}: {str(t.get('text', ''))[:300]}"
+                      for t in (history or [])[-4:] if str(t.get("text", "")).strip())
+    held = "\n".join(f"- {t}" for t in dict.fromkeys(titles or []) if t.strip())
+    prompt = ((f"CONVERSATION SO FAR\n{convo}\n\n" if convo else "")
+              + (f"WHAT THE NOTES HOLD (titles of the cards that best match)\n{held}\n\n" if held else "")
+              + f"QUESTION\n{question.strip()}")
+    reply = ""
+    try:
+        reply, stopped = collect(model, [{"role": "system", "content": PLAN},
+                                         {"role": "user", "content": prompt}],
+                                 max_tokens=600, temperature=0.1)
+        if stopped:
+            return {}
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception as exc:
+        # answered as it stands - but said, so a planner that keeps failing is seen
+        log.warning("the plan could not be read (%s): %r", exc.__class__.__name__, reply[:400])
+        return {}
+    return clean_plan(got) if isinstance(got, dict) else {}
+
+
+def clean_plan(got: dict) -> dict:
+    """What the planner said, kept to what can be run."""
+    def phrases(v, n):
+        return [str(x).strip()[:120] for x in (v if isinstance(v, list) else []) if str(x).strip()][:n]
+
+    kind = str(got.get("kind", "")).strip().lower()
+    kind = kind if kind in KINDS else "explain"
+    steps: list[dict] = []
+    for s in got.get("steps") if isinstance(got.get("steps"), list) else []:
+        if not isinstance(s, dict):
+            continue
+        find = " ".join(str(s.get("find") or "").split())[:120]
+        work = " ".join(str(s.get("work_out") or "").split())[:200]
+        if not (find or work):
+            continue
+        try:
+            uses = int(s.get("uses") or 0)
+        except (TypeError, ValueError):
+            uses = 0
+        steps.append({"find": find, "work_out": work or f"What the cards say about {find}.",
+                      "uses": uses if 0 < uses <= len(steps) else 0})
+    steps = steps[:MAX_STEPS]
+    if len(steps) < 2 or not any(s["find"] for s in steps):
+        steps = []          # one look is the question's own search (DESIGN.md 37)
+    return {"kind": kind, "reading": str(got.get("reading", "")).strip()[:300],
+            "weigh": phrases(got.get("weigh"), 6) if kind in WEIGHED else [], "steps": steps}
+
+
+LENGTH = {"fact": "Answer in one to three sentences, then the three NEXT: lines.",
+          "explain": "Explain it clearly, with a short example if it helps, then the three NEXT: lines."}
+
+
+def _task_shapes() -> None:
+    # the chat's task shapes (tasks.py) for an expert's plan too, so both
+    # answer "summarize" the same way
+    from .tasks import SHAPES
+    for kind in ("summarize", "extract", "analyze", "rewrite", "translate", "plan"):
+        LENGTH[kind] = SHAPES[kind] + " Then the three NEXT: lines."
+
+
+_task_shapes()
+
+
+def findings_note(plan: dict) -> str:
+    """What the steps found, said with the question for the answer to build on."""
+    found = plan.get("findings") or []
+    if not found:
+        return ""
+    steps = plan.get("steps") or []
+    parts = [f"{f['i'] + 1}. {steps[f['i']]['work_out'] if f['i'] < len(steps) else ''}\n{f['text']}"
+             for f in found]
+    return ("\n\n(WHAT YOUR STEPS FOUND - you looked these up before answering:\n\n"
+            + "\n\n".join(parts)
+            + "\n\nBuild the answer on these findings and cite the cards they cite. Where a step "
+              "found nothing in the cards, say so rather than fill the gap silently. Do not list "
+              "the steps themselves.)")
+
+
+def weighing(reading: dict) -> str:
+    """What the answer is asked to do with the plan - said with the question,
+    so the cached start of the prompt stays put."""
+    note = findings_note(reading)
+    if not reading.get("weigh"):
+        return note + (f"\n\n({LENGTH[reading['kind']]})" if reading.get("kind") in LENGTH else "")
+    points = "\n".join(f"- {w}" for w in reading["weigh"])
+    return note + (
+        f"\n\n(You read this as: {reading.get('reading', '')}\n"
+        f"What decides the answer:\n{points}\n"
+        "Answer briefly, in this order: your recommendation, in one or two sentences; why - "
+        "one short line for each point above, saying how the recommended approach meets it; "
+        "for an approach that does not fit, one line on why not; then one line on what would "
+        "change this recommendation. Do not open by restating the question or mentioning the "
+        "cards. End with the three NEXT: lines as always.)")
 
 
 class AskError(ValueError):
@@ -102,10 +366,34 @@ class Context:
     persona: str = ""                      # an expert's name and brief (experts.py)
     # for an expert: each card's board and title, so a citation can open it
     where: dict = field(default_factory=dict)
+    # an expert's plan for the question - its reading, steps and what they
+    # found - made before answering (DESIGN.md 46-47)
+    reading: dict = field(default_factory=dict)
+    # PDFs that match the question itself, offered to read more (DESIGN.md 48)
+    offer: list[str] = field(default_factory=list)
+    # pictures pasted into the question itself - not on the board (DESIGN.md 62)
+    attached: list[Picture] = field(default_factory=list)
+    # asking one file (DESIGN.md 64): where each passage sent comes from
+    passages: list = field(default_factory=list)
+    # what the task's steps found and the shape the task asks for (tasks.py,
+    # DESIGN.md 66) - said with the question, so the cached start stays put
+    task_note: str = ""
 
     @property
     def tokens(self) -> int:
-        return estimate(self.text) + sum(p.tokens for p in self.pictures)
+        return (estimate(self.text) + sum(p.tokens for p in self.pictures)
+                + sum(p.tokens for p in self.attached))
+
+
+FILE_EXCERPT = 700       # characters of a PDF's text the model reads with its card
+
+
+def file_excerpt(dd: DataDir, node: dict) -> str:
+    """The start of a PDF's text, under its card, so the model knows what the
+    file covers and can offer it (DESIGN.md 48). "" for other cards."""
+    sha = file_of(node)
+    text = FileNotes.get(dd).notes.get(sha) if sha else ""
+    return f"\n    file holds: {text[:FILE_EXCERPT]}" if text else ""
 
 
 def estimate(text: str) -> int:
@@ -187,6 +475,73 @@ def _picture(dd: DataDir, conn: sqlite3.Connection, bid: str, sha: str) -> Optio
     return url, (w * h) // (32 * 32) + 16   # Qwen sees a picture in 32-pixel squares
 
 
+# ---------------------------------------------------- pictures pasted in --
+#
+# DESIGN.md 62: a picture pasted into the chat box comes with the question. It
+# is shrunk and re-encoded like a card's picture - whatever was pasted, the
+# model gets a plain JPEG - described in a few lines so the board can be
+# searched for what it shows, and then seen by the model with the question.
+
+PASTED_MAX = 4                 # pictures with one question
+PASTED_BYTES = 15_000_000      # a pasted picture's size, before shrinking
+PASTED_TOKENS = 220            # a description to search by: a few lines
+PASTED_PROMPT = ("Say in two or three plain sentences what this picture shows - what kind of "
+                 "picture it is, its subject, and the main words, names, numbers or formulas in "
+                 "it (formulas in LaTeX between dollar signs). No preamble.")
+
+
+def take_pasted(urls: list[str]) -> list[Picture]:
+    """Pasted pictures (data: URLs) as the model takes them. AskError for
+    anything that is not a picture."""
+    from PIL import Image
+
+    got: list[Picture] = []
+    for i, url in enumerate(urls[:PASTED_MAX]):
+        head, _, data = str(url).partition(",")
+        if not head.startswith("data:image/") or ";base64" not in head:
+            raise AskError("a pasted picture did not come through - paste it again")
+        try:
+            raw = base64.b64decode(data, validate=False)
+            if len(raw) > PASTED_BYTES:
+                raise AskError("that picture is too large - paste a smaller one")
+            with Image.open(io.BytesIO(raw)) as im:
+                im = im.convert("RGB")
+                im.thumbnail((MAX_SIDE, MAX_SIDE))
+                buf = io.BytesIO()
+                im.save(buf, "JPEG", quality=88)
+                w, h = im.size
+        except AskError:
+            raise
+        except Exception:
+            raise AskError("a pasted picture could not be read - try a PNG or JPEG")
+        got.append(Picture(f"pasted {i + 1}",
+                           "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"),
+                           (w * h) // (32 * 32) + 16))
+    return got
+
+
+def describe_pasted(model, pic: Picture) -> str:
+    """A few lines on what a pasted picture shows, to search the board by.
+    The caller holds the model."""
+    reply = model.chat([{"role": "user", "content": [
+        {"type": "text", "text": PASTED_PROMPT},
+        {"type": "image_url", "image_url": {"url": pic.data_url}}]}],
+        max_tokens=PASTED_TOKENS, think=False, temperature=0.2)
+    return " ".join(str(reply.get("text") or "").split())[:1200]
+
+
+def with_pasted(question: str, said: list[str]) -> str:
+    """The question as it is searched and answered: what was pasted, in words.
+    Kept in the conversation too, so a follow-up still knows the picture."""
+    said = [d for d in said if d]
+    if not said:
+        return question
+    if len(said) == 1:
+        return f"{question}\n\n(The person pasted a picture with this question. It shows: {said[0]})"
+    return (f"{question}\n\n(The person pasted {len(said)} pictures with this question. "
+            + " ".join(f"Picture {i + 1} shows: {d}" for i, d in enumerate(said)) + ")")
+
+
 # cards a question embeds itself before searching - what one person writes
 # between two questions; more than that waits for the background indexer
 EMBED_NOW = 32
@@ -208,7 +563,7 @@ def board_index(dd: DataDir, conn: sqlite3.Connection, bid: str, nodes: dict[str
     row = conn.execute("SELECT revision FROM board WHERE id=?", (bid,)).fetchone()
     revision = row["revision"] if row else 0
     index = BoardIndex.get(dd, bid)
-    notes = PictureNotes.get(dd).notes
+    notes = card_notes(dd)
     try:
         if not background:
             index.sync(nodes, revision, embedder, embed_model, notes)
@@ -266,7 +621,7 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
         ids, mode, how = expand(nodes, chosen), "chosen", ""
         if not ids:
             raise AskError("none of those cards are on this board any more")
-    blocks = {i: card_text(nodes[i], nodes) for i in ids}
+    blocks = {i: card_text(nodes[i], nodes) + file_excerpt(dd, nodes[i]) for i in ids}
 
     inside = set(ids)
     pictures: list[Picture] = []
@@ -282,7 +637,7 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
             left_out += 1             # its card's title and caption still go in -
             seen = PictureNotes.get(dd).notes.get(sha)
             if seen:                  # and what the picture shows, in words (DESIGN 39)
-                blocks[i] += f"\n    picture shows: {seen}"
+                blocks[i] += seen_line(seen)
             continue
         got = _picture(dd, conn, bid, sha)
         if got:
@@ -313,6 +668,126 @@ def build(dd: DataDir, conn: sqlite3.Connection, bid: str, chosen: list[str],
 READY = "I have read these cards. Ask away."
 
 
+# ------------------------------------------------------------- dates --
+#
+# DESIGN.md 56. Asked when the latest visit was, the model kept naming 3 Nov
+# on a board whose newest date was 11 Nov: it was never told today's date, and
+# a 9B model compares dates written in words unreliably. A question about time
+# now comes with today's date and the dates found in its cards, newest first -
+# worked out here, not left to the model.
+
+MONTHS = {m: i + 1 for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+MONTH_NAMES = ("January February March April May June July August September October "
+               "November December").split()
+_MON = r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+# "3 Nov 2026", "22 Sep and 29 Oct 2026", "3-5 Nov 2026" (a day before its month)
+DAY_MONTH = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+{_MON}\b\.?(?:\s*,?\s*(\d{{4}}))?", re.I)
+# "Nov 3, 2026", "November 3rd 2026"
+MONTH_DAY = re.compile(rf"\b{_MON}\.?\s+(\d{{1,2}})(?!\d)(?:st|nd|rd|th)?(?:\s*,?\s*(\d{{4}}))?", re.I)
+ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+YEAR = re.compile(r"\b(19|20)\d{2}\b")
+TIME_WORDS = re.compile(
+    r"\b(when|date|dates|dated|day|days|latest|last|recent(?:ly)?|newest|oldest|earliest|first|next|"
+    r"upcoming|previous|before|after|since|until|week|weeks|month|months|year|years|today|yesterday|"
+    r"tomorrow|ago|timeline|order|chronolog\w*|schedule|soon)\b|" + _MON, re.I)
+CARD_HEAD = re.compile(r"^\[([0-9A-Z]{26})\]\s*(.*)$")
+MAX_DATES = 20            # dates listed, newest first
+DATE_QUOTE = 70           # characters of the words around a date, quoted with it
+
+
+def found_dates(text: str, today, year: Optional[int] = None) -> list:
+    """The dates written in a piece of text, as dates. A date without a year
+    takes the year written after it in the same text, else `year`, else this
+    year."""
+    import datetime as dt
+
+    years = [int(m.group(0)) for m in YEAR.finditer(text)] or ([year] if year else [])
+    out = []
+
+    def add(y, m, d):
+        try:
+            out.append(dt.date(y, m, d))
+        except ValueError:
+            pass
+
+    for m in ISO.finditer(text):
+        add(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    for rx, day_first in ((DAY_MONTH, True), (MONTH_DAY, False)):
+        for m in rx.finditer(text):
+            day, mon = (m.group(1), m.group(2)) if day_first else (m.group(2), m.group(1))
+            year = m.group(3)
+            if not year:                     # "22 Sep and 29 Oct 2026": the year that follows
+                year = years[-1] if years else today.year
+            add(int(year), MONTHS[mon[:3].lower()], int(day))
+    return sorted(set(out))
+
+
+def around(text: str, d, today) -> str:
+    """The words around where a date is written: a short window on it, so a
+    long line still shows what the date is for - "...Updated 12 Nov 2026."."""
+    at = 0
+    for rx in (ISO, DAY_MONTH, MONTH_DAY):
+        for m in rx.finditer(text):
+            if d in found_dates(text[m.start():m.end()] + " " + str(d.year), today):
+                at = m.start()
+                break
+        else:
+            continue
+        break
+    start = max(0, min(at - 30, len(text) - DATE_QUOTE))
+    piece = text[start:start + DATE_QUOTE].strip()
+    return ("…" if start else "") + piece + ("…" if start + DATE_QUOTE < len(text) else "")
+
+
+def say_date(d) -> str:
+    return f"{d.day} {MONTH_NAMES[d.month - 1]} {d.year}"
+
+
+def dates_note(ctx: "Context", question: str, today=None) -> str:
+    """Today's date, and - for a question about time - the dates in the cards,
+    newest first, each with the card it is on."""
+    import datetime as dt
+
+    today = today or dt.date.today()
+    note = f"\n\n(Today is {dt.date.strftime(today, '%A')} {say_date(today)}.)"
+    if not TIME_WORDS.search(question) or ctx.mode in ("own", "file"):
+        return note
+    on: dict = {}                            # date -> the cards it is written on
+    for block in ctx.text.split("\n\n"):
+        # a block is one card - the first one sits under the CARDS heading line
+        lines = block.strip().split("\n")
+        at = next((i for i, ln in enumerate(lines[:2]) if CARD_HEAD.match(ln)), None)
+        if at is None:
+            continue
+        block = "\n".join(lines[at:])
+        head = CARD_HEAD.match(lines[at])
+        title = re.sub(r"^\(\w[\w-]*\)\s*", "", head.group(2)).strip()[:70] or "Untitled"
+        block_years = [int(m.group(0)) for m in YEAR.finditer(block)]
+        seen_here: set = set()
+        # each date with the words around it, so "Updated 12 Nov 2026" is not
+        # read as a visit beside "Meeting at the lab on 11 Nov 2026" (DESIGN.md 56)
+        for i, line in enumerate(lines[at:]):
+            for d in found_dates(line, today, block_years[-1] if block_years else None):
+                if d in seen_here:
+                    continue
+                seen_here.add(d)
+                said = line if i else head.group(2)
+                said = " ".join(re.sub(r"^\(\w[\w-]*\)\s*", "", said).split())
+                quote = f' - "{around(said, d, today)}"' if said and said != title else ""
+                on.setdefault(d, []).append(f"{title}{quote} [{head.group(1)}]")
+    if not on:
+        return note
+    lines = [f"- {say_date(d)}{' (after today)' if d > today else ''}: " + "; ".join(cards[:6])
+             + (f"; and {len(cards) - 6} more" if len(cards) > 6 else "")
+             for d, cards in sorted(on.items(), reverse=True)[:MAX_DATES]]
+    return note[:-1] + (
+        " The dates written in these cards, newest first, each with the words around it - "
+        "use this order for latest, most recent, next or earliest, and cite the cards. Read "
+        "what each date is for before using it: a date a list was updated or a report written "
+        "is not a visit or a meeting.\n" + "\n".join(lines) + ")")
+
+
 def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     """The cards come first and stay put; the conversation follows them; the
     newest question comes last.
@@ -325,6 +800,18 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     The short reply after the cards keeps the turns alternating, as the chat
     template expects. Change the cards and the start changes - and they are
     read again, as they should be."""
+    if ctx.mode == "own":
+        msgs = [{"role": "system", "content": OWN_SYSTEM}]
+        return _conversation(msgs, ctx, question, history)
+    if ctx.mode == "file":
+        # one file's passages (DESIGN.md 64), and its pages better seen than read
+        parts: list[dict[str, Any]] = [{"type": "text", "text": ctx.text}]
+        for p in ctx.pictures:
+            parts.append({"type": "text", "text": f"{p.card} of the file, as a picture:"})
+            parts.append({"type": "image_url", "image_url": {"url": p.data_url}})
+        msgs = [{"role": "system", "content": FILE_SYSTEM}, {"role": "user", "content": parts},
+                {"role": "assistant", "content": "I have read these passages. Ask away."}]
+        return _conversation(msgs, ctx, question, history)
     parts: list[dict[str, Any]] = [{"type": "text", "text": ctx.text}]
     for p in ctx.pictures:
         parts.append({"type": "text", "text": f"PICTURE on card [{p.card}]:"})
@@ -334,19 +821,39 @@ def messages(ctx: Context, question: str, history: list[dict]) -> list[dict]:
     msgs: list[dict] = [{"role": "system", "content": system},
                         {"role": "user", "content": parts},
                         {"role": "assistant", "content": READY}]
+    return _conversation(msgs, ctx, question, history)
+
+
+def _conversation(msgs: list[dict], ctx: Context, question: str, history: list[dict]) -> list[dict]:
+    """The conversation after the cards (or after nothing, Board off), and the
+    newest question last, with any pictures pasted into it."""
     for turn in history:
         if turn.get("role") in ("user", "assistant") and str(turn.get("text", "")).strip():
             msgs.append({"role": turn["role"], "content": str(turn["text"])})
     # Explain more asks for a fuller answer; said with the question, not in
     # the system prompt, so the start of the prompt - and its cache - stay put
-    msgs.append({"role": "user", "content": question.strip()
-                 + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")})
+    asked = (question.strip() + (f"\n\n({EXPLAIN})" if ctx.mode == "explain" else "")
+             + weighing(ctx.reading) + ctx.task_note + dates_note(ctx, question))
+    if ctx.attached:
+        # pasted pictures go with the newest question, after the cards, so the
+        # start of the prompt - and what llama-server has cached - stays put
+        pasted: list[dict[str, Any]] = [{"type": "text", "text": PASTED_HEAD}]
+        for p in ctx.attached:
+            pasted.append({"type": "image_url", "image_url": {"url": p.data_url}})
+        msgs.append({"role": "user", "content": pasted + [{"type": "text", "text": asked}]})
+    else:
+        msgs.append({"role": "user", "content": asked})
     return msgs
+
+
+PASTED_HEAD = ("PASTED with this question (not on the board): the picture below. Answer about it, "
+               "and bring in the cards wherever they bear on it - cite them as usual.")
 
 
 def check_fits(ctx: Context, question: str, history: list[dict], think: bool) -> int:
     """Refuse up front rather than let the model silently drop the start."""
-    used = (ctx.tokens + estimate(SYSTEM) + estimate(question)
+    used = (ctx.tokens + estimate(SYSTEM) + estimate(question) + estimate(weighing(ctx.reading))
+            + estimate(ctx.task_note)
             + sum(estimate(str(t.get("text", ""))) for t in history))
     room = CONTEXT_TOKENS - ANSWER_TOKENS - (THINKING_TOKENS if think else 0)
     if used > room:
@@ -361,17 +868,53 @@ def check_fits(ctx: Context, question: str, history: list[dict], think: bool) ->
 
 # ------------------------------------------------------------ the answer --
 
+NEXT_ANYCASE = re.compile(r"^[ \t*_>#-]*next:[ \t*_]*(.*?)[ \t*_]*$", re.MULTILINE | re.IGNORECASE)
+
+
+def split_nexts(answer: str) -> tuple[str, list[str]]:
+    """The answer, and the questions it offers next - the "NEXT:" lines that
+    end it (DESIGN.md 46: three). Only lines that end the answer count, so a
+    "NEXT:" the model happens to write mid-answer stays where it is."""
+    questions: list[str] = []
+    end = len(answer)
+    # a bare "NEXT:" with the questions on the lines under it
+    bare = [m for m in NEXT_LINE.finditer(answer) if not m.group(1).strip()]
+    if bare:
+        m = bare[-1]
+        under = [re.sub(r"^[ \t]*(?:[-*•]|\d+[.)])?[ \t]*", "", ln).strip().strip('"“”').strip()
+                 for ln in answer[m.end():].splitlines() if ln.strip()]
+        if 0 < len(under) <= 4 and all(not NEXT_LINE.match(ln) for ln in under):
+            return answer[:m.start()].rstrip(), [CITE.sub("", q).strip() for q in under][:3]
+    for m in reversed(list(NEXT_LINE.finditer(answer))):
+        if answer[m.end():end].strip():
+            break
+        q = re.sub(r"[ \t]+([.,;:?!])", r"\1", CITE.sub("", m.group(1))).strip().strip('"“”').strip()
+        if q:
+            questions.insert(0, q)
+        end = m.start()
+    if not questions:
+        # "Next: ..." in any case counts only as a block of two or more at the end -
+        # a single "Next:" line is just a word in the answer
+        block = []
+        for m in reversed(list(NEXT_ANYCASE.finditer(answer))):
+            if answer[m.end():end].strip():
+                break
+            block.insert(0, m)
+            end = m.start()
+        if len(block) >= 2:
+            questions = [CITE.sub("", m.group(1)).strip().strip('"“”').strip() for m in block]
+        else:
+            end = len(answer)
+    rest = answer[:end].rstrip()
+    # a "Beyond your board:" with nothing after it is left out
+    rest = re.sub(r"\n*[ \t*_#]*Beyond your board:[ \t*_]*$", "", rest).rstrip()
+    return rest, [q for q in questions if q][:3]
+
+
 def split_next(answer: str) -> tuple[str, str]:
-    """The answer, and the question it offers next - taken off its last line.
-    Only a line that ends the answer counts, so a "NEXT:" the model happens to
-    write mid-answer stays where it is. No line, no offer."""
-    found = [m for m in NEXT_LINE.finditer(answer) if not answer[m.end():].strip()]
-    if not found:
-        return answer, ""
-    m = found[-1]
-    question = re.sub(r"[ \t]+([.,;:?!])", r"\1", CITE.sub("", m.group(1)))
-    question = question.strip().strip('"“”').strip()
-    return answer[:m.start()].rstrip(), question
+    """The answer, and the first question it offers next."""
+    answer, questions = split_nexts(answer)
+    return answer, questions[0] if questions else ""
 
 
 def check_citations(answer: str, allowed: set[str]) -> dict:
@@ -391,7 +934,8 @@ def check_citations(answer: str, allowed: set[str]) -> dict:
 
     # the model sometimes copies an id as the RELATIONSHIPS list writes it,
     # in single brackets: read it as the citation it is meant to be
-    answer = LONE_ID.sub(r"[[\1]]", BEYOND_MARK.sub(BEYOND, answer))
+    answer = LONE_ID.sub(r"[[\1]]", BEYOND_MARK.sub(BEYOND, MD_IMAGE.sub("", answer)))
+    answer = re.sub(r"\n{3,}", "\n\n", answer)
     clean = CITE.sub(keep, answer)
     clean = re.sub(r"[ \t]+([.,;:])", r"\1", clean)
     board, _, beyond = clean.partition(BEYOND)
@@ -399,19 +943,48 @@ def check_citations(answer: str, allowed: set[str]) -> dict:
             "cited": cited, "dropped": dropped}
 
 
+class LoopGuard:
+    """Notices thinking that repeats itself (DESIGN.md 56): the same line - a
+    real line, not "Yes." - a third time."""
+
+    REPEATS = 3
+    LINE = 14          # characters a line needs to count
+
+    def __init__(self):
+        self.seen: dict[str, int] = {}
+        self.buf = ""
+
+    def feed(self, piece: str) -> bool:
+        self.buf += piece
+        while "\n" in self.buf:
+            line, self.buf = self.buf.split("\n", 1)
+            key = re.sub(r"[^a-z0-9 ]", "", line.lower())
+            key = " ".join(key.split())
+            if len(key) >= self.LINE:
+                self.seen[key] = self.seen.get(key, 0) + 1
+                if self.seen[key] >= self.REPEATS:
+                    return True
+        return False
+
+
 def answer_events(model, ctx: Context, question: str, history: list[dict],
-                  think: bool = False) -> Iterator[dict]:
+                  think: bool = False, hold: bool = True) -> Iterator[dict]:
     """Everything the person sees, in order: what went in, the thinking, the
-    words as they come, and finally the checked answer."""
+    words as they come, and finally the checked answer. hold=False inside a
+    run that already holds the model - an expert's plan and steps (47)."""
     used = check_fits(ctx, question, history, think)
     yield {"event": "context", "cards": ctx.cards, "pictures": len(ctx.pictures), "tokens": used,
            "whole": ctx.whole, "pictures_left_out": ctx.pictures_left_out,
-           "mode": ctx.mode, "total": ctx.total, "how": ctx.how, "where": ctx.where}
+           "mode": ctx.mode, "total": ctx.total, "how": ctx.how, "where": ctx.where,
+           "reading": ctx.reading, "offer": ctx.offer, "passages": ctx.passages}
     text: list[str] = []
     timings: dict = {}
-    for ev in model.stream(messages(ctx, question, history),
-                           max_tokens=ANSWER_TOKENS + (THINKING_TOKENS if think else 0),
-                           think=think):
+    looped = False
+    loop = LoopGuard()
+    asked = messages(ctx, question, history)
+    stream = model.stream(asked, max_tokens=ANSWER_TOKENS + (THINKING_TOKENS if think else 0),
+                          think=think, hold=hold)
+    for ev in stream:
         if ev["type"] == "progress":
             yield {"event": "progress", "total": ev["total"], "cached": ev["cached"],
                    "done": ev["done"]}
@@ -420,48 +993,139 @@ def answer_events(model, ctx: Context, question: str, history: list[dict],
             yield {"event": "text", "text": ev["text"]}
         elif ev["type"] == "thinking":
             yield {"event": "thinking", "text": ev["text"]}
+            if loop.feed(ev["text"]):
+                looped = True
+                break
         elif ev["type"] == "done":
             timings = ev
-    answer, next_question = split_next("".join(text))
+    if looped:
+        # DESIGN.md 56: thinking that goes round in circles never ends on its
+        # own - hang up on it, and answer without thinking
+        stream.close()
+        yield {"event": "thinking", "text": "\n\n(The thinking went round in circles - answering without it.)"}
+        for ev in model.stream(asked, max_tokens=ANSWER_TOKENS, think=False, hold=hold):
+            if ev["type"] == "text":
+                text.append(ev["text"])
+                yield {"event": "text", "text": ev["text"]}
+            elif ev["type"] == "done":
+                timings = ev
+    answer, questions = split_nexts("".join(text))
+    next_question = questions[0] if questions else ""
     result = check_citations(answer, set(ctx.cards))
-    yield {"event": "done", **result, "next": next_question,
+    yield {"event": "done", **result, "next": next_question, "nexts": questions,
            "stopped": bool(timings.get("stopped")),
            "tokens_per_second": timings.get("tokens_per_second")}
+
+
+# ------------------------------------------------------- fix the writing --
+#
+# DESIGN.md 56: a small AI button on a card fixes its spelling, grammar and
+# punctuation - the person's words, corrected, not rewritten - and the card is
+# changed in one undoable step.
+
+PROOFREAD = """You correct spelling, grammar and punctuation in a note from a person's mind map.
+
+Reply with JSON only, no other text: {"title": "...", "text": "..."}
+
+- Fix only real mistakes: misspellings, wrong words, grammar, punctuation,
+  capital letters. Keep the person's wording, tone, language and meaning.
+- Do not add, remove, shorten or explain anything. Do not translate.
+- Keep line breaks, list markers ("- ", "1. "), links, emails, numbers, names
+  and technical terms exactly as they are.
+- If something is already right, return it unchanged."""
+
+PROOF_CHARS = 6000
+
+
+def proofread(model, title: str, text: str) -> dict:
+    """The card's title and text with their mistakes fixed - or as they were,
+    if the model's reply cannot be used. `changed` says whether anything did."""
+    title, text = title or "", text or ""
+    if not (title.strip() or text.strip()):
+        return {"title": title, "text": text, "changed": False}
+    try:
+        reply = model.chat([{"role": "system", "content": PROOFREAD},
+                            {"role": "user", "content": json.dumps({"title": title, "text": text[:PROOF_CHARS]},
+                                                                   ensure_ascii=False)}],
+                           max_tokens=min(4000, 200 + len(text) // 2), think=False, temperature=0.1)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        return {"title": title, "text": text, "changed": False}
+    fixed_title = str(got.get("title", title))
+    fixed_text = str(got.get("text", text)) + text[PROOF_CHARS:]
+    # an answer that is no longer the same note is not a correction
+    if (title.strip() and not fixed_title.strip()) or (text.strip() and len(fixed_text) < len(text) * 0.6):
+        return {"title": title, "text": text, "changed": False}
+    return {"title": fixed_title, "text": fixed_text,
+            "changed": fixed_title != title or fixed_text != text}
 
 
 # ------------------------------------------------------------ to a card --
 
 DRAFT_KINDS = ("relates", "supports", "example-of", "part-of", "causes", "contradicts")
-DRAFT_SYSTEM = """You turn one answer from a conversation into a card for a person's mind map.
+DRAFT_SYSTEM = """You add one new card to a person's mind map, from a conversation about it.
 
 Reply with JSON only, no other text:
-{"title": "...", "text": "...", "link_to": "...", "kind": "..."}
+{"title": "...", "text": "...", "link_to": "...", "kind": "...", "label": "...", "why": "..."}
 
-- title: a short name for the idea, at most 8 words.
-- text: the knowledge itself in 1-4 plain sentences - not the conversation, no
-  citations, no "Beyond your board".
-- link_to: the id of the one card below it belongs with most, or "" if none.
+The card holds what the LAST ANSWER adds that the CARDS do not already say:
+new knowledge - what the answer explained, added from general knowledge, or
+put together. Never repeat what a card already holds, and never write about
+the conversation itself.
+
+- title: a short name for that new idea, at most 8 words.
+- text: the new knowledge in 1-4 plain sentences, with no citations and no
+  "Beyond your board".
+- link_to: the id of the ONE card below this new knowledge belongs with most -
+  the card it explains, extends, gives an example of or argues with. The
+  cards are the ones this conversation found; read their words, not only
+  their titles. "" only if none of them is related.
 - kind: how the new card relates to that card: relates, supports, example-of,
-  part-of, causes or contradicts. A new example of an idea is example-of."""
+  part-of, causes or contradicts.
+- label: "" when the kind says it well enough; otherwise a few words naming
+  the relation more exactly, read as "new card <label> that card" - such as
+  "is a faster variant of" or "explains why". At most 5 words.
+- why: one short sentence on why it belongs with that card."""
+
+DRAFT_CARDS = 40          # cards from the conversation the drafter may link to
+DRAFT_EXCERPT = 160       # characters of each card's words it reads
+LABEL_WORDS = 5
 
 
 def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
-               cited: list[str]) -> dict:
-    """A card made from an answer, for the person to check before it is added
-    (DESIGN 34): title, text, the card to link it to and how. Nothing is
-    written here - the board only changes when the person presses Add, through
-    the op-log like any edit."""
-    cards = [i for i in dict.fromkeys(cited) if i in nodes]
-    listing = "\n".join(f"{i}: {nodes[i].get('title') or 'Untitled'}" for i in cards) or "(none)"
+               cited: list[str], candidates: Optional[list[str]] = None,
+               history: Optional[list[dict]] = None) -> dict:
+    """A card made from an answer (DESIGN 34, 53): the NEW knowledge it adds,
+    the card from this conversation it belongs with, and how they relate - a
+    kind, and a label of its own where the kind is too coarse - with the
+    reason. Nothing is written here: the interface places it, then asks the
+    person whether it is in the right place.
+
+    `cited`: the cards the answer drew on; `candidates`: every card the
+    conversation brought up - an Explain more answer cites none, so without
+    them it had nothing to link to; `history`: the conversation before it."""
+    cards = [i for i in dict.fromkeys([*cited, *(candidates or [])]) if i in nodes][:DRAFT_CARDS]
+
+    def words(n: dict) -> str:
+        c = n.get("content") or {}
+        said = " ".join(str(c.get(k) or "") for k in ("text", "summary", "excerpt")).split()
+        return " ".join(said)[:DRAFT_EXCERPT]
+
+    marked = set(cited)
+    listing = "\n".join(f"{i}{' *' if i in marked else ''}: {nodes[i].get('title') or 'Untitled'}"
+                         + (f" - {words(nodes[i])}" if words(nodes[i]) else "") for i in cards) or "(none)"
     clean = CITE.sub("", BEYOND_MARK.sub(BEYOND, answer)).replace(BEYOND, "\nFrom general knowledge:")
+    convo = "\n".join(f"{t.get('role')}: {CITE.sub('', str(t.get('text', '')))[:400].strip()}"
+                       for t in (history or [])[-6:] if str(t.get("text", "")).strip())
     fallback = {"title": question.strip()[:70], "text": clean.strip()[:500],
-                "link_to": cards[0] if cards else "", "kind": "relates"}
+                "link_to": cards[0] if cards else "", "kind": "relates", "label": "", "why": ""}
     try:
         reply = model.chat([{"role": "system", "content": DRAFT_SYSTEM},
                             {"role": "user", "content":
-                             f"QUESTION\n{question.strip()}\n\nANSWER\n{clean.strip()[:6000]}"
-                             f"\n\nCARDS IT DREW ON\n{listing}"}],
-                           max_tokens=400, think=False, temperature=0.3)["text"]
+                             (f"CONVERSATION BEFORE\n{convo}\n\n" if convo else "")
+                             + f"LAST QUESTION\n{question.strip()}\n\nLAST ANSWER\n{clean.strip()[:6000]}"
+                             f"\n\nCARDS (* = the last answer drew on it)\n{listing}"}],
+                           max_tokens=500, think=False, temperature=0.3)["text"]
         got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
     except Exception:
         return fallback                      # a model that strays still gives a usable card
@@ -469,16 +1133,203 @@ def draft_card(model, nodes: dict[str, dict], question: str, answer: str,
     text = CITE.sub("", str(got.get("text") or "")).strip()[:800] or fallback["text"]
     link = str(got.get("link_to") or "").strip()
     kind = str(got.get("kind") or "").strip()
-    return {"title": title, "text": text,
-            "link_to": link if link in cards else (cards[0] if cards else ""),
-            "kind": kind if kind in DRAFT_KINDS else "relates"}
+    label = " ".join(str(got.get("label") or "").split()[:LABEL_WORDS]).strip(" .")[:40]
+    link = link if link in cards else (cards[0] if cards else "")
+    return {"title": title, "text": text, "link_to": link,
+            "kind": kind if kind in DRAFT_KINDS else "relates",
+            "label": label if link else "",
+            "why": str(got.get("why") or "").strip()[:200] if link else ""}
+
+
+# ------------------------------------------- one card: break it, relate it --
+# DESIGN.md 72: the card's AI menu. Breaking a card drafts smaller cards from
+# its own words, for the person to accept; finding related cards searches the
+# board with the card's words. Neither writes anything.
+
+BREAK_SYSTEM = """You split one card of a person's mind map into smaller cards, one idea each.
+
+Reply with JSON only, no other text:
+{"cards": [{"title": "...", "text": "..."}]}
+
+- Use only what the card says. Add no facts, examples or opinions of your own.
+- 2 to 6 cards, in the card's own order; each a separate point it makes.
+- title: a short name for the point, at most 8 words.
+- text: the point in 1-3 plain sentences, in the card's own words where possible.
+- If the card holds only one idea, reply {"cards": []}."""
+
+BREAK_MIN, BREAK_MAX = 2, 6
+BREAK_CHARS = 6000          # of a card's words the model reads
+BREAK_SECONDS = 90.0        # one reply; past this it is hung up (CLAUDE.md rule 5)
+
+
+def _points(text: str) -> list[str]:
+    """A card's own points without the model: its list items, else its
+    paragraphs, else its lines - the fallback when the model's reply cannot be
+    used, or says one idea of a card that plainly holds several lines."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    items = [re.sub(r"^([-*+]|\d+[.)]|\[[ xX]\])\s+", "", ln) for ln in lines
+             if re.match(r"^([-*+]|\d+[.)])\s+", ln)]
+    if len(items) >= BREAK_MIN:
+        return items
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if len(paras) >= BREAK_MIN:
+        return paras
+    return lines if len(lines) >= BREAK_MIN else []
+
+
+def break_card(model, title: str, text: str) -> dict:
+    """Smaller cards drafted from one card's own words, and what went wrong if
+    none could be: {"cards": [{"title", "text"}], "note": ""}."""
+    title, text = (title or "").strip(), (text or "").strip()
+    if not text:
+        return {"cards": [], "note": "This card has no text to break up."}
+    got: dict = {}
+    try:
+        reply = model.chat([{"role": "system", "content": BREAK_SYSTEM},
+                            {"role": "user", "content": f"TITLE\n{title}\n\nTEXT\n{text[:BREAK_CHARS]}"}],
+                           max_tokens=900, think=False, temperature=0.2, timeout=BREAK_SECONDS)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        got = {}
+    out = []
+    for c in (got.get("cards") if isinstance(got, dict) else None) or []:
+        if not isinstance(c, dict):
+            continue
+        t = " ".join(str(c.get("title") or "").split()[:10]).strip()[:80]
+        x = CITE.sub("", str(c.get("text") or "")).strip()[:600]
+        if t or x:
+            out.append({"title": t or x[:60], "text": x})
+    out = out[:BREAK_MAX]
+    if len(out) >= BREAK_MIN:
+        return {"cards": out, "note": ""}
+    # the model said one idea, strayed or failed: the card's own list or paragraphs
+    points = _points(text)[:BREAK_MAX]
+    if points:
+        return {"cards": [{"title": " ".join(p.split()[:6])[:60], "text": p[:600]} for p in points],
+                "note": ""}
+    return {"cards": [], "note": "This card holds one idea - nothing to break up."}
+
+
+MERGE_SYSTEM = """You merge several cards of a person's mind map into one card.
+
+Reply with JSON only, no other text:
+{"title": "...", "text": "..."}
+
+- Use only what the cards say. Add no facts, examples or opinions of your own.
+- Keep every distinct point the cards make; say a point they share once.
+- title: a short name for the merged card, at most 8 words.
+- text: the merged points in plain sentences, or a short "- " list when the
+  cards list separate things. In the cards' own words where possible."""
+
+MERGE_MAX = 8               # cards merged at once
+MERGE_CHARS = 2500          # of each card's words the model reads
+
+
+def merge_cards(model, cards: list[dict]) -> dict:
+    """One card drafted from several cards' own words: {"title", "text"}.
+    Writes nothing. A reply that cannot be used gives the cards side by side."""
+    cards = [c for c in cards if (c.get("title") or "").strip() or (c.get("text") or "").strip()][:MERGE_MAX]
+    joined = "\n\n".join(t for t in ((c.get("text") or "").strip() for c in cards) if t)
+    fallback = {"title": " / ".join((c.get("title") or "").strip() for c in cards if (c.get("title") or "").strip())[:80]
+                or "Merged card",
+                "text": joined[:4000]}
+    if len(cards) < 2:
+        return fallback
+    listing = "\n\n".join(f"CARD {i}\nTITLE: {(c.get('title') or '').strip()}\nTEXT: {(c.get('text') or '').strip()[:MERGE_CHARS]}"
+                          for i, c in enumerate(cards, 1))
+    try:
+        reply = model.chat([{"role": "system", "content": MERGE_SYSTEM}, {"role": "user", "content": listing}],
+                           max_tokens=900, think=False, temperature=0.2, timeout=BREAK_SECONDS)["text"]
+        got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+    except Exception:
+        return fallback
+    if not isinstance(got, dict):
+        return fallback
+    title = " ".join(str(got.get("title") or "").split()[:10]).strip()[:80]
+    text = CITE.sub("", str(got.get("text") or "")).strip()[:4000]
+    # a merge that lost most of the words is not a merge
+    if not text or len(text) < min(len(joined), 400) * 0.3:
+        return fallback
+    return {"title": title or fallback["title"], "text": text}
+
+
+RELATED_LIMIT = 6
+RELATED_QUERY = 1500        # characters of the card's words searched with
+HOLDS = 2                   # a card this many others are part of is a container, not a neighbour
+
+
+def related_cards(dd: DataDir, conn: sqlite3.Connection, bid: str, nid: str,
+                  embedder: Optional[retrieve.Embedder] = None, embed_model: str = "",
+                  reranker: Optional[retrieve.Reranker] = None,
+                  limit: int = RELATED_LIMIT) -> list[dict]:
+    """Cards on the board that belong with this one, by the board's own search
+    run on the card's words - leaving out the card, the cards it is already
+    linked to, and the groups it sits in or holds."""
+    graph = read_graph(conn, bid)
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    me = nodes.get(nid)
+    if me is None:
+        raise AskError("that card is not on this board any more")
+    c = me.get("content") or {}
+    query = " ".join([me.get("title") or "", str(c.get("text") or c.get("summary") or "")]).strip()
+    if not query:
+        return []
+    skip = {nid}
+    for e in graph["edges"]:
+        if e["source"] == nid:
+            skip.add(e["target"])
+        elif e["target"] == nid:
+            skip.add(e["source"])
+    up = me.get("parent")
+    while up:                                  # the groups it sits in
+        skip.add(up)
+        up = (nodes.get(up) or {}).get("parent")
+    skip.update(expand(nodes, [nid]))          # what it holds, if it is a group
+    # groups, and cards that hold others - the board's root, "External
+    # visitors", an organisation its people are part of - match every card's
+    # words and are structure, not what "related" means. Counting links did
+    # not find them: the root had 2, a meeting card with content 7 (DESIGN.md 72)
+    held: dict[str, int] = {}
+    for e in graph["edges"]:
+        if e.get("kind") == "part-of":
+            held[e["target"]] = held.get(e["target"], 0) + 1
+    skip.update(i for i, n in nodes.items() if n.get("type") == "meta" or held.get(i, 0) >= HOLDS)
+    index = board_index(dd, conn, bid, nodes, embedder, embed_model, background=True)
+    scored, _ = retrieve.score(index, query[:RELATED_QUERY], nodes, graph["edges"], embedder, reranker)
+    out = []
+    for i in retrieve.ranked(scored):
+        if i in skip or i not in nodes or scored[i] <= 0:
+            continue
+        n = nodes[i]
+        words = " ".join(str((n.get("content") or {}).get(k) or "")
+                         for k in ("text", "summary", "excerpt", "alt")).split()
+        out.append({"id": i, "type": n.get("type"), "title": n.get("title") or "Untitled",
+                    "snippet": " ".join(words)[:140]})
+        if len(out) >= limit:
+            break
+    return out
 
 
 # ------------------------------------------------------------ pictures --
 
-DESCRIBE = ("Describe this picture for a search index, in 1-3 plain sentences: what it "
-            "shows, any words or numbers written in it, and what kind of picture it is "
-            "(photo, diagram, screenshot, chart). No preamble.")
+# DESIGN.md 51: the description now writes out the picture's text, so a word
+# that appears only in a corner of a slide or one cell of a table is found.
+DESCRIBE = ("Describe this picture for a search index. First, in one or two plain sentences: "
+            "what it shows and what kind of picture it is (photo, diagram, screenshot, chart, "
+            "table, slide). Then write \"Text:\" and every word, number and label you can read "
+            "in it, in reading order, exactly as written - headings, labels, table cells, axis "
+            "names, captions, code. Write any mathematical formula in LaTeX between single "
+            "dollar signs, like $P(Y \\mid X)$. Leave out the Text part if there is no text. "
+            "No preamble.")
+DESCRIBE_TOKENS = 600
+DESCRIBE_CHARS = 3000        # kept for search; the prompt reads less (SEEN_CHARS)
+SEEN_CHARS = 700             # of a description, read in place of a picture left out
+
+
+def seen_line(text: str) -> str:
+    """A picture's description, under its card, where the picture itself did
+    not fit - shortened, as a long one would crowd out other cards."""
+    return f"\n    picture shows: {text[:SEEN_CHARS]}" if text else ""
 
 
 def describe_picture(model, dd: DataDir, conn: sqlite3.Connection, bid: str, sha: str) -> str:
@@ -490,5 +1341,5 @@ def describe_picture(model, dd: DataDir, conn: sqlite3.Connection, bid: str, sha
     reply = model.chat([{"role": "user", "content": [
         {"type": "text", "text": DESCRIBE},
         {"type": "image_url", "image_url": {"url": got[0]}}]}],
-        max_tokens=160, think=False, temperature=0.2)
-    return " ".join(str(reply.get("text") or "").split())[:600]
+        max_tokens=DESCRIBE_TOKENS, think=False, temperature=0.2)
+    return " ".join(str(reply.get("text") or "").split())[:DESCRIBE_CHARS]

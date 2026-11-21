@@ -16,8 +16,9 @@ import { revealCard, useAsk } from './askStore'
 import { edgeTypes } from './edges'
 import { exportBoardImage, type ImageKind } from './exportImage'
 import { Icon } from './icons'
-import { CLICK_SLOP, nodeTypes } from './nodes'
+import { CLICK_SLOP, nodeTypes, SelectionAi } from './nodes'
 import { ancestorAtLevel, currentParent, useStore } from './store'
+import { PlacedCheck } from './PlacedCheck'
 import { Shortcuts } from './Shortcuts'
 import { ThemeSheet } from './ThemeSheet'
 import type { MEdge, MNode } from './types'
@@ -117,6 +118,7 @@ function CanvasInner() {
   const setUI = useUI((s) => s.set)
   const minimap = useUI((s) => s.minimap)
   const themeOpen = useUI((s) => s.themeOpen)
+  const pattern = board?.settings?.pattern ?? 'dots'
   const focusId = useUI((s) => s.focusId)
   const linking = useUI((s) => s.linking)
   const selectedIds = useUI((s) => s.selected)
@@ -154,7 +156,15 @@ function CanvasInner() {
   const [rfNodes, setRfNodes] = useState<Node[]>(level.rfNodes)
   const rfNodesRef = useRef<Node[]>(level.rfNodes)
   rfNodesRef.current = rfNodes
-  useEffect(() => { setRfNodes(level.rfNodes) }, [level.rfNodes])
+  // a change to the board rebuilds the level; the cards in hand stay in hand,
+  // or a colour picked for the selected card would put its tools away
+  // (DESIGN.md 71)
+  useEffect(() => {
+    const held = new Set(useUI.getState().selected)
+    setRfNodes(held.size
+      ? level.rfNodes.map((n) => (held.has(n.id) ? { ...n, selected: true } : n))
+      : level.rfNodes)
+  }, [level.rfNodes])
 
   // entering or leaving a meta-node lands you looking at its contents - unless
   // the move was to go to one card, which then gets the view to itself
@@ -795,6 +805,11 @@ function CanvasInner() {
         }}
         onPaneClick={(e) => {
           setUI('selectedEdges', [])
+          // a click on the empty board puts away what floats over it: the
+          // board's look, and the chat unless it is pinned (DESIGN.md 68)
+          if (useUI.getState().themeOpen) setUI('themeOpen', false)
+          const chat = useAsk.getState()
+          if (chat.open && !chat.pinned && !chat.expanded) chat.setOpen(false)
           const active = useUI.getState().linking
           if (!active) return
           const src = useStore.getState().nodes[active.sourceId]
@@ -825,7 +840,21 @@ function CanvasInner() {
         proOptions={{ hideAttribution: true }}
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1 }}>
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1.9} color="var(--mb-grid)" />
+        {/* the pattern chosen in the theme panel (DESIGN.md 69) */}
+        {pattern === 'grid' ? (
+          <Background variant={BackgroundVariant.Lines} gap={24} lineWidth={1} color="var(--mb-grid)" />
+        ) : pattern === 'big-grid' ? (
+          <>
+            <Background id="fine" variant={BackgroundVariant.Lines} gap={24} lineWidth={0.6}
+              color="color-mix(in srgb, var(--mb-grid) 55%, transparent)" />
+            <Background id="major" variant={BackgroundVariant.Lines} gap={120} lineWidth={1.2} color="var(--mb-grid)" />
+          </>
+        ) : pattern === 'cross' ? (
+          <Background variant={BackgroundVariant.Cross} gap={32} size={7} lineWidth={1} color="var(--mb-grid)" />
+        ) : pattern === 'plain' ? null : (
+          <Background variant={BackgroundVariant.Dots} gap={24} size={1.9} color="var(--mb-grid)" />
+        )}
+        <PlacedCheck />
         {linkPath && (
           <ViewportPortal>
             <svg className="link-ghost" width={1} height={1}
@@ -838,9 +867,7 @@ function CanvasInner() {
         )}
         {selectionBox && (
           <ViewportPortal>
-            <div className="selection-bar nodrag nopan"
-              style={{ position: 'absolute', transform:
-                `translate(-50%,-100%) translate(${selectionBox.x}px, ${selectionBox.y - 14}px)` }}>
+            <Unzoomed x={selectionBox.x} y={selectionBox.y} className="selection-bar nodrag nopan">
               <span className="count">{selectedIds.length} selected</span>
               <span className="sep" />
               <button onClick={() => wrapSelection(selectedIds)}>
@@ -853,10 +880,11 @@ function CanvasInner() {
                 onClick={() => useAsk.getState().add(selectedIds)}>
                 <Icon name="askAdd" size={14} /> Ask
               </button>
+              <SelectionAi key={selectedIds.join()} ids={selectedIds} />
               <button className="danger" onClick={() => deleteNodes(selectedIds)}>
                 <Icon name="trash" size={14} />
               </button>
-            </div>
+            </Unzoomed>
           </ViewportPortal>
         )}
         {minimap && (
@@ -949,4 +977,21 @@ export function Canvas() {
 function ZoomLevel() {
   const pct = useFlow((s) => Math.round(s.transform[2] * 100))
   return <span className="zoom">{pct}%</span>
+}
+
+
+/** A bar placed on the board at (x, y) - centred above that point - that
+ *  keeps one size at any zoom, as the card's own bar does (DESIGN.md 72).
+ *  Reads the zoom itself, so the canvas does not redraw as it changes. */
+function Unzoomed({ x, y, className, children }: {
+  x: number; y: number; className: string; children: React.ReactNode
+}) {
+  const zoom = useFlow((s) => s.transform[2])
+  return (
+    <div className={className}
+      style={{ position: 'absolute', transformOrigin: '0 0', transform:
+        `translate(${x}px, ${y - 14 / zoom}px) scale(${1 / zoom}) translate(-50%, -100%)` }}>
+      {children}
+    </div>
+  )
 }

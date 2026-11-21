@@ -810,6 +810,9 @@ class ModelError(RuntimeError):
     """The local model could not start or answer - phrased for the person."""
 
 
+TURN_WAIT = 120.0   # a question waits this long for one picture's description to finish
+
+
 class ModelBusy(ModelError):
     """Another question is being answered; the server runs one at a time."""
 
@@ -955,6 +958,7 @@ class LocalModel:
         self._requests = threading.Condition(self._lock)   # see _enter, evict
         self._draining = False
         self._asking = threading.Lock()     # one question at a time, like --parallel 1
+        self.waiting = 0                    # questions waiting for it: background work steps aside
         self._cancel = threading.Event()
         self._watcher: Optional[threading.Thread] = None
         atexit.register(self.stop)
@@ -1153,24 +1157,51 @@ class LocalModel:
         }
 
 
+    def take_turn(self, timeout: Optional[float] = None) -> bool:
+        """Take the one question slot, waiting up to `timeout` seconds for it
+        (DESIGN.md 60). While a question waits, background work - a picture
+        being described - sees `waiting` and does not start another, so the
+        question goes next instead of being told "still answering"."""
+        with self._lock:
+            self.waiting += 1
+        try:
+            return self._asking.acquire(timeout=TURN_WAIT if timeout is None else timeout)
+        finally:
+            with self._lock:
+                self.waiting -= 1
+
     def cancel(self) -> None:
         """Stop the answer being written, from any thread. The stream notices
         before its next piece and hangs up on llama-server, which stops."""
         self._cancel.set()
 
+    def cancelled(self) -> bool:
+        """Whether a Stop came - between the calls of one run, a plan's steps."""
+        return self._cancel.is_set()
+
     def stream(self, messages: list[dict], *, max_tokens: int = 1024, think: bool = False,
-               temperature: float = 0.7) -> Iterator[dict]:
+               temperature: float = 0.7, hold: bool = True) -> Iterator[dict]:
         """The answer as it is written: {"type": "thinking"|"text", "text"} for
         each piece, then {"type": "done", ...timings}.
 
         Closing the generator part-way closes the connection, and llama-server
         stops generating for a question nobody is waiting on any more.
+
+        hold=False: the caller already holds the one question slot for a run of
+        calls - a plan, its steps and the answer (DESIGN.md 47) - so this
+        neither takes it nor clears a Stop given earlier in the run: once
+        stopped, every later call of the run ends at once.
         """
         import httpx
 
-        if not self._asking.acquire(blocking=False):
-            raise ModelBusy("still answering the last question")
-        self._cancel.clear()
+        if hold:
+            if not self.take_turn():
+                raise ModelBusy("still answering the last question")
+            self._cancel.clear()
+        elif self._cancel.is_set():
+            yield {"type": "done", "stopped": True, "tokens": 0, "tokens_per_second": None,
+                   "prompt_tokens": 0}
+            return
         try:
             self.start()
             with self._lock:
@@ -1181,7 +1212,12 @@ class LocalModel:
                     headers={"Authorization": f"Bearer {self.key}"},
                     json={
                         "messages": messages, "max_tokens": max_tokens, "stream": True,
-                        "temperature": temperature, "top_p": 0.8, "top_k": 20,
+                        # Qwen's settings for thinking (DESIGN.md 56): the
+                        # answering ones let it loop on one line until the
+                        # limit; a presence penalty is its own advice for that
+                        **({"temperature": min(temperature, 0.6), "top_p": 0.95, "top_k": 20,
+                            "presence_penalty": 1.5} if think else
+                           {"temperature": temperature, "top_p": 0.8, "top_k": 20}),
                         "chat_template_kwargs": {"enable_thinking": think},
                         "timings_per_token": False,
                         # reading a long context can take minutes on a card that
@@ -1228,7 +1264,8 @@ class LocalModel:
                     self.busy -= 1
                     self.last_used = time.time()
         finally:
-            self._asking.release()
+            if hold:
+                self._asking.release()
 
 
 class SearchModel(LocalModel):

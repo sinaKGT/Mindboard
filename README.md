@@ -48,7 +48,14 @@ practise next.
 Linux).
 
 The first run sets everything up: an isolated environment inside this folder,
-nothing installed system-wide. After that you get a menu:
+nothing installed system-wide. On a Mac it builds the interface too, so it
+needs Python 3.10+ and Node.js first (a Mac's own `python3` is 3.9):
+
+```bash
+brew install python@3.12 node
+```
+
+After that you get a menu:
 
 ```
   ● Mindboard 0.1.0
@@ -89,7 +96,36 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1   # Windows
 then `.venv\Scripts\mindboard run` (or `.venv/bin/mindboard run`). Every menu
 option has a command behind it; see [Commands](#commands).
 
+On macOS and Linux, `install.sh` offers to add a `mindboard` command to your
+terminal. Say yes, open a new terminal window, and from any folder:
+
+```bash
+mindboard          # starts Mindboard and opens it in your browser (Ctrl+C stops it)
+mindboard menu     # the menu
+```
+
+Any other command works the same way, such as `mindboard backup`, or `mindboard update`
+to get the latest version. It is a short
+function in `~/.zshrc` (or your bash profile), between `# >>> mindboard shortcut >>>`
+and `# <<< mindboard shortcut <<<`; delete those lines to remove it. Said no?
+Run `./install.sh` again to be asked again.
+
 </details>
+
+## Updating
+
+Mindboard updates itself from GitHub - your boards are never touched:
+
+```bash
+mindboard update                 # macOS / Linux, with the mindboard command
+.venv/bin/mindboard update       # macOS / Linux, from the Mindboard folder
+.venv\Scripts\mindboard update   # Windows, from the Mindboard folder
+```
+
+or choose **9 Update** in the menu. It gets the latest version, says what
+changed, and reinstalls (new packages, the interface rebuilt). Close
+Mindboard first. If you have changed Mindboard's own files it stops and names
+them; keep them with `git stash`, then update again.
 
 ## Use
 
@@ -309,6 +345,10 @@ conversation. Everything runs on this computer, and the audio is not kept.
 ```
 mindboard ai voice        # one-time, about 520 MB: speaking, listening, turn-taking
 ```
+
+On a Mac, listening uses Homebrew's whisper-cpp, which setting up the voice
+installs for you (`brew install whisper-cpp`). Without Homebrew, experts still
+speak; only listening waits for it.
 
 In the chat bar, the **1×** chip sets how fast the expert speaks, and the
 speaker button turns speaking off. The voice is optional: its pronunciation

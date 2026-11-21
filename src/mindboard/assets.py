@@ -201,6 +201,31 @@ def resolve(dd: DataDir, conn: sqlite3.Connection, board_id: str, sha: str) -> O
     return p if p.exists() else None
 
 
+PDF_PAGES = 40           # a PDF's text is read from its first pages only
+PDF_CHARS = 12_000       # and kept to this - enough to say what it covers
+
+
+def pdf_text(path: Path, pages: int = PDF_PAGES, chars: int = PDF_CHARS) -> str:
+    """What a PDF says, as plain text, from its first pages (DESIGN.md 48).
+    "" for a PDF with no text layer (a scan) or one that cannot be read."""
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(path))
+        out, size = [], 0
+        for page in reader.pages[:pages]:
+            text = " ".join((page.extract_text() or "").split())
+            if text:
+                out.append(text)
+                size += len(text)
+            if size >= chars:
+                break
+        head = f"({len(reader.pages)} pages) " if out else ""
+        return (head + " ".join(out))[:chars]
+    except Exception:
+        return ""
+
+
 def thumbnail(dd: DataDir, conn: sqlite3.Connection, board_id: str, sha: str,
               size: int = 480) -> Optional[Path]:
     out = dd.thumbs_dir(board_id) / f"{sha}_{size}.webp"

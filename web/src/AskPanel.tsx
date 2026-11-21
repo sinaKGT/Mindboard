@@ -8,10 +8,16 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { api } from './api'
-import { cardsInside, revealCard, useAsk, type Turn } from './askStore'
+import { AnswerFiles, filesToOffer } from './AnswerFiles'
+import { AnswerPictures, picturesToShow } from './AnswerPictures'
+import { askable, cardsInside, revealCard, useAsk, type Turn } from './askStore'
+import { Calculated, FileStrip, FileTabs, PagesUsed, pageLink } from './FileBranch'
+import { stepLine, TaskSteps } from './TaskSteps'
 import { Icon } from './icons'
+import { AskedWith, PastedStrip, PickPicture, usePasted } from './Pasted'
 import { Prose } from './Prose'
 import { useStore } from './store'
+import { useUI } from './ui'
 import { newEdge, newNode, type MEdge, type Op } from './types'
 
 const BEYOND = 'Beyond your board:'
@@ -21,7 +27,7 @@ const STARTER = 'What am I missing here?'
  *  line off when the answer is done and sends the question on its own. While
  *  the answer is still being written, the line - or the start of it - is kept
  *  out of sight here. */
-const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/
+const NEXT_LINE = /(^|\n)[ \t*_>#-]*(NEXT:[\s\S]*|N(E(X(T)?)?)?)$/i
 const hideNext = (text: string) => text.replace(NEXT_LINE, '')
 /** **Beyond your board:**, or a heading of it, read as the plain line - as the
  *  server does (ask.BEYOND_MARK) - so no stray ** is left either side */
@@ -39,8 +45,52 @@ function Cite({ id }: { id: string }) {
 
 /** An answer laid out (Prose): headings, lists with their depth, bold, and
  *  [[card]] citations as chips. Nothing is ever interpreted as HTML. */
-function Rich({ text }: { text: string }) {
-  return <Prose text={text} cite={(id) => <Cite id={id} />} />
+function Rich({ text, page }: { text: string; page?: (page: number, label: string) => React.ReactNode }) {
+  return <Prose text={text} cite={(id) => <Cite id={id} />} page={page} />
+}
+
+/** a pin: the chat stays open when the board is clicked (DESIGN.md 68) */
+function PinIcon({ on }: { on: boolean }) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 16 16" fill={on ? 'currentColor' : 'none'} stroke="currentColor"
+      strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" aria-hidden>
+      <path d="M6 2.5h4l-.6 4 2.1 2.2H4.5l2.1-2.2z" />
+      <path d="M8 8.7v4.8" fill="none" />
+    </svg>
+  )
+}
+
+/** the file conversation being shown, if one is (DESIGN.md 64) */
+const useBranch = () => useAsk((s) => (s.active ? s.branches.find((b) => b.id === s.active) : undefined))
+
+/** The pictures an answer cites, shown under it (DESIGN.md 48) - from the
+ *  board's own cards, which this page already has. */
+function CitedPictures({ turn }: { turn: Turn }) {
+  const nodes = useStore((s) => s.nodes)
+  const boardId = useStore((s) => s.boardId)
+  if (!boardId) return null
+  const pictures = picturesToShow(turn.cited ?? [], turn.cards ?? [], (id) => {
+    const n = nodes[id]
+    const sha = !n ? undefined : (n.type === 'image' ? n.content.sha256 : n.type === 'video' ? n.content.poster : undefined)
+    return typeof sha === 'string' ? { card: id, board: boardId, sha, title: n.title || 'Untitled' } : null
+  })
+  return <AnswerPictures pictures={pictures} onShow={(p) => revealCard(p.card)} />
+}
+
+/** The PDFs this answer touches, offered to read more (DESIGN.md 48). */
+function OfferedFiles({ turn }: { turn: Turn }) {
+  const nodes = useStore((s) => s.nodes)
+  const boardId = useStore((s) => s.boardId)
+  if (!boardId) return null
+  const files = filesToOffer(turn.cited ?? [], turn.cards ?? [], (id) => {
+    const n = nodes[id]
+    const sha = n?.content.sha256
+    const name = String(n?.content.filename || n?.content.alt || n?.title || '')
+    const pdf = n?.type === 'file' && typeof sha === 'string' && (n.content.mime === 'application/pdf' || /\.pdf$/i.test(name))
+    return pdf ? { card: id, board: boardId, sha: sha as string, name } : null
+  })
+  return <AnswerFiles files={files} onShow={(f) => revealCard(f.card)}
+    onAsk={(f) => void useAsk.getState().openFile({ board: f.board, sha: f.sha, card: f.card, name: f.name })} />
 }
 
 const fmt = (n: number) => n.toLocaleString()
@@ -51,9 +101,14 @@ const fmt = (n: number) => n.toLocaleString()
 function statusLine(t: Turn): string | null {
   if (t.status === 'loading') return 'Starting the model…'
   if (t.status === 'thinking') return 'Thinking…'
+  const step = stepLine(t)
+  if (step) return step
   if (t.status !== 'reading') return null
-  if (t.mode === undefined) return 'Looking through your cards…'   // before the cards are chosen
-  const what = t.mode === 'search' ? `the ${t.used} best-matching cards` : 'your cards'
+  if (t.looking) return 'Looking at your picture…'
+  // before the answer's context: the request being understood (DESIGN.md 66)
+  if (t.used === undefined) return t.task ? 'Getting ready to write…' : 'Understanding your request…'
+  const what = t.mode === 'search' ? `the ${t.used} best-matching cards`
+    : t.mode === 'file' ? `${t.used} passages from the file` : 'your cards'
   const p = t.progress
   if (p && p.total > 0) {
     const fresh = Math.max(p.total - p.cached, 1)
@@ -69,27 +124,43 @@ const KIND_WORDS: Record<string, string> = {
   'part-of': 'is part of', causes: 'causes', contradicts: 'contradicts',
 }
 
-/** Add to board: the model drafts a card from the answer - the knowledge, not
- *  the chat - and proposes the card it belongs with. Nothing changes until
- *  Add: then one undoable step through the op-log, marked as made by AI, and
- *  the background indexer makes it searchable (DESIGN 34). */
+/** Add to board (DESIGN.md 34, 53): the model writes what this answer adds
+ *  that the conversation's cards do not already say - most often what Explain
+ *  more brought in from general knowledge - picks the card it belongs with
+ *  among every card this conversation found, and how they relate: a kind, and
+ *  a label of its own where a kind is too coarse. The card goes on the board
+ *  at once, one undoable step through the op-log, marked as made by AI, and
+ *  the canvas asks "Right place?" beside it (PlacedCheck): keep it, or link
+ *  it to another card yourself. */
 function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; onDone: () => void }) {
   const boardId = useStore((s) => s.boardId)
-  const nodes = useStore((s) => s.nodes)
-  const [draft, setDraft] = useState<{ title: string; text: string; link_to: string; kind: string } | null>(null)
+  const turns = useAsk((s) => s.turns)
+  const branch = useBranch()
   const [error, setError] = useState('')
-  const cited = (turn.cited ?? []).filter((id) => nodes[id])
 
   useEffect(() => {
     if (!boardId) return
-    api.askDraft(boardId, { question, answer: turn.text, cited })
-      .then(setDraft).catch((e) => setError(e.message || 'could not draft the card'))
-    // drafted once, when opened
+    const nodes = useStore.getState().nodes
+    const at = turns.indexOf(turn)
+    const before = turns.slice(0, Math.max(at - 1, 0))
+    // every card this conversation brought up - what answers cited and what
+    // searches found - the latest first: Explain more cites none of its own
+    const seen = [turn, ...before.slice().reverse()]
+      .flatMap((t) => [...(t.cited ?? []), ...(t.cards ?? [])])
+    const candidates = [...new Set([...(branch?.card ? [branch.card] : []), ...seen])]
+      .filter((id) => nodes[id]).slice(0, 60)
+    const history = before
+      .filter((t) => !t.error && t.text.trim() && (t.role === 'user' || t.status === 'done'))
+      .slice(-6).map((t) => ({ role: t.role, text: t.text }))
+    const cited = (turn.cited ?? []).filter((id) => nodes[id])
+    api.askDraft(boardId, { question, answer: turn.text, cited, candidates, history })
+      .then((draft) => place(draft))
+      .catch((e) => setError(e.message || 'could not draft the card'))
+    // drafted once, when asked for
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const add = () => {
-    if (!draft || !draft.title.trim()) return
+  const place = (draft: { title: string; text: string; link_to: string; kind: string; label: string; why: string }) => {
     const store = useStore.getState()
     const target = draft.link_to ? store.nodes[draft.link_to] : undefined
     // beside the card it belongs with, in its group; else on the level in view
@@ -97,46 +168,30 @@ function AddToBoard({ question, turn, onDone }: { question: string; turn: Turn; 
       ? [target.pos[0] + (target.size[0] ?? 240) + 90, target.pos[1] + 30]
       : [0, 0]
     const parent = target ? target.parent : (store.path[store.path.length - 1] ?? null)
-    const card = newNode({ pos, parent, title: draft.title.trim(),
+    const card = newNode({ pos, parent, title: draft.title.trim() || question.slice(0, 70),
                            content: { text: draft.text.trim() }, provenance: 'ai' })
     const ops: Op[] = [{ kind: 'node.create', node: card }]
+    let edgeId: string | null = null
     if (target) {
-      ops.push({ kind: 'edge.create',
-                 edge: newEdge(card.id, target.id, { kind: draft.kind as MEdge['kind'], provenance: 'ai' }) })
+      const edge = newEdge(card.id, target.id, { kind: draft.kind as MEdge['kind'], label: draft.label,
+                                                provenance: 'ai' })
+      edgeId = edge.id
+      ops.push({ kind: 'edge.create', edge })
     }
     store.run(ops)
-    store.say('Added to your board')
+    useUI.getState().set('placed', {
+      cardId: card.id, edgeId, targetId: target?.id ?? null, why: draft.why,
+      relation: draft.label || KIND_WORDS[draft.kind] || 'relates to' })
+    // the board has to be seen to answer "Right place?": the chat steps aside
+    // unless it sits along the left edge, out of the way
+    const ask = useAsk.getState()
+    if (ask.expanded || ask.side !== 'left') ask.setOpen(false)
     onDone()
     revealCard(card.id)
   }
 
   if (error) return <div className="ask-error">{error}</div>
-  if (!draft) return <div className="ask-note">Drafting a card from this answer…</div>
-  return (
-    <div className="ask-draft">
-      <input className="draft-title" value={draft.title} placeholder="Title"
-        onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-      <textarea className="draft-text" rows={3} value={draft.text}
-        onChange={(e) => setDraft({ ...draft, text: e.target.value })} />
-      <div className="draft-link">
-        {cited.length ? (
-          <>
-            <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-              {Object.entries(KIND_WORDS).map(([k, w]) => <option key={k} value={k}>{w}</option>)}
-            </select>
-            <select value={draft.link_to} onChange={(e) => setDraft({ ...draft, link_to: e.target.value })}>
-              {cited.map((id) => <option key={id} value={id}>{nodes[id].title || 'Untitled'}</option>)}
-              <option value="">no card - on its own</option>
-            </select>
-          </>
-        ) : <span>On its own, on the level you are looking at</span>}
-      </div>
-      <div className="draft-actions">
-        <button className="starter" onClick={add} disabled={!draft.title.trim()}>Add</button>
-        <button className="ctx-clear" onClick={onDone}>Cancel</button>
-      </div>
-    </div>
-  )
+  return <div className="ask-note">Finding what is new here, and where it belongs on your board…</div>
 }
 
 function Answer({ turn, offer, question }: {
@@ -144,6 +199,8 @@ function Answer({ turn, offer, question }: {
 }) {
   const [adding, setAdding] = useState(false)
   const [showThinking, setShowThinking] = useState(false)
+  const branch = useBranch()
+  const fromFile = turn.mode === 'file'
   const text = (turn.status === 'done' ? turn.text : hideNext(turn.text))
     .replace(BEYOND_MARK, BEYOND)
   const at = text.indexOf(BEYOND)
@@ -157,17 +214,26 @@ function Answer({ turn, offer, question }: {
           {showThinking ? 'Hide' : 'Show'} its thinking
         </button>
       ) : null}
+      <TaskSteps turn={turn} />
       {showThinking && turn.thinking ? <div className="thinking">{turn.thinking}</div> : null}
       {!turn.text && statusLine(turn)
         ? <div className="ask-status">{statusLine(turn)}</div> : null}
-      {board.trim() ? <div className="voice board"><Rich text={board.trim()} /></div> : null}
+      {board.trim() ? (
+        <div className={`voice board ${turn.mode === 'own' ? 'own' : ''}`}>
+          {turn.mode === 'own'
+            ? <div className="voice-head">Not from your board — the model's own knowledge</div> : null}
+          <Rich text={board.trim()} page={fromFile ? pageLink(branch) : undefined} />
+        </div>
+      ) : null}
       {beyond.trim() ? (
         <div className="voice beyond">
-          <div className="voice-head">Beyond your board — the model's own knowledge</div>
+          <div className="voice-head">{fromFile ? 'Beyond this file' : 'Beyond your board'} — the model's own knowledge</div>
           <Rich text={beyond.trim()} />
         </div>
       ) : null}
       {turn.status === 'writing' ? <span className="caret" /> : null}
+      {turn.status === 'done' && !fromFile ? <><CitedPictures turn={turn} /><OfferedFiles turn={turn} /></> : null}
+      {fromFile ? <><Calculated turn={turn} /><PagesUsed turn={turn} branch={branch} /></> : null}
       {turn.error ? <div className="ask-error">{turn.error}</div> : null}
       {turn.status === 'stopped' ? <div className="ask-note">Stopped.</div> : null}
       {turn.mode === 'search' && turn.status && ['done', 'stopped'].includes(turn.status) ? (
@@ -197,12 +263,12 @@ function Answer({ turn, offer, question }: {
               <Icon name="plus" size={11} /> Add to board
             </button>
       ) : null}
-      {offer && turn.next && turn.status === 'done' ? (
+      {offer && turn.nexts?.length && turn.status === 'done' ? (
         <div className="ask-next">
-          <span className="ask-next-lead">Would you like to know</span>
-          <button className="starter" title="Ask this" onClick={() => offer(turn.next!)}>
-            {turn.next}
-          </button>
+          <span className="ask-next-lead">You could ask next</span>
+          {turn.nexts.map((q, i) => (
+            <button key={i} className="starter" title="Ask this" onClick={() => offer(q)}>{q}</button>
+          ))}
         </div>
       ) : null}
     </div>
@@ -217,12 +283,26 @@ export function AskPanel() {
   const open = useAsk((s) => s.open)
   const expanded = useAsk((s) => s.expanded)
   const explain = useAsk((s) => s.explain)
+  const own = useAsk((s) => s.own)
+  const pinned = useAsk((s) => s.pinned)
+  const branch = useBranch()
   const context = useAsk((s) => s.context)
   const turns = useAsk((s) => s.turns)
   const busy = useAsk((s) => s.busy)
+  const side = useAsk((s) => s.side)
+  // the bar rests as a small pill; under the pointer, focused, holding a draft,
+  // answering, or with the conversation open, it is the full bar
+  const [hot, setHot] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const cool = useRef(0)
+  // "Clear this conversation?", asked above the bar in Mindboard's own style
+  const [clearing, setClearing] = useState(false)
   const think = useAsk((s) => s.think)
   const nodes = useStore((s) => s.nodes)
   const [draft, setDraft] = useState('')
+  const pasted = usePasted()
+  const awake = hot || focused || !!draft.trim() || busy || open || pasted.pictures.length > 0
+  useEffect(() => () => window.clearTimeout(cool.current), [])
   const box = useRef<HTMLTextAreaElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const ask = useAsk.getState()
@@ -235,30 +315,94 @@ export function AskPanel() {
     const el = scroller.current
     if (el && following.current) el.scrollTop = el.scrollHeight
   }, [turns, open, expanded])
+  // back at the bottom picks the answer up again; only the reader's own
+  // moves upward (below) let it go - our own scrolls never do
   const onScroll = () => {
     const el = scroller.current
-    if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    // a few lines' grace: the answer may have grown since the scroll began
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) following.current = true
+  }
+  // Scrolling up lets go at once. Read from the scroll position alone it did
+  // not: a smooth wheel scroll moves a few pixels at a time, the next words
+  // arrived first and pulled the view back down, and it could never get away
+  // while an answer was being written (DESIGN.md 68).
+  const letGo = () => { following.current = false }
+  const onWheel = (e: React.WheelEvent) => {
+    const el = scroller.current
+    if (e.deltaY < 0) letGo()
+    else if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) following.current = true
+  }
+  const onKeyScroll = (e: React.KeyboardEvent) => {
+    if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) letGo()
   }
 
-  // grow the box with what is typed, up to a few lines
-  useEffect(() => {
+  // grow the box with what is typed, up to a few lines - and again whenever
+  // its width changes: the bar opens from a small pill, and text measured
+  // while it is narrow wraps into lines it no longer needs once it is wide
+  //
+  // A question that does not fit on one line beside the tools takes a row of
+  // its own, the full width of the bar, with the tools under it (DESIGN.md 70)
+  // - beside the chips it was squeezed into a column a few letters wide. The
+  // test is the text's width against the room one row would leave, which is
+  // the same whichever layout is showing, so the bar does not flip between
+  // the two; it is taken again as the bar widens while it opens.
+  const [tall, setTall] = useState(false)
+  const ruler = useRef<CanvasRenderingContext2D | null>(null)
+  const fit = () => {
     const el = box.current
     if (!el) return
     el.style.height = '0px'
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`
-  }, [draft])
+    const text = el.value
+    const bar = el.parentElement
+    const tools = bar?.querySelector<HTMLElement>('.bar-tools')
+    if (!text || !bar || !tools || !tools.offsetWidth) { setTall(false); return }
+    if (text.includes('\n')) { setTall(true); return }
+    ruler.current ??= document.createElement('canvas').getContext('2d')
+    const r = ruler.current
+    if (!r) return
+    r.font = getComputedStyle(el).font
+    // one row: the bar less its padding (11), the ankh (36), the tools and two gaps (16)
+    const room = bar.clientWidth - 11 - 36 - tools.offsetWidth - 16
+    setTall(r.measureText(text).width > room - 6)
+  }
+  useEffect(fit, [draft, tall])   // again after moving rows: the box's width changed
+  useEffect(() => {
+    const bar = box.current?.parentElement
+    if (!bar || typeof ResizeObserver === 'undefined') return
+    let width = bar.clientWidth
+    const ro = new ResizeObserver(() => {
+      if (bar.clientWidth !== width) { width = bar.clientWidth; fit() }
+    })
+    ro.observe(bar)
+    return () => ro.disconnect()
+  }, [])
 
   const present = context.filter((id) => nodes[id])
   const everything = Object.keys(nodes).length
-  const canSend = !busy && everything > 0
-  const explaining = expanded && explain
+  const canSend = !busy && (branch ? branch.status === 'ready' : everything > 0 || own)
+  // a PDF, Word or Excel file dropped or pasted on the bar opens its own conversation
+  const openFiles = (files: File[]) => {
+    for (const f of files) void ask.openFile({ file: f, name: f.name })
+  }
+  const docsIn = (list: FileList | DataTransferItemList | undefined | null): File[] => {
+    const out: File[] = []
+    for (const item of Array.from((list ?? []) as ArrayLike<File | DataTransferItem>)) {
+      const f = item instanceof File ? item : item.kind === 'file' ? item.getAsFile() : null
+      if (f && askable(f.name)) out.push(f)
+    }
+    return out
+  }
+  const explaining = explain && !own
 
   const send = (text: string) => {
-    if (!canSend || !text.trim()) return
+    if (!canSend || (!text.trim() && !pasted.pictures.length) || pasted.reading) return
     following.current = true
-    void ask.send(text)
+    void ask.send(text, pasted.pictures)
     setDraft('')
+    pasted.clear()
   }
+  const ready = canSend && !pasted.reading && (!!draft.trim() || pasted.pictures.length > 0)
   // Esc steps back one level: the expanded view, then the conversation
   const escape = (e: React.KeyboardEvent) => {
     if (e.key !== 'Escape') return
@@ -272,11 +416,35 @@ export function AskPanel() {
     <>
       {open && expanded ? <div className="ask-dim" onClick={() => ask.setExpanded(false)} /> : null}
       {open ? (
-        <aside className={`ask-sheet nodrag nopan ${expanded ? 'expanded' : ''}`}
+        <aside className={`ask-sheet nodrag nopan ${expanded ? 'expanded' : ''} ${side === 'left' && !expanded ? 'left' : ''}`}
           aria-label="Ask your board" onKeyDown={escape}>
           <header className="ask-head">
             <span className="ask-title"><Icon name="ask" size={14} /> Ask your board</span>
             <span className="ask-head-actions">
+              {!expanded ? (
+                <button className={`icon-btn ${explain ? 'on' : ''}`} aria-pressed={explain}
+                  title={explain ? 'Explain more is on - answers come from this conversation and the model’s own knowledge, without searching the board. Click to turn it off'
+                    : 'Explain more - answer from this conversation and the model’s own knowledge, with examples, without searching the board'}
+                  onClick={() => ask.setExplain(!explain)}>
+                  <Icon name="explain" size={14} />
+                </button>
+              ) : null}
+              <button className={`icon-btn pin-btn ${pinned ? 'on' : ''}`} aria-pressed={pinned}
+                title={pinned ? 'Pinned open - a click on the board leaves it open. Click to unpin'
+                  : 'Pin open - otherwise a click on the board puts the chat away'}
+                onClick={() => ask.setPinned(!pinned)}>
+                <PinIcon on={pinned} />
+              </button>
+              <button className="icon-btn" title="Clear the conversation" disabled={!turns.length}
+                onClick={() => setClearing(true)}>
+                <Icon name="trash" size={14} />
+              </button>
+              {!expanded ? (
+                <button className="icon-btn" title={side === 'left' ? 'Move the chat to the middle' : 'Move the chat to the left'}
+                  onClick={() => ask.setSide(side === 'left' ? 'center' : 'left')}>
+                  <Icon name={side === 'left' ? 'dock-center' : 'dock-left'} size={14} />
+                </button>
+              ) : null}
               <button className="icon-btn" title={expanded ? 'Back to the board' : 'Expand the chat'}
                 onClick={() => ask.setExpanded(!expanded)}>
                 <Icon name={expanded ? 'shrink' : 'fit'} size={14} />
@@ -286,9 +454,13 @@ export function AskPanel() {
               </button>
             </span>
           </header>
+          <FileTabs />
 
-          <div className="ask-context">
-            {explaining ? (
+          {branch ? <FileStrip branch={branch} /> : <div className="ask-context">
+            {own ? (
+              <span className="ask-empty"><b>Board off:</b> answers come from the model's own
+                knowledge — the board is not searched or sent. Switch it back on in the bar below.</span>
+            ) : explaining ? (
               <span className="ask-empty">Explain more is on: answers come from this conversation,
                 and the board is not searched.</span>
             ) : present.length === 0 ? (
@@ -323,10 +495,20 @@ export function AskPanel() {
                 <button className="ctx-clear" onClick={() => ask.clear()}>Clear</button>
               </>
             )}
-          </div>
+          </div>}
 
-          <div className="ask-turns" ref={scroller} onScroll={onScroll}>
-            {turns.length === 0 ? (
+          <div className="ask-turns" ref={scroller} onScroll={onScroll} onWheel={onWheel}
+            onTouchMove={letGo} onPointerDown={(e) => { if (e.target === e.currentTarget) letGo() }}
+            onKeyDown={onKeyScroll} tabIndex={-1}>
+            {turns.length === 0 && branch ? (
+              <div className="ask-hello">
+                {branch.status === 'ready'
+                  ? <>Ask anything about <b>{branch.name}</b>. Each question searches the file and sends
+                      only its best-matching passages; a page that is mostly a figure, a table or
+                      formulas goes as a picture of the page. Answers say which page they come from.</>
+                  : branch.status === 'preparing' ? <>You can ask as soon as it is prepared.</> : null}
+              </div>
+            ) : turns.length === 0 ? (
               <div className="ask-hello">
                 Ask anything about {present.length ? 'the cards in context' : 'this board'}. What
                 comes from your cards is linked to them; anything the model adds from its own
@@ -337,7 +519,7 @@ export function AskPanel() {
               </div>
             ) : turns.map((t, i) => (
               t.role === 'user'
-                ? <div key={i} className="turn question">{t.text}</div>
+                ? <div key={i} className="turn question"><AskedWith thumbs={t.images} />{t.text}</div>
                 // only the latest answer offers its next question
                 : <Answer key={i} turn={t} question={turns[i - 1]?.text ?? ''}
                     offer={i === turns.length - 1 && canSend ? send : undefined} />
@@ -346,40 +528,84 @@ export function AskPanel() {
         </aside>
       ) : null}
 
-      {/* the one way in: always at the bottom of the board */}
-      <div className={`ask-bar nodrag nopan ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''}`}
-        onKeyDown={escape}>
-        <textarea ref={box} rows={1} value={draft}
-          placeholder={explaining ? 'Ask for an explanation…'
+      {clearing ? (
+        <div className="ask-confirm nodrag nopan" role="alertdialog" aria-label="Clear this conversation?"
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setClearing(false) } }}>
+          <Icon name="trash" size={15} />
+          <div className="ask-confirm-words">
+            <b>Clear this conversation?</b>
+            <span>Its questions and answers are removed. Your cards are not touched.</span>
+          </div>
+          <button className="ask-confirm-keep" onClick={() => setClearing(false)}>Keep</button>
+          <button className="ask-confirm-go" autoFocus onClick={() => { ask.forget(); setClearing(false) }}>Clear</button>
+        </div>
+      ) : null}
+
+      {/* the one way in: always at the bottom of the board. At rest a small
+          "Ask me" pill; it opens to the full bar under the pointer, while you
+          type, and while a conversation or an answer is going */}
+      <div className={`ask-bar nodrag nopan ${awake ? 'awake' : 'rest'} ${expanded && open ? 'expanded' : ''} ${busy ? 'busy' : ''} ${pasted.pictures.length || pasted.reading ? 'has-pictures' : ''} ${tall && awake ? 'tall' : ''}`}
+        onKeyDown={escape}
+        onMouseEnter={() => { window.clearTimeout(cool.current); setHot(true) }}
+        onMouseLeave={() => { cool.current = window.setTimeout(() => setHot(false), 160) }}
+        onClick={() => box.current?.focus()}
+        onDragOver={pasted.onDragOver}
+        onDrop={(e) => {
+          const docs = docsIn(e.dataTransfer?.files)
+          if (docs.length) { e.preventDefault(); e.stopPropagation(); openFiles(docs) } else pasted.onDrop(e)
+        }}
+        title={awake ? undefined : `Ask your board  (${/mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+J)`}>
+        <PastedStrip pictures={pasted.pictures} reading={pasted.reading} remove={pasted.remove} />
+        <span className="bar-mark" aria-hidden><Icon name="ankh" size={15} /></span>
+        <textarea ref={box} rows={1} value={draft} aria-label="Ask your board"
+          placeholder={!awake ? (everything ? 'Ask me' : 'No cards yet')
+            : branch ? (branch.status === 'ready' ? `Ask ${branch.name}…`
+              : branch.status === 'preparing' ? `Preparing ${branch.name}…` : 'This file is not ready')
+            : own ? 'Ask without your board…'
+            : explaining ? 'Ask for an explanation…'
             : present.length ? 'Ask about these cards…'
-            : everything ? 'Ask your board…' : 'This board has no cards yet'}
-          disabled={everything === 0}
-          onFocus={() => { if (turns.length && !open) ask.setOpen(true) }}
+            : everything ? 'Ask your board anything…' : 'This board has no cards yet'}
+          disabled={!branch && everything === 0 && !own}
+          onFocus={() => { setFocused(true); if (turns.length && !open) ask.setOpen(true) }}
+          onBlur={() => setFocused(false)}
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={(e) => {
+            const docs = docsIn(e.clipboardData?.items)
+            if (docs.length) { e.preventDefault(); openFiles(docs) } else pasted.onPaste(e)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(draft) }
           }} />
-        {expanded && open ? (
-          <label className="bar-toggle"
-            title="Answer from this conversation, with examples, without searching the board">
-            <input type="checkbox" checked={explain} onChange={(e) => ask.setExplain(e.target.checked)} />
-            Explain more
+        <div className="bar-tools">
+          <PickPicture add={pasted.add} className="bar-chip icon-only" size={12} />
+          {expanded && open ? (
+            <label className={`bar-chip ${explain ? 'on' : ''}`}
+              title="Answer from this conversation, with examples, without searching the board">
+              <input type="checkbox" checked={explain} onChange={(e) => ask.setExplain(e.target.checked)} />
+              <Icon name="bullets" size={12} /> Explain more
+            </label>
+          ) : null}
+          {!branch ? <label className={`bar-chip own-chip ${own ? 'on' : ''}`}
+            title={own ? 'Board off: the model answers alone. Click to use your board again'
+              : 'Answer from the model alone - without searching or sending your board'}>
+            <input type="checkbox" checked={own} onChange={(e) => ask.setOwn(e.target.checked)} />
+            <Icon name="grid" size={12} /> {own ? 'Board off' : 'Board on'}
+          </label> : null}
+          <label className={`bar-chip ${think ? 'on' : ''}`} title="Slower, and deeper - worth it for what is missing">
+            <input type="checkbox" checked={think} onChange={(e) => ask.setThink(e.target.checked)} />
+            <Icon name="bulb" size={12} /> Think deeper
           </label>
-        ) : null}
-        <label className="bar-toggle" title="Slower, and deeper - worth it for what is missing">
-          <input type="checkbox" checked={think} onChange={(e) => ask.setThink(e.target.checked)} />
-          Think deeper
-        </label>
-        {busy ? (
-          <button className="send stop" title="Stop" onClick={() => ask.stop()}>
-            <Icon name="stop" size={13} />
-          </button>
-        ) : (
-          <button className="send" title="Ask  (Enter)" disabled={!canSend || !draft.trim()}
-            onClick={() => send(draft)}>
-            <Icon name="send" size={14} />
-          </button>
-        )}
+          {busy ? (
+            <button className="send stop" title="Stop" onClick={() => ask.stop()}>
+              <Icon name="stop" size={13} />
+            </button>
+          ) : (
+            <button className={`send ${ready ? 'ready' : ''}`} title="Ask  (Enter)"
+              disabled={!ready} onClick={() => send(draft)}>
+              <Icon name="send" size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </>
   )

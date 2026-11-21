@@ -58,6 +58,12 @@ export interface MEdge {
 export interface BoardSettings {
   theme?: string
   palette?: Record<string, string>
+  /** the theme of your own this board uses, if any (DESIGN.md 52) */
+  custom?: string | null
+  /** its tile's colour on the first page (DESIGN.md 54) */
+  tile?: string
+  /** the canvas's pattern: dots, grid, big-grid, cross, plain (DESIGN.md 69) */
+  pattern?: string
   viewport?: { x: number; y: number; zoom: number }
 }
 

@@ -19,6 +19,22 @@ if (fromUrl) {
 let token = fromUrl || ''
 if (!token) { try { token = localStorage.getItem('mb_token') || '' } catch { token = '' } }
 
+/** a theme of your own: a name, the built-in theme it starts from, its colours */
+export interface CustomTheme { id: string; name: string; base: string; palette: Record<string, string> }
+
+/** the first page (DESIGN.md 57) */
+export interface HomeLook { theme: string; pattern: string }
+export interface BoardGroup { id: string; name: string; colour: string; boards: string[] }
+export interface Home { look: HomeLook; groups: BoardGroup[] }
+
+/** a file being prepared or asked (DESIGN.md 64) */
+export interface FileInfo {
+  id: string; name: string; kind: string; status: 'preparing' | 'ready' | 'failed'
+  stage: string; done: number; total: number; error: string; pages: number; passages: number
+  note: string; board: string; sha: string
+  sheets?: { name: string; rows: number; columns: number }[]
+}
+
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as any) }
   if (token) headers['X-Mindboard-Token'] = token
@@ -40,6 +56,16 @@ const apiCore = {
   patchBoard: (id: string, patch: Partial<Pick<BoardMeta, 'title' | 'description' | 'settings'>>) =>
     req<BoardMeta>(`/boards/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteBoard: (id: string) => req<{ deleted: boolean }>(`/boards/${id}`, { method: 'DELETE' }),
+  /** the first page: groups of boards, and its theme and pattern (DESIGN.md 57) */
+  home: () => req<Home>('/home'),
+  setLook: (look: Partial<HomeLook>) => req<HomeLook>('/home/look', { method: 'PATCH', body: JSON.stringify(look) }),
+  addGroup: (name: string, colour = '') =>
+    req<BoardGroup>('/home/groups', { method: 'POST', body: JSON.stringify({ name, colour }) }),
+  updateGroup: (id: string, patch: { name?: string; colour?: string }) =>
+    req<BoardGroup>(`/home/groups/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteGroup: (id: string) => req<{ deleted: boolean }>(`/home/groups/${id}`, { method: 'DELETE' }),
+  placeBoard: (board: string, group: string | null) =>
+    req<Home>('/home/place', { method: 'POST', body: JSON.stringify({ board, group }) }),
 
   graph: (id: string) =>
     req<{ board: BoardMeta; revision: number; nodes: MNode[]; edges: MEdge[] }>(`/boards/${id}/graph`),
@@ -57,6 +83,22 @@ const apiCore = {
     return req<{ sha256: string; mime: string; width: number | null; height: number | null }>(
       `/boards/${boardId}/assets`, { method: 'POST', body: fd })
   },
+  /** Asking one file (DESIGN.md 64): start preparing it - one added in the
+   *  chat, or one on a board - then follow it, ask it, and close it. */
+  openFile: (src: { file: File } | { board: string; sha: string; name: string }) => {
+    const fd = new FormData()
+    if ('file' in src) fd.append('file', src.file)
+    else { fd.append('board', src.board); fd.append('sha', src.sha); fd.append('name', src.name) }
+    return req<FileInfo>('/files', { method: 'POST', body: fd })
+  },
+  fileInfo: (id: string) => req<FileInfo>(`/files/${id}`),
+  closeFile: (id: string) => req<{ closed: boolean }>(`/files/${id}`, { method: 'DELETE' }),
+  askFile: (id: string, body: unknown, onEvent: (name: string, data: any) => void, signal: AbortSignal) =>
+    streamEvents(`/files/${id}/ask`, body, onEvent, signal),
+  fileUrl: (id: string, page?: number | null) =>
+    `/api/files/${id}/raw${token ? `?t=${encodeURIComponent(token)}` : ''}${page ? `#page=${page}` : ''}`,
+  filePageUrl: (id: string, page: number, size = 240) =>
+    `/api/files/${id}/page/${page}?size=${size}${token ? `&t=${encodeURIComponent(token)}` : ''}`,
   /** Media is stored locally; a page comes back with a stored preview and,
    *  when it is a video we can play, its embed address. */
   fromUrl: (boardId: string, url: string) =>
@@ -77,19 +119,29 @@ const apiCore = {
    *  the question cannot be asked at all. */
   ask: (boardId: string, body: {
     question: string; cards: string[]; history: { role: string; text: string }[]; think: boolean
-    keep: string[]; explain: boolean
+    keep: string[]; explain: boolean; images?: string[]; own?: boolean
   }, onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> =>
     streamEvents(`/boards/${boardId}/ask`, body, onEvent, signal),
   /** Ask one expert: its boards searched together, answered in its voice. */
-  askExpert: (expertId: string, body: { question: string; history: { role: string; text: string }[] },
+  askExpert: (expertId: string, body: { question: string; history: { role: string; text: string }[]; images?: string[] },
               onEvent: (name: string, data: any) => void, signal: AbortSignal): Promise<void> =>
     streamEvents(`/experts/${expertId}/ask`, { ...body, cards: [], think: false }, onEvent, signal),
   experts: () => req<{ experts: Expert[]; shapes: ShapeState[] }>('/experts'),
+  /** a card drafted from an expert's answer, across all its boards (DESIGN.md 55) */
+  expertDraft: (expertId: string, body: { question: string; answer: string; cited: string[];
+                                          candidates: string[]; history: { role: string; text: string }[] }) =>
+    req<{ title: string; text: string; link_to: string; kind: string; label: string; why: string; board: string }>(
+      `/experts/${expertId}/draft`, { method: 'POST', body: JSON.stringify(body) }),
   createExpert: (body: Partial<ExpertDraft>) =>
     req<Expert>('/experts', { method: 'POST', body: JSON.stringify(body) }),
   updateExpert: (id: string, body: Partial<ExpertDraft>) =>
     req<Expert>(`/experts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteExpert: (id: string) => req<{ deleted: boolean }>(`/experts/${id}`, { method: 'DELETE' }),
+  /** your own themes, offered on every board (DESIGN.md 52) */
+  themes: () => req<{ themes: CustomTheme[] }>('/themes'),
+  saveTheme: (body: { name: string; base: string; palette: Record<string, string> }) =>
+    req<CustomTheme>('/themes', { method: 'POST', body: JSON.stringify(body) }),
+  deleteTheme: (id: string) => req<{ deleted: boolean }>(`/themes/${id}`, { method: 'DELETE' }),
   /** is the experts' voice set up, and which voices there are */
   voice: () => req<{ installed: boolean; cast: string[]; listen: boolean; turn?: boolean; talk?: boolean }>('/voice'),
   /** words from a short recording, made on this computer (whisper.cpp) */
@@ -170,9 +222,27 @@ async function streamEvents(path: string, body: unknown, onEvent: (name: string,
 
 const apiMore = {
   /** A card drafted from an answer, to check before adding (nothing is written) */
-  askDraft: (boardId: string, body: { question: string; answer: string; cited: string[] }) =>
-    req<{ title: string; text: string; link_to: string; kind: string }>(
+  /** a card drafted from an answer: the new knowledge, where it belongs and how (DESIGN.md 53) */
+  askDraft: (boardId: string, body: { question: string; answer: string; cited: string[];
+                                      candidates?: string[]; history?: { role: string; text: string }[] }) =>
+    req<{ title: string; text: string; link_to: string; kind: string; label: string; why: string }>(
       `/boards/${boardId}/ask/draft`, { method: 'POST', body: JSON.stringify(body) }),
+  /** a card's words with spelling and grammar fixed (DESIGN.md 56) */
+  proofread: (boardId: string, body: { title: string; text: string }) =>
+    req<{ title: string; text: string; changed: boolean }>(`/boards/${boardId}/proofread`,
+      { method: 'POST', body: JSON.stringify(body) }),
+  /** Smaller cards drafted from one card's own words (DESIGN.md 72). */
+  breakCard: (boardId: string, id: string) =>
+    req<{ cards: { title: string; text: string }[]; note: string }>(
+      `/boards/${boardId}/cards/${id}/break`, { method: 'POST' }),
+  /** One card drafted from several cards' own words (DESIGN.md 72). */
+  mergeCards: (boardId: string, ids: string[]) =>
+    req<{ title: string; text: string }>(`/boards/${boardId}/cards/merge`,
+      { method: 'POST', body: JSON.stringify({ ids }) }),
+  /** Cards that belong with this one, by the board's own search (DESIGN.md 72). */
+  relatedCards: (boardId: string, id: string) =>
+    req<{ results: { id: string; type: string; title: string; snippet: string }[] }>(
+      `/boards/${boardId}/cards/${id}/related`),
   askStop: (boardId: string) =>
     req<{ stopped: boolean }>(`/boards/${boardId}/ask/stop`, { method: 'POST' }),
   /** Accepts a single .mindboard bundle or a whole backup zip. */
@@ -185,9 +255,15 @@ const apiMore = {
 
   assetUrl: (boardId: string, sha: string) =>
     `/api/boards/${boardId}/assets/${sha}${token ? `?t=${encodeURIComponent(token)}` : ''}`,
+  /** a picture, small: made once on the server and kept (assets.thumbnail) */
+  thumbUrl: (boardId: string, sha: string, size = 240) =>
+    `/api/boards/${boardId}/assets/${sha}/thumb?size=${size}${token ? `&t=${encodeURIComponent(token)}` : ''}`,
   exportUrl: (boardId: string) =>
     `/api/boards/${boardId}/export${token ? `?t=${encodeURIComponent(token)}` : ''}`,
   backupUrl: () => `/api/backup${token ? `?t=${encodeURIComponent(token)}` : ''}`,
+  /** what a backup made now would lack: files on the boards found nowhere (DESIGN.md 49) */
+  backupCheck: () => req<{ files: number; recovered: number;
+    missing: { sha: string; board: string; board_title: string; cards: string[] }[] }>('/backup/check'),
 }
 
 /** Everything the interface asks the server, in one place. */

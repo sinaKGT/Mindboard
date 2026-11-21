@@ -33,7 +33,8 @@ export default function App() {
   // which page without a board: the welcome (''), your boards, or your experts
   const [page, setPage] = useState(location.hash)
 
-  useEffect(() => { applyTheme(settings) }, [settings])
+  // a board's own theme while it is open; the first page sets its own (DESIGN.md 57)
+  useEffect(() => { if (boardId) applyTheme(settings) }, [settings, boardId])
 
   // The open board lives in the URL, so a refresh keeps your place and the
   // browser's back button walks out of a board the way you'd expect.
@@ -57,8 +58,19 @@ export default function App() {
     const back = sessionStorage.getItem('mb_xp_return') ? '#/experts' : '#/boards'
     const want = boardId ? `#/b/${boardId}` : (h === '#/experts' || h === '#/boards' || h === '' || h === '#/'
       ? (h === '#/' ? '' : h) : back)
-    if (location.hash !== want) history.replaceState({}, '', location.pathname + want)
-    setPage(want)   // replaceState fires no hashchange
+    if (location.hash !== want) {
+      if (boardId && !/^#\/b\//.test(location.hash)) {
+        // opening a board is a step forward: the page it was opened from - your
+        // boards, a group of them, the experts - stays behind it, so the
+        // browser's back button returns there (DESIGN.md 67)
+        history.pushState({ mbBoard: true }, '', location.pathname + want)
+      } else if (!boardId && history.state?.mbBoard) {
+        history.back()   // leaving by the board's own button: the same step back
+      } else {
+        history.replaceState({}, '', location.pathname + want)
+      }
+    }
+    setPage(want)   // pushState and replaceState fire no hashchange
   }, [boardId])
 
   useEffect(() => {

@@ -2672,3 +2672,1063 @@ button instead, which looked like the option did not exist. Messages about
 the microphone used to appear only on the overview.
 
 210 tests.
+
+## 46. Experts read the question first, and offer three next questions (2026-11-08)
+
+Asked "which architecture for a RAG system for a school, where students ask
+about their lectures?", an expert answered for "a school project" and
+recommended the simplest thing, weighing nothing. It answered in one pass,
+and its rules pushed it to summarise whichever cards matched.
+
+- **A reading before the answer.** One short call works out what kind of
+  question it is (fact, explain, advice, compare, design), the person's
+  situation in one sentence in their own terms, and, for advice, comparisons
+  and designs, the 3 to 6 points that decide the answer. Points the person
+  left open are named as open, never assumed. The reading is shown above the
+  answer, so a misreading is seen at once. §47 turned it into the plan.
+- **Weighed answers** come in a fixed order: the recommendation; one line
+  per deciding point; why another approach does not fit; what would change
+  the advice. Fact questions get one to three sentences. The instructions go
+  with the question, not the system prompt, so the cached cards at the start
+  of the prompt stay put.
+- **Three next questions** end every answer, as buttons: one going deeper,
+  one putting it to use, one on a neighbouring idea from the cards. "Next:"
+  in any case is understood, and kept out of sight and out of the voice.
+- **The voice speaks while the answer is written**, one finished sentence at
+  a time, instead of after the whole answer.
+- The install test (`test_not_set_up_until_every_piece_is_there`) left 6 GB
+  in the temp folder on every run: on Windows `truncate()` writes zeros. It
+  now writes only the last byte, and the file stays sparse.
+
+Measured on RAG Deep Knowledge, the same question gave three different main
+recommendations in three runs (Naive RAG + Reranking, Hybrid Search +
+Reranking, Modular RAG): the answer is sampled at temperature 0.7, and the
+reading changed what it thought was open.
+
+## 47. A plan, run step by step, before the answer (2026-11-08)
+
+The person asked for a planner that writes the steps needed to answer a
+question - what to look up, what to work out - then runs them one after the
+other and answers from what they found. §37 measured a planner that split
+every question into search phrases: it made search worse and slower. This
+one differs in three ways: it leaves questions about one thing alone, it adds
+its searches beside the question's own instead of replacing it, and it works
+something out at every step rather than only searching.
+
+**The plan** (`ask.make_plan`). The reading of §46 now also returns up to 4
+steps. Each step has `find` (a search phrase for the cards, or "" for a step
+that only works from earlier ones), `work_out` (one sentence) and `uses` (the
+earlier step whose result it needs). Advice, compare and design questions get
+one step per option worth checking, then a step that weighs them. Fewer than
+two steps, or steps that look nothing up, count as no plan
+(`ask.clean_plan`): one look is the question's own search. A reply that
+cannot be read is logged, and the question is answered as it stands.
+
+- **Planned from what the notes hold.** Planned blind, the first plan asked
+  about embedding models, vector databases and LLMs; the boards hold none of
+  that, and all four steps came back "Not in the cards". Now the question is
+  searched first and the planner sees the titles of the 30 best-matching
+  cards. Its steps then name real cards: "Modular RAG", "Common RAG Problems
+  and Provided Solution".
+- **Two options at least.** Told "2 to 4 options", the 9B checked one. The
+  prompt now says checking one option weighs nothing, and gives an example
+  outside RAG, so it does not bias these boards.
+
+**The steps** (`experts.run_plan`). Each step searches the expert's boards
+(2,500 tokens of cards), then the model writes 1 to 5 lines of notes from
+those cards and from what the earlier steps found, citing cards. Citations of
+cards the step was not shown are removed. A step that `uses` an earlier one
+searches its phrase plus the titles of the cards that step cited: a chain is
+followed by name, with no extra model call. A weighing step has no cards and
+works from the findings above it.
+
+**The answer** is the normal streamed answer. Its cards are the question's
+own search, plus each step's phrase, plus every card the findings cite, put
+first so the answer can cite them. The findings and the weighing go with the
+question.
+
+**One run, one hold.** The plan, the steps and the answer are separate
+model calls but one question. The endpoint now streams at once and holds the
+model's single slot for the whole run (`stream_answer(hold=True)`; inside it,
+`LocalModel.stream(hold=False)`), so nothing slips in between the calls. A
+Stop given during the run stays set: every later call ends at once, and a
+new question still takes over between steps or mid-step.
+
+**On screen.** The plan appears above the answer as a checklist: waiting,
+running (pulsing), done, each with what it looked for, how many cards it
+read, and a "What it found" that opens, its citations chips like the answer's.
+While it works, the note says "Working through step 2 of 4…".
+
+Measured on RAG Deep Knowledge (10,000 cards), with the model loaded:
+
+| question | steps | plan | steps done | answer done |
+|---|---|---|---|---|
+| What is reranking? | none | — | — | 8 s |
+| Which architecture for students asking about lectures? | 4 | 4.5 s | 17-19 s | 28-31 s |
+| Add multimodal capability to that | 4 | 4.7 s | 18 s | 28 s |
+
+- The school question was asked three times with the plan; each answer
+  recommended Naive RAG + Reranking and said why Modular, self-correcting or
+  agentic RAG were not needed. Three runs is too few to call it steady, but
+  §46's three runs gave three different answers.
+- The multimodal follow-up planned from the conversation (the Naive RAG +
+  reranking pipeline it had recommended) and said plainly that the boards
+  hold nothing on multimodal approaches beyond captioning.
+- A cold start is slow because loading is: the 9.5 GB model took 4.5 minutes
+  to read from a disk shared with downloads, and the plan waits for it.
+
+Not done: the plan is not measured on the retrieval test set the way §37
+was; it is not used for Ask your board, only for experts; and a follow-up
+like "why did you choose that?" sees the earlier answer, not its plan.
+
+218 tests.
+
+## 48. Pictures and PDFs, shown and offered with the answer (2026-11-08)
+
+Search already found a picture by what it shows (§38), and the model read the
+best pictures themselves, but an answer showed a cited picture only as its
+title, a chip. Seeing it meant going to its board; from an expert, that meant
+leaving the conversation. PDFs were stored and opened in the person's
+reader, but their text was never read: a PDF was found only by its name and
+whatever note was written on its card.
+
+**Pictures in the answer** (`AnswerPictures.tsx`, board chat and Experts).
+- Each picture card an answer cites appears under it as a thumbnail, in the
+  order cited, at most 6. The server already made and kept thumbnails
+  (`/assets/{sha}/thumb`).
+- A click opens it full size over the page, in the canvas's own viewer
+  (`Viewer.Open`, now reusable: zoom, drag, full screen, Esc), with "Show on
+  its board" for its place in the map. It opens in a portal on the page's
+  body, so it sits above the Experts page as well.
+- Experts send each card's picture with `where` (`experts.where`: board,
+  title, `pic`); board chat takes it from the board's cards, which the page
+  already has.
+- A picture whose file is not on this computer shows as "picture file
+  missing" rather than a broken image. The 10,000-card test library has no
+  files at all, which is how this was found.
+- The rules tell the model that cited pictures are shown, so it cites them
+  when asked to show or find one. Told this, it once also wrote a markdown
+  image with an address it made up; images it writes are now taken out
+  (`ask.MD_IMAGE`), and the rules forbid them.
+- An expert's pictures left out of the question now go in as words, "picture
+  shows: …", as a board's always did (§39), in the answer and in each step.
+
+**PDFs found by what they cover.**
+- `assets.pdf_text` reads a PDF's first 40 pages, up to 12,000 characters,
+  with pypdf (pure Python, BSD-3-Clause, the one new dependency). A PDF with
+  no text layer, a scan, gives "".
+- The background indexer reads each board's PDFs not yet read, before it
+  indexes, with no model: a few tenths of a second a file. The text is kept
+  by file hash in `<data>/search/files.json` (`FileNotes`), beside the
+  pictures' words, derived and regenerated like them. Your cards are
+  unchanged.
+- The text joins the card's searchable body ("File holds: …"): keywords,
+  meaning and the reranker all see it. The model reads the first 700
+  characters under the card ("file holds: …"), so it knows what the file
+  covers, and the rules tell it to cite a file that covers the question.
+
+**PDFs offered with the answer** (`AnswerFiles.tsx`): "Read more in your
+files", up to 3. Each has Open, which hands the file to your PDF reader as a
+click on its card does, and "Show on its board". The files offered are the
+PDFs the answer cites, then PDFs among the question's best matches even if it
+did not cite them. In a planned expert answer the steps' cards come first and
+pushed a matching PDF out, so the PDFs among the question's own 8 best
+matches (the glimpse taken before planning) are kept in the answer's cards
+and offered by name (`Context.offer`).
+
+Measured on the test library, with a 5-page PDF on chunking named
+`reading-list-03.pdf` (its name says nothing of its subject):
+- Opening the board read it at once (`files.json`, 5 pages).
+- Board chat, "How much overlap should I use between chunks for lecture
+  notes?": answered from it in 16 s ("10 to 20 percent… 300 to 500 tokens"),
+  cited it, and offered it.
+- The Retrieval Engineer, same question, planned in 4 steps: before
+  `Context.offer` it used the same facts but offered nothing; after, it cited
+  the PDF and offered it.
+- "Show me a diagram of how reranking fits into retrieval": board chat and
+  the expert both showed the diagram (a picture card added for the test) in
+  10-11 s; it opened full size over the Experts page and closed with Esc,
+  leaving the conversation as it was.
+
+Not done: other file types (Word, slides) are still found by name only; a
+scanned PDF has no text to read; and Open was not pressed in the test, as it
+starts the PDF reader on this computer.
+
+226 tests.
+
+## 49. Every file a card points to is in the backup - or named (2026-11-08)
+
+A backup carries every file any card points to (§22: found by the shape of
+a hash, whatever key it hides under). But a file missing from disk was
+skipped without a word: the backup finished normally, and the gap showed
+only after a restore. The test library is that case - its cards point to 49
+pictures whose files were never copied. The rule now: every file a board's
+cards point to goes in, or the backup says which one did not and why.
+
+- **Taken from another board's copy** (`bundle.find_file`). A file is named
+  by its hash, so when one is missing from its own board, the same file kept
+  by another board is the very same bytes. It goes into this board's bundle,
+  and a restore puts it back where it belongs.
+- **Found nowhere: named, never passed over** (`board_files`, `check_files`).
+  The backup is still made - everything else, and every card, is in it - and
+  it says what it lacks: `MISSING-FILES.txt` inside the zip, by board, card
+  and file; `missing_files` in its manifest; a warning in the terminal
+  (`mindboard backup`) and the menu; the count in the download's
+  `X-Mindboard-Missing-Files` header.
+- **Asked before the download in the app.** "Back up all" and the palette's
+  backup check first (`GET /api/backup/check`, which writes nothing and takes
+  a moment). If a file is found nowhere, they name it - board and card, up to
+  eight, the rest in the zip - and ask whether to download the backup anyway.
+  If the check itself fails, the backup is never refused for it.
+- A single board's export (`.mindboard`) follows the same rule, and counts
+  its missing files in its manifest.
+- Files no card points to any more are still left out, as before: they are
+  what `gc` removes.
+
+Measured on the test library: the backup took the 2 files it has (the
+diagram and the PDF of §48), named all 49 missing ones in the terminal, in
+`MISSING-FILES.txt` and in the manifest, and restores. In the app, "Back up
+all" named the same 49 before downloading; cancelling downloaded nothing.
+
+230 tests.
+
+## 50. Listening on a Mac, through Homebrew (2026-11-09)
+
+On a Mac, everything ran except speaking to an expert: setting up the voice
+said "not available on this kind of computer yet". whisper.cpp publishes
+programs for Windows and Linux only; for macOS it ships a framework for
+apps, not a program. Homebrew builds it for Apple silicon, with Metal.
+
+- **A Mac listens through Homebrew's whisper-cpp** (`voice.py`). Setting up
+  the voice runs `brew install whisper-cpp` (with Homebrew's auto-update
+  off, which would add minutes), then downloads the same pinned, checked
+  model, Smart Turn and Silero VAD as everywhere else.
+- **Found where Homebrew puts it.** `whisper-cli`, or `whisper-cpp` (its name
+  before whisper.cpp 1.7), on PATH or in `/opt/homebrew/bin` and
+  `/usr/local/bin`: a double-clicked `Mindboard.command` may start with a
+  PATH that lacks them.
+- **Said before, and when it fails.** Setup says on a Mac that listening is
+  installed with Homebrew. Without Homebrew it says to install it (brew.sh)
+  or run `brew install whisper-cpp`; experts still speak, and nothing is
+  downloaded for a voice that cannot listen. A failed install says Homebrew's
+  own last line ("No space left on device").
+- **Not pinned here.** Homebrew checks its own downloads, but the program's
+  version is Homebrew's, not ours. Only its long-standing flags are used
+  (`-m -f -nt -np -l -t`), the same as the pinned Windows and Linux builds.
+- Windows and Linux are unchanged.
+
+Tested as a Mac would see it (the platform reported as darwin, a stand-in
+Homebrew): found on PATH or in Homebrew's folders, by either name; installed
+once, then not asked again; the right messages without Homebrew and when it
+fails. Not yet run on a real Mac.
+
+236 tests.
+
+## 51. Pictures described sooner, with their text written out (2026-11-09)
+
+Asked about something inside a picture without naming it, Mindboard found the
+picture only through its description (§38), and two things limited that.
+Pictures were described only while the chat model was loaded anyway, so a
+picture added before the day's first question was found by its title alone.
+And a description was 1-3 sentences: a word in one table cell or a corner
+label was not in it, so a question about that detail could not find it.
+
+- **Sooner.** A picture never described now loads the model, a couple of
+  seconds after it is added (or when its board is opened), and is described
+  then. The load happens outside the question slot: a question asked while
+  it loads waits for the load and then goes first, as before. The model is
+  unloaded after 20 idle minutes, as always.
+- **Not onto a full graphics card.** When the card has less free memory than
+  the model needs (`llm.memory_shortfall`), it is not loaded for this: it
+  would load slowly and partly on the processor, for work nobody is waiting
+  on. Then pictures wait for the next question, as before. A Mac's shared
+  memory is never "short", so a Mac always describes soon.
+- **Not for files that are missing** (§49): a picture whose file is not on
+  this computer cannot be described, and must not load the model each round.
+- **Its text written out.** The description now has one or two sentences on
+  what the picture shows, then "Text:" and every word, number and label in
+  it, in reading order: headings, table cells, axis names, captions, code.
+  Up to 600 tokens, kept up to 3,000 characters, all searchable (keywords,
+  meaning, reranker). Where a picture does not fit into a question and goes
+  in as words, only the first 700 characters are read (`ask.seen_line`), so
+  a long description cannot crowd out other cards.
+- **Old descriptions are redone, not dropped.** New ones go in
+  `search/pictures-2.json`; the short ones in `pictures.json` stay in use
+  until each picture is described again, so nothing becomes harder to find
+  meanwhile. Redoing them never loads the model: only while it is loaded.
+
+- **A picture the answer drew on, shown even if not cited.** Asked a detail
+  from a table, the model answered from the picture and did not cite it, so
+  the picture strip (§48) stayed empty. The rules now say that anything taken
+  from a picture is cited like a card's text, and the strip also shows
+  pictures among the question's 3 best matches (`picturesToShow`), as files
+  are offered. Such a "likely" picture whose file is missing is hidden rather
+  than shown as missing.
+
+Tested with stand-in models: a new picture loads the model and is described
+once; a short graphics card, a busy model or a missing file does not load it;
+an old description keeps finding its picture until it is redone, and then a
+detail written in the picture ("scale 1:500") finds it.
+
+Tried in the app, with a table picture titled only "IMG_0423" added while the
+model was not loaded: opening its board loaded the model with no question
+asked, and about 15 s later both pictures were described with their text
+written out - "Kestrel-Embed-3 768 0.93 chosen for lectures" - the older
+diagram's short description redone too. Asked "Which embedding model did we
+choose for lectures, and what recall did it get?", search put IMG_0423 first
+of 78 cards and the answer was right ("Kestrel-Embed-3 … Recall@5 of 0.93");
+the picture showed under it, cited or not.
+
+239 tests.
+
+## 52. Themes of your own (2026-11-09)
+
+A board could take one of ten built-in themes and have its colours changed
+with pickers, but those colours belonged to that board alone: liking a look
+meant setting the same nine colours again on every board.
+
+- **Name it and save it.** Under the colour pickers in the Theme panel: a
+  name and Save. It keeps the built-in theme the colours started from and
+  all nine colours as they are on screen, and the board then uses it.
+  Saving again under the same name (case aside) updates that theme, so
+  tweaking a colour and pressing Update keeps one theme, not two.
+- **Offered on every board**, under "Your themes", with a preview in its own
+  colours. Picking one copies its colours onto the board (its settings, with
+  `custom` naming the theme), so the board looks the same in an exported
+  bundle, or after the theme is deleted. Picking a built-in theme again
+  removes those colours.
+- **Kept by Mindboard, not the browser** (`themes.py`, `<data>/themes.json`,
+  `GET/POST /api/themes`, `DELETE /api/themes/{id}`), like the experts: they
+  survive a change of browser and travel in backups. A restore adds them in
+  every mode, and restoring twice does not double them.
+- Only the nine known colours, as `#rrggbb`, and a known base are kept; a
+  name is up to 40 characters; up to 50 themes.
+
+Tried in the app: "Desert night" saved on one board was offered on the other,
+applied, kept after a reload; Ocean replaced its colours; deleting it asked
+first and left the board in its colours.
+
+245 tests.
+
+## 53. Two fixes: writing on a group, and Add to board that finds its place (2026-11-10)
+
+**Writing on a group.** Double-clicking a group always opened it, wherever
+the click landed, so its title and description could not be written that
+way. Now, as on a picture card, double-clicking the words edits them;
+double-clicking the rest of the group card (its count, its little map) opens
+it, as does its Open button. Enter on a selected group still edits.
+
+**Add to board finds what is new, and where it goes.** It drafted from the
+one answer and could link only to the cards that answer cited. Explain more
+answers from the conversation and cites nothing, so the mode it is most used
+with had nothing to link to; the relation was one of six fixed words; and the
+card was added from a form, with no way to say afterwards it was misplaced.
+
+- **What is new** (`ask.draft_card`). The drafter is given the conversation
+  before the answer and every card the conversation brought up - what earlier
+  answers cited and what their searches found, the latest first, up to 40 -
+  each with its title and its first 160 characters, so it judges by their
+  words. It writes only what the answer adds that those cards do not already
+  say, most often what came from general knowledge.
+- **Where, and how.** It picks the one card it belongs with, a kind (the six
+  built-in ones), and where a kind is too coarse a label of its own of up to
+  5 words ("sets the bar for"), with a one-line reason. A link it names that
+  the conversation did not bring up falls back to the first one.
+- **Placed, then asked** (`PlacedCheck.tsx`). The card goes on the board at
+  once beside its card, linked, in one undoable step marked as made by AI;
+  the view goes to it, and the chat steps aside unless docked on the left.
+  Above the card: "Right place? <relation> <card>" with ✓ and ✗. ✓ keeps it.
+  ✗ removes the suggested link, keeps the card, and starts a connection from
+  it: the next click on a card links it there (Esc leaves it alone).
+- The Experts' own add-card form is unchanged.
+
+Tried in the app with a stand-in reply from the model (the real model was in
+use by another copy of Mindboard): an Explain more answer citing nothing sent
+the three cards its conversation had found; the card landed beside the table
+picture, linked "supports · sets the bar for", with the prompt above it; ✗
+removed the link, and a click on another card linked it there. A group's
+title and description were written by double-clicking them, and a
+double-click on its count opened it. Not yet tried with the real model.
+
+247 tests.
+
+## 54. The first page: a constellation, tile colours, summaries on hover (2026-11-10)
+
+- **A constellation that draws itself** (`Constellation.tsx`), top right,
+  behind the header, in the Experts' gold above two faint dune lines - their
+  night desert without its sand. Each round places 12 stars at least 42 apart,
+  then joins them one line every 0.42 s into a spanning tree, nearest first,
+  plus two short links that close small loops; holds 4.5 s, fades, and draws a
+  new one. Lines and stars only, all CSS - no particles, nothing per frame in
+  script. Less motion asked for: one constellation, drawn, still. Hidden on
+  windows narrower than 900 px.
+- **A colour per tile.** A swatch button on each tile: the seven card colours,
+  the Experts' gold, any colour, or none. It colours the tile's edge, a strip
+  along its top, its glow and its preview. Kept in the board's settings as
+  `tile`, merged in, as settings are saved whole and also hold the theme.
+  Like any change to a board it moves the tile to the front of the list.
+- **A summary on hover** (`summaries.py`, `GET /api/boards/{id}/summary`).
+  One or two sentences, at most 40 words, written by the local model from the
+  board's title, description, top-level groups and its 30 most connected
+  cards, starting with the subjects, never "This board". Shown over the tile's
+  preview after the pointer rests a moment. Kept in
+  `<data>/search/summaries.json` (derived, not backed up) and written again
+  only when the board is renamed or changes by 15%, and by at least 5 cards.
+  Written only while the model is loaded and free - by the tile's request, or
+  by the background indexer after a board's round - and never loaded for a
+  hover; until then the tile says it is not summarised yet.
+
+Tried in the app: the constellation drew, held and redrew in a new shape; two
+tiles took gold and pink, the boards' themes and colours untouched; a summary
+showed on hover below the tile's buttons, and a board without one said it was
+not summarised yet. A summary has not yet been written by the real model: it
+was in use by another copy of Mindboard.
+
+251 tests.
+
+## 55. Add to board from the Experts, the same way (2026-11-10)
+
+The Experts kept their own form: draft, choose a board and a card, press Add.
+Now they work as board chat does (§53).
+
+- **Across the expert's boards** (`POST /api/experts/{id}/draft`). The
+  drafter reads the cards of all the expert's boards, is given every card the
+  conversation brought up (what answers cited and what their searches found)
+  and the conversation, and the route says which board the chosen card is on.
+- **Placed there, then asked there.** The card goes on that board beside its
+  card, linked with the kind and label, marked as made by AI; then you are
+  taken to it, and the canvas shows "Right place?" (`PlacedCheck`). With no
+  card to link to, it goes on the board the answer cited most, to the right.
+  The conversation is kept, as when opening a cited card, and is there when
+  you come back.
+- **The board's own chat steps aside** for the prompt, once that chat has
+  loaded its saved state, and once per card: a chat you reopen stays open.
+  Docked on the left, it stays.
+- Cards added from the Experts go in through the board's op-log on the
+  server, so the canvas's undo does not reach them; ✗ and deleting the card
+  work as usual.
+
+Tried in the app with a stand-in reply from the model: an answer citing
+nothing sent the conversation's two cards, the card landed on the board beside
+the table picture, the prompt showed with the board's chat out of the way, ✓
+kept it, and the Experts page brought the conversation back.
+
+252 tests.
+
+## 56. Dates, a loop in Think deeper, fixing the writing; summaries removed (2026-11-12)
+
+- **Dates.** On the SWIFT Lab Visitors board, asked for the latest visit, the
+  model kept naming 3 Nov though the newest date was 11 Nov: it was never told
+  today's date, and a 9B model compares dates written in words unreliably.
+  Every question now carries today's date, said with the question so the
+  cached start of the prompt stays put. A question about time (when, latest,
+  next, month names...) also carries the dates found in its cards, worked
+  out in code - "3 Nov 2026", "22 Sep and 29 Oct 2026", "Nov 3, 2026",
+  ISO dates; a date with no year takes the year after it - one line per date,
+  newest first, with the cards it is on (`ask.dates_note`). On that board the
+  list starts "11 November 2026: Professor Daniel King; NTU Business School
+  and Research Partnerships; Sarah Malone".
+- **Think deeper looped.** It thought "Wait, I need to check if I should
+  mention the 3 Nov meeting in the NEXT section. Yes. Okay." again and again
+  until its limit. Thinking ran with the answering settings; it now uses
+  Qwen's settings for thinking - temperature 0.6, top_p 0.95, and the
+  presence penalty 1.5 they advise against endless repetition. And a guard
+  (`ask.LoopGuard`) watches the thinking: the same real line a third time
+  ends it, the model is hung up on, and the question is answered without
+  thinking, saying so.
+- **Fix the writing** (`ask.proofread`, `POST /api/boards/{id}/proofread`).
+  A wand in each card's toolbar: the local model corrects spelling, grammar
+  and punctuation in the title and text - the person's words, not a rewrite;
+  lists, links, names and line breaks kept - and the card changes in one
+  undoable step. A reply that drops much of the note is not taken. Tried
+  with the real model: "Meting with Sara / We discused the budjet and the nex
+  step is to send the reprot to Paul / - book the lab for tuesday" became
+  "Meeting with Sara / We discussed the budget and the next step is to send
+  the report to Paul / - book the lab for Tuesday" in 2 s; Ctrl+Z undid it.
+- **Clear the conversation** asks above the chat bar in Mindboard's own style,
+  Keep or Clear, instead of the browser's dialog.
+- **Summaries on hover (§54) are removed** at the person's request: the
+  route, the background writing, the page code and `search/summaries.json`'s
+  writer are gone.
+
+## 57. Groups of boards, and the first page's own look (2026-11-12)
+
+- **Groups** (`home.py`, `/api/home...`). "New group" on the first page, or
+  "New group..." from a tile's folder button. A board goes into a group by
+  dragging its tile onto it, or from that folder button; it is in at most one,
+  or in none. A group shows as a fanned stack of up to three of its boards'
+  previews in their own colours, its name and how many boards it holds, in
+  its own colour. Clicking it opens it: "All boards / AI work - 1 board", and
+  its boards. Deleting a group keeps its boards. The first page shows groups,
+  then the boards in none.
+- **The page's look.** "Look", at the right of the actions: the ten themes,
+  and six backgrounds - dots, grid, lines, dunes, stars, plain - each with a
+  preview. A board keeps its own theme while open; the first page sets its
+  own again when you come back.
+- Groups and look are kept in `<data>/home.json` and travel in backups;
+  restoring adds groups not here (not in "copy" mode, where boards get new
+  ids), and the look only when replacing.
+- **The tile colour picker** is redrawn in the page's style: a titled panel,
+  eight distinct colours (a teal in place of a gold too close to the yellow),
+  a tick on the current one, "Any colour" and "None". A tile lets its panel
+  out instead of cutting it off. Groups use the same picker.
+- **Deleting a board** asks in the page's own style too.
+- Found while trying it: the board grid, empty where the Look panel opens,
+  sat above the panel and took its clicks; the action row is now above it.
+
+## 58. `mindboard update` (2026-11-12)
+
+Menu option 9 only reinstalled: it never fetched anything new. Now it, and a
+new `mindboard update`, get the latest version from GitHub first
+(`updater.py`): `git fetch`, then `git pull --ff-only` on the branch the copy
+follows - nothing merged, nothing overwritten - saying what came ("got 3 new
+changes" and their titles), then run the installer, which installs new
+packages and rebuilds the interface. Changes of your own to Mindboard's files
+stop it and are named, to keep with `git stash`; a copy not cloned with git,
+or no git, says what to do. Already up to date, it asks (menu) or stops
+(`--force` reinstalls anyway). Mindboard must not be running. Boards are never
+touched: they live in the data folder.
+
+260 tests.
+
+## 59. A mark for Mindboard, and dates read with their words (2026-11-12)
+
+- **The mark** (`Logo.tsx`, `public/favicon.svg`): an ankh drawn as a small
+  graph. Its teardrop loop is the mind; its arms and foot end in round nodes,
+  cards linked on a board - the Experts' ankh and the boards' graphs in one
+  sign. A round loop read as the ♀ symbol; the teardrop of a real ankh does
+  not. It replaces the blinking dot before "Mindboard" on the first page, in
+  the page's accent: the loop draws itself once, then the three nodes breathe.
+  The browser tab shows it in the Experts' gold on a dark square; it reads at
+  16 px.
+- **Dates with their words.** On the SWIFT board the top card says "Updated
+  12 Nov 2026", and the date list (§56) gave the model only the date and the
+  card, so a plain answer took 12 Nov for a visit. Each date now comes with
+  the words around where it is written - "...with role and email. Updated 12
+  Nov 2026." beside "Visit: Lab visit on 11 Nov 2026" - and the model is told
+  an updated or reported date is not a visit. With the real model, Think
+  deeper answered "The most recent specific lab visit recorded is 11 November
+  2026... The master visitor list was updated on 12 November 2026", in 49 s
+  and without looping; the plain answer named 11 Nov as the latest visit too.
+
+260 tests.
+
+## 60. A question waits its turn instead of being refused (2026-11-16)
+
+Asked on one board, answered in full, then asked on another: "still answering
+the last question". Nothing was answering. When an answer ends, and when a
+board is opened, the indexer gets a moment with the free model to describe
+the board's pictures (§49, §51) - longer descriptions now, old short ones
+redone while the model is loaded. It held the one question slot for each
+picture, and a question arriving meanwhile was refused at once: the board
+route said 409 if the slot was taken, the model's stream said busy if it
+could not take it that instant.
+
+- **A question waits** (`LocalModel.take_turn`, `TURN_WAIT` = 120 s): it
+  counts itself in `waiting` and waits for the slot. The board's answer is
+  held for its whole run by `stream_answer` - the answer and, if it loops, the
+  plain retry (§56) - like an expert's. Only a model that never comes free is
+  "still answering". Fixing a card's writing, drafting a card and the Experts'
+  guide wait up to 30 s (`SHORT_WAIT`).
+- **Background work steps aside.** The indexer describes one picture at a
+  time and starts none while a question is `waiting`, so a question waits at
+  most for the picture already under way, then goes first. The rest wait for
+  the next quiet moment.
+- **Experts**: a new question still stops the answer being written (§45), and
+  now waits for the slot rather than giving up after 6 s - a picture being
+  described cannot be stopped mid-way, only finished.
+
+260 tests.
+
+## 61. Formulas drawn as maths (2026-11-16)
+
+A picture of a formula is described in LaTeX (`$\arg\max_{\text{prompt}}
+P_\theta(Y \mid \text{prompt})$`), and that text reached cards and answers as
+code. Worse, an answer's light formatting took the formula's underscores for
+italics, and half a line went slanted.
+
+- **KaTeX, bundled** (`web/src/Math.tsx`): about 280 KB and its fonts, built
+  into the interface, so it works offline. `$$...$$` and `\[...\]` are drawn
+  on their own line, `$...$` and `\(...\)` in the sentence.
+- **Maths first.** In an answer (`Prose.tsx`) formulas are found before bold,
+  italics and citations, so a formula's `_` and `*` stay maths. On a card the
+  title and text are drawn with their formulas too.
+- **Prices stay prices.** A `$...$` has no space just inside either dollar,
+  is not followed by a letter or digit, and is not only a number: "$5 and
+  $10" and "$5-$10" are text. A formula KaTeX cannot read is shown as the text
+  it was, never an error. Hovering a formula shows its LaTeX; Copy copies it.
+- **KaTeX's HTML** is made by KaTeX from its own reading of the formula, with
+  trust off - no links, styles or raw HTML from the text.
+- **Asked for**: the picture reader writes any formula in LaTeX between single
+  dollar signs, and answers write formulas that way too, so both come out in
+  the one form that is drawn.
+- Cards break long words anywhere and keep line breaks; inside a formula that
+  put `\text{prompt}` one letter per line. A formula keeps together, and a
+  long one on its own line scrolls.
+
+260 tests.
+
+## 62. Pictures pasted into the chat (2026-11-16)
+
+Paste a picture into a chat box (Ctrl/⌘+V), drop one on it, or choose one
+with the picture button, and ask about it - "explain this", "who is this
+visitor" - answered from the picture and the board together. Board chat and
+an expert's chat alike (not the Experts' guide, which only picks who to ask).
+
+- **In the box** (`Pasted.tsx`): up to four pictures wait in a row on top of
+  the bar, each removable, with a note that they go to this computer's model
+  only. They are shrunk in the browser first (1600 px JPEG; a phone photo is
+  megabytes), and a 180 px copy is kept to show in the question - in the tab,
+  like the rest of the conversation. A picture with no words asks "Explain
+  this picture." A pasted picture is never put on the board; Add to board
+  turns the answer into a card as usual.
+- **On the server** (`ask.take_pasted`): read again with Pillow, shrunk to
+  1024 px and re-encoded as JPEG - whatever was pasted, the model gets a plain
+  picture; anything else is refused at once (400).
+- **Looked at, then searched by.** "Explain this" says nothing a search can
+  use, so with the model held the picture is first described in two or three
+  sentences (`describe_pasted`, 220 tokens) and the question is searched and
+  planned with that description (`with_pasted`). The page is told what the
+  model saw (`pasted`) and keeps it with the question, so a follow-up still
+  knows the picture without sending it again. Stop during the look stops.
+- **Answered with the picture itself**, placed with the newest question after
+  the cards (`ctx.attached`), so the start of the prompt and llama-server's
+  cache stay put, and counted in what fits.
+- With the real model a pasted visitor badge was read ("Dr. Maria Keller, ETH
+  Zurich, 11 Nov 2026"), the board searched by it - no card for her, but the
+  visit on the same day found and cited; an expert answered in 22 s.
+
+263 tests.
+
+## 63. Board off: the model alone (2026-11-16)
+
+Some questions are not about the board - a general explanation, a pasted
+picture to explain, a quick fact. Explain more (§34) skips the search but
+still sends the cards the conversation used, and the instructions still put
+the board first. **Board off**, a switch in the bar beside Think deeper,
+leaves the board out entirely:
+
+- **Nothing from the board** (`own: true`, `own_context`): no search, no
+  cards, no date list from cards - today's date only. Explain more and chosen
+  cards are ignored while it is on.
+- **Its own instructions** (`OWN_SYSTEM`): a plain assistant that does not
+  talk of cards or a board, still short by default, formulas in `$...$`, and
+  the three next questions. The prompt is tiny, so it answers quickly.
+- **Only Board off turns as the conversation.** The first try sent the whole
+  conversation, and an earlier answer from the board brought its facts back
+  in: asked "who visited on 11 Nov?", it named the visitor from the board
+  under the label "not from your board". Now a Board off question carries
+  only earlier Board off questions and answers; asked afresh, the model had
+  no idea who visited.
+- **A pasted picture** goes straight to the model - with nothing to search,
+  it is not described first.
+- **Marked**: each answer is headed "Not from your board - the model's own
+  knowledge", in the dashed frame of "Beyond your board"; the context strip
+  says the board is not searched or sent; the box says "Ask without your
+  board…". It stays on (per board, in the tab) until switched off, like Think
+  deeper. Add to board still turns an answer into a card.
+- Board chat only: an expert is its boards, so it has no Board off.
+
+264 tests.
+
+## 64. Asking one file: prepared, then searched on its own (2026-11-16)
+
+A file is never put into the model's context whole. To ask a PDF, Word
+document, Excel workbook, CSV or text file, it is **prepared** first and
+then **searched inside itself only**, the way a board is searched - in a
+conversation of its own beside the board's.
+
+- **Ways in**: the file button in the chat bar, or a file dropped or pasted
+  on it (a file added this way goes on the board only with "Add file to
+  board"); "Ask this file" beside a PDF an answer offers; the ask button on a
+  file card on the board.
+- **A branch of its own**: each file is a tab above the conversation, next
+  to "Board", with its own questions and answers; switching keeps both
+  (`askStore`: `branches`, `active`, `boardTurns`). Board off and Explain more
+  do not apply in a file's tab. Add to board works as before, and links the
+  new card to the file's card when the file is on the board.
+- **Preparing** (`filechat.py`, on its own thread, progress in the strip):
+  read into passages of about 1,100 characters with some overlap - a PDF by
+  page with pdfium, a Word document under its headings plus its tables, a
+  sheet or CSV row by row with the header's names in every row; figures
+  described by the model once (a PDF page with pictures, many drawn lines or
+  little text - charts and scans - and a Word document's pictures, 24 at
+  most), so a question finds them by what they show; a keyword index (BM25,
+  Tantivy, in memory) and a vector per passage.
+- **Asking**: exact phrases, keywords and meaning fused by reciprocal rank,
+  the best 30 reranked, then passages taken best first up to 5,000 tokens
+  (12 at most), sent in the file's order, each labelled where it is. "What
+  is this about?" also takes the file's start. The model cites "(p. 12)",
+  which opens the file at that page.
+- **Multimodal, smartly**: a page that is mostly a figure, a table, formulas
+  or a scan goes to the model as a picture of the page when one of its
+  passages is among the best (2 pages at most); text pages go as text. A
+  picture costs about 1,300 tokens and some seconds, so only pages that need
+  it pay. Under the answer, the pages it was given, small, the ones it saw as
+  pictures outlined.
+- **Temporary**: in memory and under `<data>/tmp/filechat`, removed when its
+  tab is closed, after six hours unused, and whenever Mindboard starts. A
+  board's file is read where it is, never changed. Boards and their search
+  are untouched.
+- New dependencies: pypdfium2 (pages drawn and counted), python-docx,
+  openpyxl.
+- With the real model, a four-page report with a bar chart drawn as a
+  picture: prepared in seconds; "which month had the most visitors?" was
+  answered from the chart page (November, 16), and "how much does the depot
+  cost?" with "(p. 2)" linked to page 2. Closing the tab removed it on the
+  server.
+
+Not yet: Experts' conversations, older .doc and .xls files, and sums or
+averages over a whole column (a sheet is searched row by row).
+
+270 tests.
+
+## 65. A spreadsheet's tools, chosen by the model (2026-11-16)
+
+Searching a workbook row by row (§64) finds what a row says, but a total over
+three hundred rows is in no passage. So an Excel or CSV file asked on its own
+is also loaded, while it is prepared, into an in-memory SQLite database - a
+table a sheet, every row up to 200,000, a column numeric when 80% of it reads
+as numbers ("1,800", "£4.20" and "12%" included), dates as YYYY-MM-DD so they
+compare as dates (`sheets.py`).
+
+- **The model decides.** Before each answer it is shown the sheets' columns,
+  types and a few example values, and the question, and answers in JSON:
+  which tools, if any (`decide`). Most questions about one row need none.
+  It is told which operation fits which wording - "which region had the
+  most visitors" is a sum per region, not the largest single visit; the
+  first real try picked max and the answer, rightly, said it could not tell.
+- **Three tools, at most three calls**: `calculate` (sum, average, min, max,
+  count, count distinct, median; filters; per group, sorted), `rows` (the
+  rows matching filters, sorted, 30 at most), `distinct` (a column's values,
+  most common first). Structured, never SQL from the model: every sheet and
+  column is checked against the file, every value passed as a parameter, so
+  nothing it writes can change or escape the data - a filter of "'; DROP
+  TABLE" is refused, a "contains" of "%' OR 1=1 --" matches nothing.
+- **Facts only.** Results go to the answer marked CALCULATED over the whole
+  sheet, and the model says "(calculated)" after figures it takes from them.
+  A tool that fails, and a choice that cannot be made, are listed as NOT
+  CALCULATED with the instruction not to work those figures out from the
+  passages - they are only part of the sheet. For every file, the model is
+  told never to present a total or "all of them" from passages, and never to
+  fill a gap with a guess. Under the answer, what was calculated, and what
+  could not be, in its own box.
+- **Slow or failing steps**: choosing tools is cut off after 120 s (the
+  reply is hung up, so llama-server stops) and the answer goes on from the
+  passages, saying no calculation was made; a calculation is stopped after 5
+  s; a figure that fails or takes over 120 s to describe while preparing is
+  skipped and said in the strip; a preparation that has not moved for two
+  minutes says so and offers to stop; the page tries again, more slowly,
+  when the server does not answer for a moment, and only "not found" ends a
+  file's tab (after a restart it says to prepare or add the file again).
+- With the real model on a 300-row visits workbook (true totals known): "how
+  many visitors came from Europe?" - 365 (calculated), exact; "which region
+  had the most visitors?" - East Midlands, 971, exact; "what did MIT's
+  visitors do?" - the sheet has no such column, and it said so.
+
+274 tests.
+
+## 66. Understanding the request, then doing it in steps (2026-11-16)
+
+"Summarize this for me" with a pasted slide got a description of the slide:
+the chat sent the question to the model in one shot, and nothing worked out
+first that a summary was asked for. Experts planned (§47); the board's chat,
+Board off and a file's tab did not. Now every question there goes through
+three stages (`tasks.py`), inside the run that holds the model:
+
+1. **Understand** (one call, JSON, 60 s at most): the task - answer,
+   summarize, explain, compare, extract, analyze, rewrite, translate, plan -
+   what it is about, the output asked for ("short", "a table", "in
+   Persian"), the request read back ("You want ..."), and steps only when one
+   look is not enough. The model is told what is already in front of it and
+   which actions exist here.
+2. **Chain the steps** (ReAct-style, 4 at most): `read` the pasted pictures
+   in full (every line, figures described), `search` the board or the file
+   (a board search's cards join the answer's, so they can be cited), `work
+   out` something from the earlier steps - each step's result handed to the
+   next. After the last of two or more, a check: is anything the task needs
+   plainly missing? One more step may be added, once. A step that fails is
+   marked and hands on nothing; one that takes over 150 s is cut off (hung
+   up, so llama-server stops).
+3. **Write** with what the steps found and the task's shape said with the
+   question (`ctx.task_note`, after the cached start): a summary as its gist,
+   the key points under the source's own headings, and what it means; a
+   comparison as a table; a list with each item's source; a plan as numbered
+   steps; and the output asked for over all of it. Every part answered, every
+   source cited, and no empty "Beyond your board: None".
+
+Tuning, with the real model: a plain question at first got steps - "when was
+the latest visit?" planned a search, which only repeated the search already
+made, took 17 s and lost the citations. The planner is now told most
+requests need none, and a plan of one search is dropped. Then the
+"extract" shape's "no commentary" cut the answer to a bare date; it now
+lists each item with its source and answers every part. Now: the slide -
+Summary, short, 2 steps (read it, work out its points) - came back as a gist
+line, Objective / What to monitor / Implementation / Outcome, and what it
+means; the latest-visit question - no steps, about 5 s more than before -
+gave the date, both visitors and their cards; comparing two visits ran three
+steps and gave a cited table.
+
+The page shows the task above the answer - its kind, the output asked for,
+"You want ..." - and the steps live ("Step 2 of 3: work out ..."), folded
+into "2 steps" once the answer is written. If the request cannot be
+understood in time, it is answered as it stands, as before. Experts' planner
+knows the same kinds and answers them in the same shapes.
+
+281 tests.
+
+## 67. Back from a board returns to the group it was opened from (2026-11-16)
+
+Opened from inside a group on the first page, a board's back led to the
+first page, not the group. Two causes:
+
+- **The open group was forgotten**: it was the first page's own state, lost
+  when the page gave way to the board. It is now kept for the tab
+  (`sessionStorage` `mb_home_inside`) and restored when the first page comes
+  back; "All boards" clears it, and a group that no longer exists is let go.
+- **Opening a board replaced the page in the browser's history** instead of
+  adding to it (`history.replaceState` in `App.tsx`), so the browser's back
+  button skipped the first page and landed on the welcome page. Opening a
+  board is now a step forward (`pushState`, marked `mbBoard`), and leaving by
+  the board's own button steps back through it (`history.back()`), so both
+  ways back agree. From an expert's conversation the same holds: back
+  returns to the Experts.
+
+Checked in the browser: group "AI work" → board → browser back, and → board →
+the board's back button: both land inside "AI work"; "All boards" leaves it.
+
+281 tests.
+
+## 68. Scrolling while it writes, panels that put themselves away, new boards light (2026-11-16)
+
+- **Scrolling during an answer.** The chat follows an answer as it is
+  written, and let go only when the scroll position was well away from the
+  bottom. A smooth wheel scroll moves a few pixels at a time; the next words
+  arrived first and pulled the view back down, so while an answer was being
+  written it could not be scrolled at all. Now the reader's own moves upward
+  let go at once - wheel up, touch, the arrow, Page Up and Home keys, a press
+  on the scrollbar - and only coming back near the bottom (or wheeling down
+  near it) picks the answer up again; the page's own scrolls never let go. A
+  first try that ignored the page's own scroll events by a flag got stuck
+  when two scrolls arrived as one event, and the answer was never picked up
+  again; dropped. The Experts' conversation had the same trouble and the
+  same fix.
+- **A click on the board puts panels away.** The board's look (theme panel)
+  and the chat close when the empty board is clicked. The chat has a pin in
+  its header to stay open while working on the board (kept in
+  `localStorage`); the expanded chat still closes by its dimmed backdrop.
+- **The theme panel saves as you change it** - it always did: every pick is
+  an op on the board at once. "Done" made it look otherwise; it is replaced
+  by a close button, "Saved as you change it", Escape, and the board click.
+- **New boards start light**: `DEFAULT_SETTINGS.theme` is `daylight`
+  (near-white canvas, white cards). Boards made before keep their theme.
+
+Checked in the browser: scrolled up while an answer was written and stayed
+there; back at the bottom it followed again; an unpinned chat closed on a
+board click and a pinned one stayed; the theme panel closed on a board click;
+a new board opened on daylight.
+
+282 tests.
+
+## 69. Markdown in cards, and the canvas's pattern (2026-11-16)
+
+- **Markdown in a card.** A card showed paragraphs and simple lists only.
+  Its text is now drawn by the chat's own renderer (`Prose`), so a card takes
+  what an answer does: headings, **bold**, _italics_, `code` and code blocks,
+  quotes, tables, rules, numbered and nested lists, formulas - and three
+  things added to the renderer for both: links (`[words](https://...)` and
+  bare addresses, http and https only, opening in a new tab, a press on one
+  not taken as a press on the card), ~~strikethrough~~, and task items
+  (`- [ ]`, `- [x]`, drawn as boxes, done ones struck through). A card keeps
+  its line breaks as written (`breaks`); an answer's lines still run on as a
+  paragraph. A card named in a card's text (`[[id]]`) shows as its title and
+  goes to it. Sizes are in em, so a card's text size carries to all of it.
+  Editing is unchanged: the card's text is written as plain text, and drawn
+  when it is not being edited.
+- **The canvas's pattern** is chosen in the board's theme panel, beside the
+  themes: dots (as before, the default), grid, large grid (a fine grid with a
+  stronger line every five squares), crosses, or plain. Kept in the board's
+  settings (`pattern`) like its theme; drawn in the theme's grid colour.
+
+Checked in the browser: a card with a heading, bold and italics, a kept line
+break, a done and an open task, a numbered list, a quote, inline code,
+strikethrough, a formula, a table and both kinds of link drew each one; each
+pattern drew on the canvas and the choice was saved with the board.
+
+282 tests.
+
+## 70. A long question takes its own row; no file button in the chat (2026-11-21)
+
+- **A long question.** The open bar is one row: the ankh, the question box,
+  then the tools (picture, Explain more, Board on, Think deeper, send). On a
+  window 1,024 px wide the bar is 424 px, the tools take 280 px, and the box
+  was left 77 px - a long question stood in a column a few letters wide
+  inside a tall pill. Now a question that does not fit on one line beside
+  the tools, or that has a line break, moves to a row of its own across the
+  whole bar, with the ankh and the tools under it; the bar's ends round to
+  22 px instead of a pill. The box still grows to five lines (120 px) and
+  then scrolls inside itself.
+  The test is the text's measured width against the room one row would
+  leave (the bar less its padding, the ankh, the tools and the gaps), not
+  the box's own height: the height depends on which layout is showing, so a
+  first try that used it stuck in two rows - and while the bar opens from
+  the small pill the box measured many lines. The test is taken again
+  whenever the bar's width changes.
+- **The file button is gone.** "Ask a file" sat beside the picture button
+  and was clicked by mistake while working. A file is still asked by
+  dragging or pasting it into the chat, or from a file card on the board.
+
+Checked in the browser at 1,024 and 1,600 px wide: a 21-character question
+stays on one row at 1,600 (two at 1,024, where one row leaves 77 px); an
+89-character question and one with a line break move to two rows and come
+back when shortened; a 2,000-character question shows five lines with a
+scroll bar, the tools beneath; clearing the box returns the bar to its pill.
+
+282 tests.
+
+## 71. The card's tools: one compact bar above the card (2026-11-21)
+
+A selected card opened a panel above it, three rows tall: colours and fill,
+text size and lists, then fix the writing, context, connect, add connected,
+move out, duplicate, delete. It covered the cards above the selected one and
+grew with every new action.
+
+Now one compact bar sits just above the selected card (`CardTools` in
+`nodes.tsx`), four buttons, each opening only what belongs to it:
+
+- **Colour** (a dot in the card's colour): six swatches, any colour, default
+  colour, and the three fills (bar, tinted, solid).
+- **Aa**: text size by name - S, M, L, XL (11, 13, 16, 20 px), the nearest
+  marked, so a card with another size keeps it.
+- **AI** (sparkles): the card's AI actions - fix the writing, ask about it,
+  and since §72 summarise, explain, quiz, fun fact, break up, find related.
+- **Connect** (a link): one click, as before; `c` still works.
+
+Taken off the bar at the owner's word, to keep it to four: the "more" menu
+(add connected card, duplicate, delete, open, ungroup, move out) and the two
+lists. They remain where they already were - the ports add a connected
+card, Ctrl+D duplicates, Del deletes, a double-click opens a group, Ctrl+G /
+Ctrl+Shift+G group and ungroup -
+and lists are to go into the card's editor. Not done yet: the lists in the
+editor, and Move out has no button now.
+
+Menus open above the bar, so the card stays in view while it changes. The bar
+is in xyflow's `NodeToolbar`: one size at any zoom, shown only while that card
+alone is selected, hidden in exported pictures. Its surface is the app's
+floating panel (the selection bar's border and shadow, a faint lit top edge),
+in every theme's own colours.
+
+- **Any colour**: the rainbow swatch opens the system colour picker; the
+  choice is kept in `style.color` and applied once, when the picker closes,
+  not as an op for every step of a drag across it.
+- **A fix found on the way**: any change to the board rebuilt the canvas's
+  list of cards without their selection, so picking a colour deselected the
+  card and put its tools away. The cards in hand are now kept selected when
+  the level is rebuilt.
+
+Tried and dropped, on the owner's look at each, the same day: a pill at the
+top of the canvas for the actions with the look beside the card - first a
+colour dot opening a strip down the card's right side (glossy "3D" beads,
+then flat; it sat on the resize corner, covered the right port, and was
+awkward), then a format row above the card. Two menus for one card were
+confusing. One wide bar with everything, everything in the top pill, and
+formatting behind an "Aa" button were drawn and not chosen. Text size as
+smaller / number / larger, and then as a numbered list, was confusing; named
+sizes replace both.
+
+Keyboard and undo are as before; every change is still an op. Checked in the
+browser on a dark and a light theme at 87 % zoom: each menu opened alone and
+above the bar; a swatch, L then XL, and the fills changed the card while it
+stayed selected; the AI menu listed its two items. The old panel, the top
+pill and their styles are gone.
+
+282 tests.
+
+## 72. AI on a card, and on several (2026-11-21)
+
+The card bar's sparkle button (§71) held two things: fix the writing, and put
+the card in the chat's context. The owner asked for more that a learner does
+with one card, and for some of it on several cards at once.
+
+**One card** - the sparkle menu, in three groups:
+
+- **Summarise, Explain this card, Quiz me on this, Fun fact** go through the
+  chat: the card alone is put in context and the request is sent in words the
+  person sees in the conversation, so the answer cites the card like any
+  other. Each is sent *fresh* - without the conversation before it - and names
+  the card by its title: sent with the history, "this card" was read as the
+  card the conversation had last been about (a fun fact for the University of
+  Derby card came back about David Astill).
+  - Fun fact: only from what the card says; if it holds too little, one short
+    funny line ending with an emoji instead.
+  - Quiz: one question at a time, a cheer and a short explanation after each
+    answer, the score, three questions (four for several cards). Asked as
+    steps, the request reader (§66) took it as a plan and wrote a plan for a
+    quiz, twice, however it was worded; so `quiz` is now a task of its own
+    with its own answer shape (`tasks.SHAPES["quiz"]`): judge the last answer
+    if there was one, then ask only the next question, never its answer, and
+    make the three NEXT lines answers to pick from. The page names it Quiz.
+- **Break it into cards** (`POST /cards/{id}/break`, `ask.break_card`): 2 to 6
+  cards drafted from the card's own words, nothing added. They are listed in
+  the menu with a tick each; "Add N cards" places the ticked ones beside the
+  card, each linked to it as *part of*, in one undoable step. When the model
+  says one idea or its reply cannot be used, the card's own list items, else
+  its paragraphs, are offered; failing those, it says there is one idea.
+- **Find related cards** (`GET /cards/{id}/related`, `ask.related_cards`): the
+  board's own search (§35) run on the card's title and text, leaving out the
+  card, the cards it already links to, the groups it sits in and anything it
+  holds. Up to six, each with a Link button and a click to go to it. Uses the
+  search models only, not the question slot.
+- Fix the writing and Ask about this card (into the chat's context) as before.
+
+**Several cards** - an AI button on the selection bar:
+
+- **Summarise these, Quiz me on these** - through the chat, as above.
+- **Merge into one card** (`POST /cards/merge`, `ask.merge_cards`, 2 to 8
+  cards, not groups): one card drafted from their own words, every distinct
+  point kept. It is shown, editable, with "Replace with this"; accepted, the
+  merged card takes the place of the first, every link the cards had to cards
+  outside them is moved to it (kind and label kept, a link two of them shared
+  made once), and the cards go - one step, so Ctrl+Z brings them all back. A
+  reply that drops most of the words, or cannot be read, gives the cards side
+  by side instead.
+- The selection bar now keeps one size at any zoom (it was drawn inside the
+  board and shrank with it; at 12 % the merge draft was unreadable).
+
+All drafts are offered, never written, until the person accepts (CLAUDE.md
+rule 1); the model's JSON is parsed between the first `{` and last `}` and
+every field checked (rule 8); each call has a time limit (90 s). A menu opens
+above its bar unless the window's top would cut it off; then below.
+
+Measured with the real model (Qwen3.5) on the SWIFT Lab Visitors board: break
+15 s cold, 3 s warm, five cards taken faithfully from a four-line card; related
+2.8 s, the other visitors and their groups; merge 7.6 s, all points of two
+cards kept; Summarise 6.6 s, cited; fun fact 4 s, a playful refusal with 🤷 on
+a card holding only a title; the quiz asked question 1, then judged "B"
+right with a 🎉, gave 1/3 and asked question 2.
+
+**Three weak spots, then fixed** (the same day):
+
+- *A quiz question with three right choices*: "what is his official title?"
+  over a card listing three roles. The quiz shape now asks for exactly one
+  right answer by the cards, the wrong choices plainly wrong by them - never
+  another true fact from them. Two runs after: "which is NOT one of his
+  roles?" and "his role at Nottingham City Transport?" - one right each.
+- *Hub cards among the related*: the board's root, "External visitors",
+  "Internal visitors". Leaving out cards linked to six or more others was
+  tried first and was wrong both ways: the root had 2 links and "External
+  visitors" 4, while two meeting cards with real content had 6 and 7. What
+  marks structure on a board is being held: a card that two or more cards are
+  *part of* (`HOLDS`) - categories, organisations, meetings - is left out, as
+  groups are. For David Astill the six are now all people.
+- *Drafted cards placed without looking*: `actions.columnSpots` finds the
+  first column to the card's right where all of them fit clear of every card
+  on the level, starting level with it and stepping down past anything in the
+  way, further right if crowded. Five cards from David Astill's: no overlap
+  with any card, measured against their drawn sizes. `freeSpot` (pasting) read
+  a self-sizing card's width as 0 (`??` on 0); it now uses the guess.
+- Found on the way: a later run said "one idea" of the same four-line card;
+  the fallback now offers a card's separate lines when it has neither list
+  items nor paragraphs.
+
+290 tests.

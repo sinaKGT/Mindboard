@@ -7,7 +7,6 @@ import re
 import threading
 import shutil
 import tempfile
-import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,7 +23,7 @@ from .assets import (
 )
 from .boards import board_meta, conn_for, create_board, delete_board, list_boards
 from .bundle import (
-    BundleError, backup_filename, create_backup, export_board, import_bundle, is_backup,
+    BundleError, backup_filename, check_files, create_backup, export_board, import_bundle, is_backup,
     restore_backup,
 )
 from .ids import ulid
@@ -35,6 +34,19 @@ from .paths import DataDir
 
 WEB_DIR = Path(__file__).parent / "web"
 SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+SHORT_WAIT = 30.0   # fixing a card's writing or drafting one waits this long for the model
+
+
+def take_turn(model, timeout: Optional[float] = None) -> bool:
+    """The model's one question slot, waited for (DESIGN.md 60): a picture
+    being described in the background finishes and steps aside, so a question
+    is not told "still answering" just because the model was busy a moment."""
+    take = getattr(model, "take_turn", None)
+    if take is None:                       # a stand-in model in the tests
+        return model._asking.acquire(timeout=timeout if timeout is not None else 10)
+    return take(timeout) if timeout is not None else take()
 
 
 def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
@@ -333,9 +345,89 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     # each change - so a question never waits for it (indexer.py)
     from .indexer import Indexer
 
-    # it describes pictures with the chat model, but only while that is loaded
-    indexer = Indexer(dd, lambda: search_model("embed"), describer=lambda: held.get("model"))
+    # it describes pictures with the chat model - loading it for a picture
+    # never described (DESIGN.md 51), so a new picture is soon found by what it shows
+    indexer = Indexer(dd, lambda: search_model("embed"), describer=local_model)
     app.state.indexer = indexer
+
+    @app.post("/api/boards/{bid}/proofread")
+    def api_proofread(bid: str, body: dict):
+        """A card's title and text with spelling and grammar fixed (DESIGN.md
+        56). Writes nothing: the interface changes the card, undoably."""
+        from .ask import proofread
+
+        board_or_404(bid)
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Set up the AI first - choose 6 in the Mindboard menu")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
+        try:
+            return proofread(model, str(body.get("title") or "")[:300], str(body.get("text") or "")[:20000])
+        finally:
+            model._asking.release()
+
+    @app.post("/api/boards/{bid}/cards/{nid}/break")
+    def api_break_card(bid: str, nid: str):
+        """Smaller cards drafted from one card's own words (DESIGN.md 72).
+        Writes nothing: the interface adds the ones the person keeps."""
+        from .ask import break_card
+
+        board_or_404(bid)
+        node = {n["id"]: n for n in read_graph(conn_for(dd, bid), bid)["nodes"]}.get(nid)
+        if node is None:
+            raise HTTPException(404, "that card is not on this board any more")
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Set up the AI first - choose 6 in the Mindboard menu")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
+        try:
+            c = node.get("content") or {}
+            return break_card(model, node.get("title") or "", str(c.get("text") or c.get("summary") or ""))
+        finally:
+            model._asking.release()
+
+    @app.post("/api/boards/{bid}/cards/merge")
+    def api_merge_cards(bid: str, body: dict):
+        """One card drafted from several cards' own words (DESIGN.md 72).
+        Writes nothing: the interface replaces the cards only if the person
+        accepts, in one undoable step."""
+        from .ask import MERGE_MAX, merge_cards
+
+        board_or_404(bid)
+        ids = [str(i) for i in (body.get("ids") or [])][:MERGE_MAX]
+        nodes = {n["id"]: n for n in read_graph(conn_for(dd, bid), bid)["nodes"]}
+        picked = [nodes[i] for i in ids if i in nodes]
+        if len(picked) < 2:
+            raise HTTPException(400, "choose two or more cards to merge")
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Set up the AI first - choose 6 in the Mindboard menu")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
+        try:
+            return merge_cards(model, [{"title": n.get("title") or "",
+                                        "text": str((n.get("content") or {}).get("text") or "")} for n in picked])
+        finally:
+            model._asking.release()
+
+    @app.get("/api/boards/{bid}/cards/{nid}/related")
+    def api_related_cards(bid: str, nid: str):
+        """Cards that belong with this one, by the board's search on its words
+        (DESIGN.md 72). Uses the search models only - not the question slot."""
+        from .ask import AskError, related_cards
+
+        board_or_404(bid)
+        emb = search_model("embed")
+        try:
+            got = related_cards(dd, conn_for(dd, bid), bid, nid, emb,
+                                emb.inst.embedder.name if emb else "", search_model("rerank"))
+        except AskError as exc:
+            raise HTTPException(404, str(exc))
+        finally:
+            indexer.want(bid)
+        return {"results": got}
 
     @app.post("/api/boards/{bid}/ask/draft")
     def api_ask_draft(bid: str, body: DraftRequest):
@@ -348,11 +440,12 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         model = local_model()
         if model is None:
             raise HTTPException(503, "Ask your board is not set up yet")
-        if not model._asking.acquire(blocking=False):
-            raise HTTPException(409, "still answering the last question")
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
         try:
             nodes = {n["id"]: n for n in read_graph(conn_for(dd, bid), bid)["nodes"]}
-            return draft_card(model, nodes, body.question, body.answer, body.cited)
+            return draft_card(model, nodes, body.question, body.answer, body.cited,
+                              body.candidates, [t.model_dump() for t in body.history])
         finally:
             model._asking.release()
 
@@ -363,7 +456,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         Reads the board only - nothing is written."""
         from starlette.concurrency import run_in_threadpool
 
-        from .ask import AskError, answer_events, build, check_fits
+        from .ask import AskError, answer_events, build, check_fits, own_context, take_pasted
 
         history = [t.model_dump() for t in body.history]
 
@@ -373,8 +466,20 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             if model is None:
                 raise HTTPException(503, "Ask your board is not set up yet - choose 6 in the "
                                          "Mindboard menu, or run: mindboard ai install")
-            if model._asking.locked():
-                raise HTTPException(409, "still answering the last question")
+            if body.own:
+                # Board off (DESIGN.md 63): nothing from the board, so nothing
+                # to search by - a pasted picture goes straight to the model
+                try:
+                    return model, own_context(take_pasted(body.images)), model.memory_note()
+                except AskError as exc:
+                    raise HTTPException(400, str(exc))
+            if body.images:
+                # pasted pictures (DESIGN.md 62): read now, so a bad one is
+                # refused at once; looked at and searched by once the model is held
+                try:
+                    return model, take_pasted(body.images), model.memory_note()
+                except AskError as exc:
+                    raise HTTPException(400, str(exc))
             try:
                 emb = search_model("embed")
                 ctx = build(dd, conn_for(dd, bid), bid, body.cards, body.question, history,
@@ -391,11 +496,111 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             return model, ctx, model.memory_note()
 
         model, ctx, warning = await run_in_threadpool(prepare)
-        return stream_answer(model, ctx, body.question, history, body.think, warning, request,
-                             after=lambda: indexer.want(bid))
+        if isinstance(ctx, list):
+            pics = ctx
 
-    def stream_answer(model, ctx, question: str, history: list, think: bool, warning,
-                      request: Request, after=None) -> StreamingResponse:
+            def with_pictures():
+                question = yield from look_at_pasted(model, pics, body.question)
+                if question is None:
+                    return
+                emb = search_model("embed")
+                try:
+                    got = build(dd, conn_for(dd, bid), bid, body.cards, question, history,
+                                emb, emb.inst.embedder.name if emb else "", search_model("rerank"),
+                                background=True, keep=body.keep, explain=body.explain)
+                finally:
+                    indexer.want(bid)
+                got.attached = pics
+                yield from tasks_mod.run(model, got, body.question, history,
+                                         board_tools(model, bid, pics))
+                yield from answer_events(model, got, question, history, body.think, hold=False)
+
+            return stream_answer(model, with_pictures, warning, request,
+                                 after=lambda: indexer.want(bid), hold=True)
+
+        def understood():
+            # the request understood and its steps done first (DESIGN.md 66);
+            # held for the whole answer, its loop fallback included; a question
+            # asked while a picture is being described waits its turn (60)
+            tools = own_tools(model, ctx.attached) if ctx.mode == "own" \
+                else board_tools(model, bid, ctx.attached)
+            yield from tasks_mod.run(model, ctx, body.question, history, tools)
+            yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
+
+        return stream_answer(model, understood, warning, request, after=lambda: indexer.want(bid), hold=True)
+
+    # ------------------------------------------------- what steps can do --
+    # DESIGN.md 66: the tools a task's steps use, where the question is asked
+    from . import tasks as tasks_mod
+
+    READ_PICTURE = ("Write out all the text in this picture exactly, in reading order, keeping its "
+                    "headings, bullet points and their nesting. Then describe each figure, chart or "
+                    "diagram in one or two sentences. Formulas in LaTeX between dollar signs. No preamble.")
+
+    def picture_reader(model, pics):
+        if not pics:
+            return None
+
+        def read(_what: str) -> str:
+            out = []
+            for i, p in enumerate(pics, 1):
+                reply = model.chat([{"role": "user", "content": [
+                    {"type": "text", "text": READ_PICTURE},
+                    {"type": "image_url", "image_url": {"url": p.data_url}}]}],
+                    max_tokens=900, think=False, temperature=0.1, timeout=tasks_mod.STEP_SECONDS)
+                text = str(reply.get("text") or "").strip()
+                out.append((f"PICTURE {i}\n" if len(pics) > 1 else "") + text)
+            return "\n\n".join(out)
+        return read
+
+    def board_tools(model, bid: str, pics) -> "tasks_mod.Tools":
+        from . import retrieve
+        from .ask import board_index, card_text
+        from .experts import STEP_BUDGET
+
+        def search(query: str):
+            conn = conn_for(dd, bid)
+            g = read_graph(conn, bid)
+            nodes = {n["id"]: n for n in g["nodes"]}
+            emb = search_model("embed")
+            index = board_index(dd, conn, bid, nodes, emb, emb.inst.embedder.name if emb else "",
+                                background=True)
+            found = retrieve.search(index, query, nodes, g["edges"], index.costs, emb,
+                                    budget=STEP_BUDGET, reranker=search_model("rerank"))
+            ids = found.ids[:8]
+            return "\n\n".join(card_text(nodes[i], nodes) for i in ids), ids
+
+        have = ("Cards from the person's board found for this request are already in front of the "
+                "model; a step can search the board for more.")
+        if pics:
+            have += f" {len(pics)} picture{'s' if len(pics) > 1 else ''} pasted with the request."
+        return tasks_mod.Tools(have, "the board", read=picture_reader(model, pics), search=search)
+
+    def own_tools(model, pics) -> "tasks_mod.Tools":
+        have = "No notes - the board is switched off; general knowledge only."
+        if pics:
+            have += f" {len(pics)} picture{'s' if len(pics) > 1 else ''} pasted with the request."
+        return tasks_mod.Tools(have, read=picture_reader(model, pics))
+
+    def look_at_pasted(model, pics, question: str):
+        """Pasted pictures described in a few lines each (DESIGN.md 62) - said to
+        the page, which keeps them with the question for later turns - and the
+        question with them, to search and answer by. None if stopped meanwhile.
+        The caller holds the model."""
+        from .ask import check_citations, describe_pasted, with_pasted
+
+        said = []
+        for p in pics:
+            said.append(describe_pasted(model, p))
+            if model.cancelled():
+                yield {"event": "done", **check_citations("", set()), "next": "", "nexts": [],
+                       "stopped": True, "tokens_per_second": None}
+                return None
+        yield {"event": "pasted", "said": said}
+        return with_pasted(question, said)
+
+    def stream_answer(model, make, warning, request: Request, after=None,
+                      hold: bool = False) -> StreamingResponse:
         """An answer as server-sent events - for a board and for an expert alike.
 
         The answer is made on its own thread and handed over through a queue.
@@ -404,21 +609,31 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         connection waited forever, nothing pulled the next piece, and the model
         sat mid-answer holding the one slot, so every later question was told
         "still answering". Now the response can stall without stalling the
-        model, and Stop reaches the model directly (ask/stop)."""
-        from starlette.concurrency import run_in_threadpool
+        model, and Stop reaches the model directly (ask/stop).
 
-        from .ask import answer_events
+        `make` gives the events. hold=True: they are a run of model calls - an
+        expert's plan, its steps and the answer (DESIGN.md 47) - and the model
+        is held for the whole run, here, rather than call by call."""
+        from starlette.concurrency import run_in_threadpool
 
         loading = not model.running()
         pieces: "queue.Queue[Optional[dict]]" = queue.Queue()
 
         def produce() -> None:
+            held = False
             try:
-                for item in answer_events(model, ctx, question, history, think):
+                if hold:
+                    held = take_turn(model)
+                    if not held:
+                        raise RuntimeError("still answering the last question")
+                    model._cancel.clear()
+                for item in make():
                     pieces.put(item)
-            except Exception as exc:     # ModelError, ModelBusy: said, not thrown
+            except Exception as exc:     # ModelError, ModelBusy, ExpertError: said, not thrown
                 pieces.put({"event": "error", "message": str(exc)})
             finally:
+                if held:
+                    model._asking.release()
                 pieces.put(None)
                 if after is not None:
                     after()              # e.g. a moment to describe pictures, the model free
@@ -447,6 +662,129 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
 
+    # ------------------------------------------------------- one file asked --
+    # DESIGN.md 64: a file prepared - read, its figures described, indexed -
+    # then asked, searched inside itself only. Temporary; boards untouched.
+    from . import filechat
+
+    files = filechat.FileChats(dd)
+    app.state.files = files
+
+    def file_or_404(fid: str) -> "filechat.FileSession":
+        s = files.get(fid)
+        if s is None:
+            raise HTTPException(404, "this file's conversation has ended - open the file again")
+        return s
+
+    @app.post("/api/files")
+    def api_file_open(file: Optional[UploadFile] = File(None), board: str = Form(""),
+                      sha: str = Form(""), name: str = Form("")):
+        """Start preparing a file: one added in the chat, or one on a board."""
+        try:
+            if file is not None:
+                s = files.from_upload(file.file, file.filename or name)
+            else:
+                board_or_404(board)
+                path = resolve(dd, conn_for(dd, board), board, sha)
+                if path is None:
+                    raise HTTPException(404, "that file is not on this computer")
+                s = files.from_board(path, name, board, sha)
+        except filechat.FileError as exc:
+            raise HTTPException(400, str(exc))
+        files.prepare(s, local_model, lambda: search_model("embed"),
+                      lambda m: take_turn(m))
+        return s.info()
+
+    @app.get("/api/files/{fid}")
+    def api_file(fid: str):
+        return file_or_404(fid).info()
+
+    @app.delete("/api/files/{fid}")
+    def api_file_close(fid: str):
+        return {"closed": files.close(fid)}
+
+    @app.get("/api/files/{fid}/raw")
+    def api_file_raw(fid: str):
+        """The file itself - to open at a page (#page=12), or to add to a board."""
+        s = file_or_404(fid)
+        import mimetypes
+        return FileResponse(s.path, filename=s.name,
+                            media_type=mimetypes.guess_type(s.name)[0] or "application/octet-stream",
+                            content_disposition_type="inline")
+
+    @app.get("/api/files/{fid}/page/{page}")
+    def api_file_page(fid: str, page: int, size: int = 360):
+        s = file_or_404(fid)
+        if s.kind != "pdf" or not 1 <= page <= max(s.pages, 1):
+            raise HTTPException(404, "no such page")
+        return FileResponse(files.thumb(s, page, max(120, min(size, 1200))), media_type="image/jpeg",
+                            headers={"Cache-Control": "private, max-age=3600"})
+
+    @app.post("/api/files/{fid}/ask")
+    async def api_file_ask(fid: str, body: AskRequest, request: Request):
+        """Ask the file: its best passages, and pages better seen than read,
+        streamed like a board's answer. Reads only."""
+        from starlette.concurrency import run_in_threadpool
+
+        from .ask import AskError, answer_events, take_pasted
+
+        s = file_or_404(fid)
+        history = [t.model_dump() for t in body.history]
+
+        def prepare():
+            if s.status != "ready":
+                raise HTTPException(409, s.error or "the file is still being prepared")
+            model = local_model()
+            if model is None:
+                raise HTTPException(503, "Ask your board is not set up yet - choose 6 in the "
+                                         "Mindboard menu, or run: mindboard ai install")
+            try:
+                pasted = take_pasted(body.images)
+            except AskError as exc:
+                raise HTTPException(400, str(exc))
+            picked, how = files.find(s, body.question, search_model("embed"), search_model("rerank"))
+            ctx = files.context(s, picked, how)
+            ctx.attached = pasted
+            return model, ctx, model.memory_note()
+
+        model, ctx, warning = await run_in_threadpool(prepare)
+
+        def run():
+            # a spreadsheet (DESIGN.md 65): the model first decides whether the
+            # question needs calculating over whole sheets, and the tools run
+            if s.book is not None:
+                from .sheets import calculated_text, decide
+
+                calls, why, trouble = decide(model, s.book, body.question, history)
+                if model.cancelled():
+                    yield {"event": "done", "answer": "", "board": "", "beyond": "", "cited": [],
+                           "dropped": [], "next": "", "nexts": [], "stopped": True,
+                           "tokens_per_second": None}
+                    return
+                results = [s.book.run(c) for c in calls]
+                yield {"event": "tools", "why": why, "trouble": trouble,
+                       "calls": [{"tool": r.get("tool"), "label": r.get("label", ""),
+                                  "said": r["said"], "error": r.get("error", "")} for r in results]}
+                ctx.text = calculated_text(results, trouble) + ctx.text
+            # the request understood and its steps done (DESIGN.md 66)
+            yield from tasks_mod.run(model, ctx, body.question, history, file_tools(model, s, ctx.attached))
+            yield from answer_events(model, ctx, body.question, history, body.think, hold=False)
+
+        return stream_answer(model, run, warning, request, hold=True)
+
+    def file_tools(model, s, pics) -> "tasks_mod.Tools":
+        def search(query: str):
+            picked, _ = files.find(s, query, search_model("embed"), search_model("rerank"))
+            return "\n\n".join(f"[{c.where}] {c.text}" for c in picked[:8]), []
+
+        have = (f'The file "{s.name}": the passages that best match the request are already in front '
+                "of the model; a step can search the file for more.")
+        if s.book is not None:
+            have += " Totals and counts over its sheets were already calculated where needed."
+        if pics:
+            have += f" {len(pics)} picture{'s' if len(pics) > 1 else ''} pasted with the request."
+        return tasks_mod.Tools(have, "this file", read=picture_reader(model, pics), search=search)
+
     # ------------------------------------------------------------- experts --
     # DESIGN.md 40: experts span boards, so they live in the library
     from . import experts as experts_mod
@@ -456,6 +794,33 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             return experts_mod.get(dd, eid)
         except experts_mod.ExpertError:
             raise HTTPException(404, "no such expert")
+
+    @app.post("/api/experts/{eid}/draft")
+    def api_expert_draft(eid: str, body: DraftRequest):
+        """A card drafted from an expert's answer (DESIGN.md 53, 55): as on a
+        board, but across all of the expert's boards - the card it belongs
+        with may be on any of them, and `board` says which. Writes nothing."""
+        from .ask import draft_card
+
+        expert = expert_or_404(eid)
+        model = local_model()
+        if model is None:
+            raise HTTPException(503, "Ask your board is not set up yet")
+        nodes: dict[str, dict] = {}
+        board_of: dict[str, str] = {}
+        for bid in expert.get("boards", []):
+            if board_meta(dd, bid) is None:
+                continue
+            for n in read_graph(conn_for(dd, bid), bid)["nodes"]:
+                nodes[n["id"]], board_of[n["id"]] = n, bid
+        if not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
+        try:
+            got = draft_card(model, nodes, body.question, body.answer, body.cited,
+                             body.candidates, [t.model_dump() for t in body.history])
+        finally:
+            model._asking.release()
+        return {**got, "board": board_of.get(got["link_to"], "")}
 
     @app.get("/api/experts")
     def api_experts():
@@ -480,13 +845,72 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
     def api_expert_delete(eid: str):
         return {"deleted": experts_mod.delete(dd, eid)}
 
+    # ------------------------------------------------------ the first page --
+    # groups of boards, and the page's own theme and pattern (DESIGN.md 57)
+    from . import home as home_mod
+
+    def home_call(fn, *a):
+        try:
+            return fn(dd, *a)
+        except home_mod.HomeError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.get("/api/home")
+    def api_home():
+        present = {b["id"] for b in list_boards(dd)}
+        home = home_mod.load(dd)
+        for g in home["groups"]:                 # a board deleted since is no longer counted
+            g["boards"] = [b for b in g.get("boards", []) if b in present]
+        return home
+
+    @app.patch("/api/home/look")
+    def api_home_look(body: dict):
+        return home_mod.set_look(dd, body)
+
+    @app.post("/api/home/groups")
+    def api_home_group_add(body: dict):
+        return home_call(home_mod.add_group, body)
+
+    @app.patch("/api/home/groups/{gid}")
+    def api_home_group_update(gid: str, body: dict):
+        return home_call(home_mod.update_group, gid, body)
+
+    @app.delete("/api/home/groups/{gid}")
+    def api_home_group_delete(gid: str):
+        return {"deleted": home_mod.delete_group(dd, gid)}
+
+    @app.post("/api/home/place")
+    def api_home_place(body: dict):
+        board = str(body.get("board") or "")
+        board_or_404(board)
+        return home_call(home_mod.place, board, body.get("group") or None)
+
+    # ------------------------------------------------------- your themes --
+    # named themes of your own, offered on every board (DESIGN.md 52)
+    from . import themes as themes_mod
+
+    @app.get("/api/themes")
+    def api_themes():
+        return {"themes": themes_mod.load(dd)}
+
+    @app.post("/api/themes")
+    def api_theme_save(body: dict):
+        try:
+            return themes_mod.save(dd, body)
+        except themes_mod.ThemeError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.delete("/api/themes/{tid}")
+    def api_theme_delete(tid: str):
+        return {"deleted": themes_mod.delete(dd, tid)}
+
     @app.post("/api/experts/guide")
     def api_experts_guide(body: GuideRequest):
         """Who can help with this question - the experts whose boards answer
         it best, and why. Reads only."""
         model = local_model()
-        if model is not None and not model._asking.acquire(blocking=False):
-            raise HTTPException(409, "still answering the last question")
+        if model is not None and not take_turn(model, SHORT_WAIT):
+            raise HTTPException(409, "still answering the last question - try again in a moment")
         try:
             emb = search_model("embed")
             return experts_mod.guide(dd, body.question, model, emb,
@@ -501,7 +925,7 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
         Streams like a board's answer. Reads only."""
         from starlette.concurrency import run_in_threadpool
 
-        from .ask import AskError, check_fits
+        from .ask import AskError, take_pasted
 
         expert = expert_or_404(eid)
         history = [t.model_dump() for t in body.history]
@@ -513,28 +937,40 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
                                          "Mindboard menu, or run: mindboard ai install")
             if model._asking.locked():
                 # a conversation: the newest question replaces the one being
-                # answered - spoken over it, or asked again (DESIGN.md 45)
+                # answered - spoken over it, or asked again (DESIGN.md 45).
+                # The run below waits for the slot (60): the answer stops at
+                # once, a picture being described finishes first
                 model.cancel()
-                for _ in range(120):
-                    if not model._asking.locked():
-                        break
-                    time.sleep(0.05)
-                else:
-                    raise HTTPException(409, "still answering the last question")
             try:
-                emb = search_model("embed")
-                ctx, lib = experts_mod.context(dd, expert, body.question, history, emb,
-                                               emb.inst.embedder.name if emb else "",
-                                               search_model("rerank"))
-                check_fits(ctx, body.question, history, body.think)
-            except (experts_mod.ExpertError, AskError) as exc:
+                pics = take_pasted(body.images)           # DESIGN.md 62
+            except AskError as exc:
                 raise HTTPException(400, str(exc))
+            emb = search_model("embed")
+            lib = experts_mod.library(dd, expert, emb, emb.inst.embedder.name if emb else "")
+            if not lib.nodes:
+                raise HTTPException(400, "this expert's boards have no cards yet")
+            return model, emb, lib, model.memory_note(), pics
+
+        model, emb, lib, warning, pics = await run_in_threadpool(prepare)
+        reranker = search_model("rerank")
+
+        def run():
+            question = body.question
+            if pics:
+                question = yield from look_at_pasted(model, pics, question)
+                if question is None:
+                    return
+            # planned (DESIGN.md 47): the plan, its steps and the answer, streamed
+            # as they happen; anything that goes wrong on the way is said as an error
+            yield from experts_mod.answer(model, dd, expert, lib, question, history, emb,
+                                          emb.inst.embedder.name if emb else "", reranker, body.think,
+                                          attached=pics)
+
+        def after():
             for bid in lib.indexes:
                 indexer.want(bid)
-            return model, ctx, model.memory_note()
 
-        model, ctx, warning = await run_in_threadpool(prepare)
-        return stream_answer(model, ctx, body.question, history, body.think, warning, request)
+        return stream_answer(model, run, warning, request, after=after, hold=True)
 
     # --------------------------------------------------------------- voice --
     @app.get("/api/voice")
@@ -719,13 +1155,21 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             background=BackgroundTask(lambda: shutil.rmtree(tmp.parent, ignore_errors=True)),
         )
 
+    @app.get("/api/backup/check")
+    def api_backup_check():
+        """What a backup made now would lack: the files on the boards found
+        nowhere on this computer (DESIGN.md 49). Writes nothing."""
+        return check_files(dd)
+
     @app.get("/api/backup")
     def api_backup():
-        """Every board, media included, as one ordinary zip."""
+        """Every board, media included, as one ordinary zip. Files found
+        nowhere are listed inside it (MISSING-FILES.txt) and counted here."""
         tmp = Path(tempfile.mkdtemp()) / backup_filename()
-        create_backup(dd, tmp)
+        result = create_backup(dd, tmp)
         return FileResponse(
             tmp, media_type="application/zip", filename=tmp.name,
+            headers={"X-Mindboard-Missing-Files": str(len(result["missing"]))},
             background=BackgroundTask(lambda: shutil.rmtree(tmp.parent, ignore_errors=True)),
         )
 
@@ -759,7 +1203,12 @@ def create_app(dd: DataDir, token: str, dev: bool = False) -> FastAPI:
             candidate = WEB_DIR / full_path
             if full_path and candidate.is_file() and WEB_DIR in candidate.resolve().parents:
                 return FileResponse(candidate)
-            return FileResponse(index, media_type="text/html")
+            # The page names this build's scripts. Sent without a caching rule, a
+            # browser kept an old copy after an update and ran the old interface
+            # until a hard refresh; "no-cache" makes it ask each time - a quick
+            # "not modified" when nothing changed. The scripts it names carry a
+            # hash in their names, so they can be cached for good.
+            return FileResponse(index, media_type="text/html", headers={"Cache-Control": "no-cache"})
     else:
         @app.get("/{full_path:path}")
         def no_ui(full_path: str):
