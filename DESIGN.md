@@ -3901,3 +3901,58 @@ showed the glowing edge, the selected one the ring; on the light theme the
 cards stayed white with a soft shadow.
 
 293 tests.
+
+## 77. AI results beside the card, a quiz as data, and drop to connect (2026-11-21)
+
+From the owner, after using the card AI (§72, §75):
+
+- **"The chat box is only for asking questions."** Summarise, Explain, Fun
+  fact and the quiz now open in a panel beside the card (or the selection),
+  in place of its AI menu - never in the chat. Summarise, Explain and Fun
+  fact go through the same route as the chat with their task known (§75) and
+  no conversation; the answer streams into the panel ("Summarising…" first),
+  with Copy and Add to board (a card linked to the first one, its citations
+  taken out). Going back or closing hangs up, so the model stops.
+- **A quiz as structured data.** The model wrote its choices into the
+  question's sentence - "A) Animal instinct B) Human cognition C) ..." - and
+  a quiz played in prose had to be read back out of it. Now each question is
+  asked for on its own (`POST /cards/quiz`, `ask.quiz_question`) as JSON -
+  question, 3-4 choices, the right one's position, and why - checked (one
+  right, none repeated, the answer in range; tried twice), choices without
+  letters, and shuffled, since the model puts the right one first. The panel
+  shows them as buttons, marks the pick at once - right in green, wrong in red
+  with the right letter and the reason - keeps score, asks for the next
+  question with the earlier ones listed so none repeats, and ends with the
+  score and Play again.
+- **Merge** showed Python's list syntax - "['Analogy is ...', "It has
+  ..."]" - in the draft and then on the merged card: the model sent its text
+  as a list. A field sent as a list is now joined into lines (`ask._plain`),
+  in Break, Merge and the quiz alike. The draft's text box could not be
+  scrolled: the wheel zoomed the board. The bars and their menus are now
+  `nowheel`, so the wheel scrolls what it is over. Its button was grey: the
+  selection bar's button style reached every button inside it; it is now
+  limited to the bar's own buttons, and the main action button is solid
+  white on the accent.
+- **A menu that grows after it opens** - a quiz question arriving - ran off
+  the top of the window; the above-or-below check now runs again whenever it
+  changes size.
+- **The card bar has Delete** after Connect.
+- **Hover texts are short names**, not explanations: "Think deeper", "Explain
+  more", "Pin open", "Ask this file", "Back up all boards" - about forty were
+  shortened; a shortcut stays, set apart (§73).
+- **Connecting:** a link dragged from a card's port and let go anywhere over
+  another card - not only on one of its four ports - is made to that card.
+  Let go over empty board, it still makes a new connected card.
+
+Not done: "when I click on break it down it shows..." - the owner's sentence
+was cut off; the list-text fix above may be what it was.
+
+Checked with the real model on the SWIFT Lab Visitors board: the quiz gave
+four separate choices, a wrong pick showed "Not quite - it is B." with the
+card's words, and the chat gained nothing; Summarise streamed into the
+panel in 5.9 s with Copy and Add to board; the merge draft came back as
+lines, scrolled with the wheel, its button white on blue, and the merged
+card showed a list; a drag let go over the middle of another card made one
+link and no new card.
+
+296 tests.

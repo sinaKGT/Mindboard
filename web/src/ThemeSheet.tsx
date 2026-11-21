@@ -63,7 +63,7 @@ export function ThemeSheet() {
       onKeyDown={(e) => { if (e.key === 'Escape') setUI('themeOpen', false) }}>
       <div className="theme-sheet-head">
         <h4>Theme</h4>
-        <button className="icon-btn" title="Close (or click the board) - changes are already saved"
+        <button className="icon-btn" title="Close"
           aria-label="Close" onClick={() => setUI('themeOpen', false)}>
           <Icon name="x" size={13} />
         </button>
@@ -144,7 +144,7 @@ export function ThemeSheet() {
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void save() }} />
         <button className="btn primary" disabled={!name.trim() || saving} onClick={() => void save()}
-          title="Save these colours as a theme of your own, for every board">
+          title="Save as theme">
           {mine.some((t) => t.name.toLowerCase() === name.trim().toLowerCase()) ? 'Update' : 'Save'}
         </button>
       </div>

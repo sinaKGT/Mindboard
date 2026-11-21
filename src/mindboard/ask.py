@@ -1220,8 +1220,8 @@ def break_card(model, title: str, text: str) -> dict:
     for c in (got.get("cards") if isinstance(got, dict) else None) or []:
         if not isinstance(c, dict):
             continue
-        t = " ".join(str(c.get("title") or "").split()[:10]).strip()[:80]
-        x = CITE.sub("", str(c.get("text") or "")).strip()[:600]
+        t = " ".join(_plain(c.get("title")).split()[:10]).strip()[:80]
+        x = CITE.sub("", _plain(c.get("text"))).strip()[:600]
         if t or x:
             out.append({"title": t or x[:60], "text": x})
     out = out[:BREAK_MAX]
@@ -1270,12 +1270,79 @@ def merge_cards(model, cards: list[dict]) -> dict:
         return fallback
     if not isinstance(got, dict):
         return fallback
-    title = " ".join(str(got.get("title") or "").split()[:10]).strip()[:80]
-    text = CITE.sub("", str(got.get("text") or "")).strip()[:4000]
+    title = " ".join(_plain(got.get("title")).split()[:10]).strip()[:80]
+    text = CITE.sub("", _plain(got.get("text"))).strip()[:4000]
     # a merge that lost most of the words is not a merge
     if not text or len(text) < min(len(joined), 400) * 0.3:
         return fallback
     return {"title": title or fallback["title"], "text": text}
+
+
+QUIZ_SYSTEM = """You write ONE quiz question about a person's cards, as structured data.
+
+Reply with JSON only, no other text:
+{"question": "...", "choices": ["...", "...", "...", "..."], "answer": 0, "why": "..."}
+
+- question: one short question whose answer is written in the cards. Never what
+  a title stands for or anything the cards do not say.
+- choices: 3 or 4 short options, without letters. Exactly one is right by the
+  cards; the others are plainly wrong by the cards - never another true fact
+  from them.
+- answer: the position of the right choice, counting from 0.
+- why: one short sentence, from the cards, saying why it is right.
+- Never repeat a question already asked (listed below, if any)."""
+
+QUIZ_CHOICES = (3, 4)
+QUIZ_TRIES = 2
+
+
+def _plain(value) -> str:
+    """A field the model may send as a list of lines: joined, not shown as
+    Python's list - "['first.', 'second.']" reached a card (DESIGN.md 77)."""
+    if isinstance(value, (list, tuple)):
+        return "\n".join(f"- {_plain(v)}" if len(value) > 1 else _plain(v) for v in value if _plain(v))
+    return str(value or "").strip()
+
+
+def quiz_question(model, cards: list[dict], asked: Optional[list[str]] = None, rng=None) -> dict:
+    """One quiz question about these cards, as data - {question, choices,
+    answer, why} - so the page shows the choices as buttons and marks the
+    answer itself (DESIGN.md 77); or {note} when none could be made. The
+    choices are shuffled: the model puts the right one first."""
+    import random
+    rng = rng or random.Random()
+    listing = "\n\n".join(f"CARD {i}\nTITLE: {(c.get('title') or '').strip()}\nTEXT: {(c.get('text') or '').strip()[:MERGE_CHARS]}"
+                          for i, c in enumerate(cards[:MERGE_MAX], 1))
+    if not any((c.get("text") or c.get("title") or "").strip() for c in cards):
+        return {"note": "These cards hold nothing to ask about yet."}
+    before = "\n".join(f"- {q}" for q in (asked or [])[-10:])
+    for _ in range(QUIZ_TRIES):
+        try:
+            reply = model.chat([{"role": "system", "content": QUIZ_SYSTEM},
+                                {"role": "user", "content": listing
+                                 + (f"\n\nALREADY ASKED\n{before}" if before else "")}],
+                               max_tokens=400, think=False, temperature=0.5, timeout=BREAK_SECONDS)["text"]
+            got = json.loads(reply[reply.index("{"):reply.rindex("}") + 1])
+        except Exception:
+            continue
+        if not isinstance(got, dict):
+            continue
+        question = CITE.sub("", _plain(got.get("question")))[:300].strip()
+        raw = got.get("choices") if isinstance(got.get("choices"), list) else []
+        choices = [re.sub(r"^\(?[A-Da-d][).:]\s+", "", CITE.sub("", _plain(c))).strip()[:160] for c in raw]
+        try:
+            answer = int(got.get("answer"))
+        except (TypeError, ValueError):
+            continue
+        if (not question or not QUIZ_CHOICES[0] <= len(choices) <= QUIZ_CHOICES[1]
+                or not all(choices) or len(set(c.lower() for c in choices)) != len(choices)
+                or not 0 <= answer < len(choices)):
+            continue
+        right = choices[answer]
+        rng.shuffle(choices)
+        return {"question": question, "choices": choices, "answer": choices.index(right),
+                "why": CITE.sub("", _plain(got.get("why")))[:300].strip()}
+    return {"note": "Could not make a question from these cards - try again."}
 
 
 RELATED_LIMIT = 6

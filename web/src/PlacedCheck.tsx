@@ -66,7 +66,7 @@ export function PlacedCheck() {
         <button className="placed-yes" title="Yes - keep it here" onClick={keep}>
           <Icon name="check" size={14} />
         </button>
-        <button className="placed-no" title="No - connect it to another card yourself" onClick={move}>
+        <button className="placed-no" title="Connect it yourself" onClick={move}>
           <Icon name="x" size={14} />
         </button>
       </div>

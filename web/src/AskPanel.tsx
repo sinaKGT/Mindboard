@@ -426,15 +426,15 @@ export function AskPanel() {
             <span className="ask-head-actions">
               {!expanded ? (
                 <button className={`icon-btn ${explain ? 'on' : ''}`} aria-pressed={explain}
-                  title={explain ? 'Explain more is on - answers come from this conversation and the model’s own knowledge, without searching the board. Click to turn it off'
-                    : 'Explain more - answer from this conversation and the model’s own knowledge, with examples, without searching the board'}
+                  title={explain ? 'Explain more: on'
+                    : 'Explain more'}
                   onClick={() => ask.setExplain(!explain)}>
                   <Icon name="explain" size={14} />
                 </button>
               ) : null}
               <button className={`icon-btn pin-btn ${pinned ? 'on' : ''}`} aria-pressed={pinned}
-                title={pinned ? 'Pinned open - a click on the board leaves it open. Click to unpin'
-                  : 'Pin open - otherwise a click on the board puts the chat away'}
+                title={pinned ? 'Unpin'
+                  : 'Pin open'}
                 onClick={() => ask.setPinned(!pinned)}>
                 <PinIcon on={pinned} />
               </button>
@@ -443,7 +443,7 @@ export function AskPanel() {
                 <Icon name="trash" size={14} />
               </button>
               {!expanded ? (
-                <button className="icon-btn" title={side === 'left' ? 'Move the chat to the middle' : 'Move the chat to the left'}
+                <button className="icon-btn" title={side === 'left' ? 'Move to middle' : 'Move to left'}
                   onClick={() => ask.setSide(side === 'left' ? 'center' : 'left')}>
                   <Icon name={side === 'left' ? 'dock-center' : 'dock-left'} size={14} />
                 </button>
@@ -583,18 +583,18 @@ export function AskPanel() {
           <PickPicture add={pasted.add} className="bar-chip icon-only" size={12} />
           {expanded && open ? (
             <label className={`bar-chip ${explain ? 'on' : ''}`}
-              title="Answer from this conversation, with examples, without searching the board">
+              title="Explain more">
               <input type="checkbox" checked={explain} onChange={(e) => ask.setExplain(e.target.checked)} />
               <Icon name="bullets" size={12} /> Explain more
             </label>
           ) : null}
           {!branch ? <label className={`bar-chip own-chip ${own ? 'on' : ''}`}
-            title={own ? 'Board off: the model answers alone. Click to use your board again'
-              : 'Answer from the model alone - without searching or sending your board'}>
+            title={own ? 'Board off'
+              : 'Answer without the board'}>
             <input type="checkbox" checked={own} onChange={(e) => ask.setOwn(e.target.checked)} />
             <Icon name="grid" size={12} /> {own ? 'Board off' : 'Board on'}
           </label> : null}
-          <label className={`bar-chip ${think ? 'on' : ''}`} title="Slower, and deeper - worth it for what is missing">
+          <label className={`bar-chip ${think ? 'on' : ''}`} title="Think deeper">
             <input type="checkbox" checked={think} onChange={(e) => ask.setThink(e.target.checked)} />
             <Icon name="bulb" size={12} /> Think deeper
           </label>

@@ -628,6 +628,37 @@ def test_merging_writes_nothing_and_needs_two_cards(client, board, cards):
     assert client.post(url, headers=h, json={"ids": [cards["mount"]]}).status_code == 400
 
 
+def test_a_quiz_question_is_data_with_one_right_choice_shuffled():
+    import json as js
+    import random
+    cards = [{"title": "Mount", "text": "best angle at 4 m"}]
+    good = js.dumps({"question": "Best angle?", "choices": ["A) 4 m", "B) 9 m", "C) 1 m"], "answer": 0,
+                     "why": ["The card says 4 m."]})
+    got = ask.quiz_question(DraftModel(good), cards, rng=random.Random(3))
+    assert sorted(got["choices"]) == ["1 m", "4 m", "9 m"]          # letters gone, shuffled
+    assert got["choices"][got["answer"]] == "4 m" and got["why"] == "The card says 4 m."
+    # two choices the same, an answer out of range, or no JSON: none, and said
+    for bad in ['{"question": "Q", "choices": ["x", "X", "y"], "answer": 0}',
+                '{"question": "Q", "choices": ["x", "y", "z"], "answer": 5}', "not json"]:
+        assert "note" in ask.quiz_question(DraftModel(bad), cards)
+    assert "nothing to ask" in ask.quiz_question(DraftModel(good), [{"title": "", "text": ""}])["note"]
+
+
+def test_a_field_sent_as_a_list_is_joined_not_shown_as_a_list():
+    import json as js
+    got = ask.merge_cards(DraftModel(js.dumps({"title": "Analogy", "text": ["First.", "Second."]})),
+                          [{"title": "A", "text": "First."}, {"title": "B", "text": "Second."}])
+    assert got["text"] == "- First.\n- Second." and "[" not in got["text"]
+
+
+def test_quiz_route_gives_a_question(client, board, cards):
+    h = {"X-Mindboard-Token": TOKEN}
+    res = client.post(f"/api/boards/{board['id']}/cards/quiz", headers=h, json={"ids": [cards["mount"]]})
+    assert res.status_code == 200, res.text
+    q = res.json()
+    assert q["choices"][q["answer"]] == "4 m" and len(q["choices"]) == 3
+
+
 def test_related_cards_route(client, board, cards):
     h = {"X-Mindboard-Token": TOKEN}
     res = client.get(f"/api/boards/{board['id']}/cards/{cards['mount']}/related", headers=h)

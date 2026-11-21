@@ -44,7 +44,7 @@ export function FileTabs() {
             <span className="file-tab-name">{b.name}</span>
             {b.status === 'preparing' ? <span className="file-tab-dot" aria-label="preparing" /> : null}
           </button>
-          <button className="file-tab-x" title="Close this file's conversation - its preparation is deleted"
+          <button className="file-tab-x" title="Close file"
             aria-label={`Close ${b.name}`} onClick={() => ask.closeBranch(b.id)}>
             <Icon name="x" size={9} />
           </button>
@@ -148,7 +148,7 @@ export function pageLink(branch: FileBranch | undefined) {
   if (!branch || branch.kind !== 'pdf' || branch.status !== 'ready') return undefined
   return (page: number, label: string) => (
     <a className="page-cite" href={api.fileUrl(branch.id, page)} target="_blank" rel="noreferrer"
-      title={`Open ${branch.name} at page ${page}`}>{label}</a>
+      title={`Open page ${page}`}>{label}</a>
   )
 }
 
@@ -192,7 +192,7 @@ export function PagesUsed({ turn, branch }: { turn: Turn; branch: FileBranch | u
             return (
               <a key={p} className={`page-thumb ${pictured ? 'pictured' : ''}`} href={api.fileUrl(branch.id, p)}
                 target="_blank" rel="noreferrer"
-                title={`Page ${p}${pictured ? ' - the model saw this page as a picture' : ''}`}>
+                title={`Page ${p}`}>
                 <img src={api.filePageUrl(branch.id, p)} alt={`Page ${p}`} loading="lazy" />
                 <span>p. {p}</span>
               </a>

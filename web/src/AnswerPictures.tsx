@@ -54,7 +54,7 @@ export function AnswerPictures({ pictures, onShow, className = '' }: {
       <div className={`answer-pictures ${className}`}>
         {shown.map((p) => missing.has(p.sha) ? (
           <button key={p.card} className="answer-picture is-missing" disabled={!onShow}
-            title="This picture's file is not on this computer" onClick={() => onShow?.(p)}>
+            title="Picture not on this computer" onClick={() => onShow?.(p)}>
             <span className="answer-picture-gone">picture file missing</span>
             <span className="answer-picture-title">{p.title}</span>
           </button>
